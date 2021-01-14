@@ -182,7 +182,8 @@ ElectronManager.prototype.app = function() {
 
       // Special use cases for these... 'special' platforms
       if (process.windowsStore || self.isLinux) {
-        const username = require('os').userInfo().username;
+        const os = require('os');
+        const username = os.userInfo().username;
         const moment = require('moment');
         let secSinceLogin;
         if (process.windowsStore) {
