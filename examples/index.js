@@ -3,8 +3,6 @@ let Manager = new (require('electron-manager'));
 let Manager = new (require('electron').remote.require('electron-manager'))({
   appName: 'Somiibo',
   appId: 'somiibo',
-
-  electron: require('electron').remote,
 })
 
 
@@ -32,3 +30,12 @@ console.log(await Manager.app().setAsDefaultBrowser({
 console.log(await Manager.app().isDefaultBrowser());
 
 console.log(await Manager.app().wasOpenedAtLogin());
+
+
+await Renderer.ipcRenderer.invoke('message:og', {command: 'special:aio-manager-test', payload: {method: 'getApplicationNameForProtocol', arguments: ['somiibo']}})
+await Renderer.ipcRenderer.invoke('message:og', {command: 'special:aio-manager-test', payload: {method: 'getApplicationNameForProtocol', arguments: ['http']}})
+await Renderer.ipcRenderer.invoke('message:og', {command: 'special:aio-manager-test', payload: {method: 'getApplicationNameForProtocol', arguments: ['https']}})
+
+await Renderer.ipcRenderer.invoke('message:og', {command: 'special:aio-manager-test', payload: {method: 'isDefaultProtocolClient', arguments: ['somiibo']}})
+await Renderer.ipcRenderer.invoke('message:og', {command: 'special:aio-manager-test', payload: {method: 'isDefaultProtocolClient', arguments: ['http']}})
+await Renderer.ipcRenderer.invoke('message:og', {command: 'special:aio-manager-test', payload: {method: 'isDefaultProtocolClient', arguments: ['https']}})
