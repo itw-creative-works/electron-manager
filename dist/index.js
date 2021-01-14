@@ -53,7 +53,7 @@ ElectronManager.prototype.app = function() {
       self._libraries.electron.app.setAsDefaultProtocolClient(protocol);
       if (self.isLinux) {
         await asyncCmd(`xdg-mime default ${options.appId}.desktop "x-scheme-handler/${protocol}"`).catch(e => console.error);
-        await asyncCmd(`xdg-settings set default-url-scheme-handler ${protocol}`).catch(e => console.error);
+        await asyncCmd(`xdg-settings set default-url-scheme-handler ${protocol} ${options.appId}`).catch(e => console.error);
       }
       console.log('setAsDefaultProtocolClient', protocol, options);
       return;
