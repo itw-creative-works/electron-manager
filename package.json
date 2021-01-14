@@ -1,0 +1,39 @@
+{
+  "name": "electron-manager",
+  "version": "0.0.0",
+  "description": "An NPM module with tools, helper functions, and utilities for building a flawless Electron app 🚀",
+  "main": "dist/index.js",
+  "scripts": {},
+  "engines": {
+    "node": ">=6.0.0"
+  },
+  "author": "ITW Creative Works",
+  "license": "MIT",
+  "keywords": [
+    "root",
+    "electron",
+    "path",
+    "front-end"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/itw-creative-works/electron-manager.git"
+  },
+  "bugs": {
+    "url": "https://github.com/itw-creative-works/electron-manager/issues"
+  },
+  "homepage": "https://itwcreativeworks.com",
+  "dependencies": {
+    "auto-launch": "^5.0.5",
+    "electron-is-dev": "^1.2.0",
+    "electron-is-packaged": "^1.0.2",
+    "electron-is-snap": "^1.0.1",
+    "fs-jetpack": "^4.1.0",
+    "lodash": "^4.17.20",
+    "moment": "^2.29.1"
+  },
+  "devDependencies": {},
+  "peerDependencies": {
+    "electron": "11.x.x"
+  }
+}
