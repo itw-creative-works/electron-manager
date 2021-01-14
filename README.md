@@ -59,7 +59,7 @@ const Manager = new (require('electron-manager'))({
   * `storeName`: Can be either `mac`, `windows`, `snap`, or `none`.
 
 ## .app() Library
-This library practically replaces some methods of Electron's `app` API. The methods here can **replace** the methods you would normally call on the `app` API!
+This library practically replaces some methods of Electron's `app` API. You don't need to use these and the original APIs as these methods can replace the existing ones.
 
 ### .app().setAsDefaultProtocolClient(protocol, options)
 Correctly sets your app as the default handler for a `protocol`. Calls `xdg-mime default` and `xdg-settings set` under the hood which Electron fails to do for **Linux**.
@@ -70,7 +70,7 @@ await Manager.app().setAsDefaultProtocolClient('electron');
 ```
 
 ### .app().getApplicationNameForProtocol(protocol)
-Correctly gets the app name that handles a `protocol`. Protocol must include `://` just liek normal. Calls `xdg-settings get default-url-scheme-handler` under the hood which Electron fails to do for **Linux**.
+Correctly gets the app name that handles a `protocol`. Protocol must include `://` just like normal. Calls `xdg-settings get default-url-scheme-handler` under the hood which Electron fails to do for **Linux**.
 ```js
 await Manager.app().getApplicationNameForProtocol('electron');
 
@@ -86,7 +86,9 @@ await Manager.app().isDefaultProtocolClient('electron');
 ```
 
 ### .app().setLoginItemSettings(options)
-Correctly checks whether your app is the default handler for a `protocol`. Automatically adds a super helpful flag: `--was-opened-at-login="true"`. The only distros this doesn't seem to work on are **MAS** and **Snap**.
+Correctly checks whether your app is the default handler for a `protocol`. This is how you get an **auto-launching** app!. Automatically adds a super helpful flag: `--was-opened-at-login="true"`.
+
+The only distros this doesn't seem to work on are **MAS** and **Linux Snap**. RIP.
 ```js
 await Manager.app().setLoginItemSettings({
   openAtLogin: true,
@@ -125,14 +127,16 @@ await Manager.app().isDefaultBrowser();
 ```
 
 ### .app().wasOpenedAtLogin(options)
-Correctly returns whether your app was opened at login. Remember that `--was-opened-at-login="true"` flag we set earlier? Wow this is so **easy**!.
+Correctly returns whether your app was opened at login. Remember that `--was-opened-at-login="true"` flag we set earlier when we called `await Manager.app().setLoginItemSettings()`? Wow this is so **easy**!.
 ```js
 await Manager.app().wasOpenedAtLogin();
 
 // Output: Boolean
 ```
 
-**Note**: Before you get your hopes too high, there's no way to set or get the `--was-opened-at-login="true"` flag on **Linux** or **Windows Store** yet. To compensate, this method will check to see if the app was opened within `120` seconds of the OS booting up or the user logging in. It's by no means a perfect solution but it will work 90% of the time. You can change the `threshold` to whatever seconds you want:
+**Note**: Before you get your hopes *too* high, there's **no way** to set or get the `--was-opened-at-login="true"` flag on **Linux** or **Windows Store** yet. To compensate, this method will check to see if the app was opened within `120` seconds of the OS booting up or the user logging in.
+
+It's by no means a perfect solution but it will work 90% of the time. You can change the `threshold` to whatever seconds you want:
 
 ```js
 await Manager.app().wasOpenedAtLogin({
