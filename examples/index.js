@@ -39,3 +39,12 @@ await Renderer.ipcRenderer.invoke('message:og', {command: 'special:aio-manager-t
 await Renderer.ipcRenderer.invoke('message:og', {command: 'special:aio-manager-test', payload: {method: 'isDefaultProtocolClient', arguments: ['somiibo']}})
 await Renderer.ipcRenderer.invoke('message:og', {command: 'special:aio-manager-test', payload: {method: 'isDefaultProtocolClient', arguments: ['http']}})
 await Renderer.ipcRenderer.invoke('message:og', {command: 'special:aio-manager-test', payload: {method: 'isDefaultProtocolClient', arguments: ['https']}})
+
+await Renderer.ipcRenderer.invoke('message:og', {command: 'special:aio-manager-test', payload: {method: 'setAsDefaultProtocolClient', arguments: ['test']}})
+
+await Renderer.ipcRenderer.invoke('message:og', {command: 'special:aio-manager-test', payload: {method: 'setLoginItemSettings', arguments: []}})
+
+await Renderer.ipcRenderer.invoke('message:og', {command: 'special:aio-manager-test', payload: {method: 'isDefaultBrowser', arguments: []}})
+await Renderer.ipcRenderer.invoke('message:og', {command: 'special:aio-manager-test', payload: {method: 'setAsDefaultBrowser', arguments: []}})
+
+await Renderer.ipcRenderer.invoke('message:og', {command: 'special:aio-manager-test', payload: {method: 'wasOpenedAtLogin', arguments: []}})

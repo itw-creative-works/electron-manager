@@ -134,7 +134,7 @@ await Manager.app().wasOpenedAtLogin();
 // Output: Boolean
 ```
 
-**Note**: Before you get your hopes *too* high, there's **no way** to set or get the `--was-opened-at-login="true"` flag on **Linux** or **Windows Store** yet. To compensate, this method will check to see if the app was opened within `120` seconds of the OS booting up or the user logging in.
+**Note**: Before you get your hopes *too* high, there's **no way** to set or get the `--was-opened-at-login="true"` flag on **Linux** or **Windows Store** yet. To compensate, this method will check to see if the app was opened within `120` seconds of the OS booting up or the user logging in. Thus, it's best to call this as early as possible in your app.
 
 It's by no means a perfect solution but it will work 90% of the time. You can change the `threshold` to whatever seconds you want:
 
