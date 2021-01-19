@@ -55,7 +55,7 @@ ElectronManager.prototype.app = function() {
         await asyncCmd(`xdg-mime default ${options.appId}.desktop "x-scheme-handler/${protocol}"`).catch(e => console.error);
         await asyncCmd(`xdg-settings set default-url-scheme-handler ${protocol} ${options.appId}`).catch(e => console.error);
       }
-      console.log('setAsDefaultProtocolClient', protocol, options);
+      // console.log('setAsDefaultProtocolClient', protocol, options);
       return;
     },
     getApplicationNameForProtocol: async (protocol) => {
@@ -69,7 +69,7 @@ ElectronManager.prototype.app = function() {
             return '';
           })
       }
-      console.log('getApplicationNameForProtocol', protocol, nativeCheck, linuxCheck);
+      // console.log('getApplicationNameForProtocol', protocol, nativeCheck, linuxCheck);
       return linuxCheck || nativeCheck || '';
     },
     isDefaultProtocolClient: async (protocol, options) => {
@@ -88,7 +88,7 @@ ElectronManager.prototype.app = function() {
           .then(r => r.toLowerCase().includes(comparator))
         return nativeCheck || linuxCheck || false;
       }
-      console.log('isDefaultProtocolClient', nativeCheck, linuxCheck);
+      // console.log('isDefaultProtocolClient', nativeCheck, linuxCheck);
       return nativeCheck || false;
     },
     setLoginItemSettings: async (options) => {
@@ -117,7 +117,7 @@ ElectronManager.prototype.app = function() {
           console.error(e);
         }
       }
-      console.log('setLoginItemSettings', options);
+      // console.log('setLoginItemSettings', options);
     },
 
     // Custom methods
@@ -144,7 +144,7 @@ ElectronManager.prototype.app = function() {
       } if (self.isLinux) {
         await asyncCmd(`xdg-settings set default-web-browser ${options.appId}.desktop`).catch(e => console.error)
       }
-      console.log('setAsDefaultBrowser', options);
+      // console.log('setAsDefaultBrowser', options);
     },
     isDefaultBrowser: async (options) => {
       options = options || {};
@@ -166,10 +166,10 @@ ElectronManager.prototype.app = function() {
           });
         linuxCheck = linuxCheck.toLowerCase().includes(comparator);
 
-        console.log('isDefaultBrowser', options, matchesApplication, matchesProtocol, linuxCheck);
+        // console.log('isDefaultBrowser', options, matchesApplication, matchesProtocol, linuxCheck);
         return matchesApplication || matchesProtocol || linuxCheck || false;
       }
-      console.log('isDefaultBrowser', options, matchesApplication, matchesProtocol);
+      // console.log('isDefaultBrowser', options, matchesApplication, matchesProtocol);
       return matchesApplication || matchesProtocol || false;
     },
     wasOpenedAtLogin: async (options) => {
@@ -200,7 +200,7 @@ ElectronManager.prototype.app = function() {
         specialCheck = os.uptime() < options.threshold || secSinceLogin < options.threshold;
       }
 
-      console.log('isDefaultBrowser', options, nativeCheck, argCheck, specialCheck);
+      // console.log('wasOpenedAtLogin', options, nativeCheck, argCheck, specialCheck);
       return nativeCheck || argCheck || specialCheck || false;
     }
   }

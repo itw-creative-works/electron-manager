@@ -48,3 +48,5 @@ await Renderer.ipcRenderer.invoke('message:og', {command: 'special:aio-manager-t
 await Renderer.ipcRenderer.invoke('message:og', {command: 'special:aio-manager-test', payload: {method: 'setAsDefaultBrowser', arguments: []}})
 
 await Renderer.ipcRenderer.invoke('message:og', {command: 'special:aio-manager-test', payload: {method: 'wasOpenedAtLogin', arguments: []}})
+
+require('electron').remote.app.isDefaultProtocolClient('somiibo')
