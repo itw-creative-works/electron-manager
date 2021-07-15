@@ -206,6 +206,7 @@ ElectronManager.prototype.app = function() {
   }
 };
 
+
 /*
   Helpers
 */

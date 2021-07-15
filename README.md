@@ -86,7 +86,7 @@ await Manager.app().isDefaultProtocolClient('electron');
 ```
 
 ### .app().setLoginItemSettings(options)
-Correctly checks whether your app is the default handler for a `protocol`. This is how you get an **auto-launching** app!. Automatically adds a super helpful flag: `--was-opened-at-login="true"`.
+This is how you get an **auto-launching** app!. Automatically adds a super helpful flag: `--was-opened-at-login="true"`.
 
 The only distros this doesn't seem to work on are **MAS** and **Linux Snap**. RIP.
 ```js
