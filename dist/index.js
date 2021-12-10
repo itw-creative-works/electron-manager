@@ -4,6 +4,7 @@
 const { exec, execFile } = require('child_process');
 let jetpack;
 let electronIsDev;
+const _ = require('lodash');
 
 /*
   ElectronManager Class
@@ -15,11 +16,14 @@ function ElectronManager(options) {
 
   self.options = options || {};
   self.options.appName = self.options.appName || '';
-  self.options.appId = self.options.appId || self.options.appName.toLowerCase() || '';
+  self.options.appId = self.options.appId || self.options.appName.toLowerCase().replace(/\s/g, '') || '';
 
   // Export libraries for use here
   self._libraries = {};
   self.electron = self.options.electron || require('electron');
+
+  self._global = {};
+  self._location = undefined;
 
   // console.log("require('lodash')", require('lodash'));
   // try {
@@ -35,20 +39,185 @@ function ElectronManager(options) {
   //   self.process = 'main';
   // }
 
+
+
   // Properties
   // self.properties().isDevelopment() = require('electron-is-dev') ? 'development' : 'production';
 
 }
 
 /*
+  ElectronManager Central
+*/
+ElectronManager.prototype.initialize = function (options) {
+  const self = this;
+  options = options || {};
+  self._location = options.location.toLowerCase();
+
+  return new Promise(async function(resolve, reject) {
+    if (self._location === 'main') {
+      const { ipcMain, app } = self.electron;
+      const os = require('os');
+
+      options.openAtLogin = typeof options.openAtLogin === 'undefined' ? true : options.openAtLogin;
+      options.setProtocolHandler = typeof options.setProtocolHandler === 'undefined' ? true : options.setProtocolHandler;
+
+      self._globalListenersWCs = self._globalListenersWCs || [];
+
+      // Initialize Global
+      self._global = {
+        meta: {
+          startTime: new Date().toISOString(),
+          // systemColorPreference: nativeTheme.shouldUseDarkColors ? 'dark' : 'light',
+          // theme: nativeTheme.shouldUseDarkColors ? 'dark' : 'light',
+          environment: self.properties().isDevelopment() ? 'development' : 'production',
+          // edition: packageJSON.edition || 'standard',
+          version: app.getVersion(),
+          ip: '127.0.0.1',
+          country: 'unknown',
+          deviceId: '',
+          userAgent: '',
+          os: {
+            username: os.userInfo().username,
+            platform: os.platform(),
+            name: os.platform() === 'win32' ? 'windows' : (os.platform() === 'darwin' ? 'mac' : 'linux'),
+            version: process.getSystemVersion(),
+            locale: app.getLocale(),
+          },
+          indicator: {
+            soft: '',
+            strict: '',
+          }
+        },
+        paths: {
+          mainDir: __dirname,
+          userData: app.getPath('userData'),
+          appData: app.getPath('appData'),
+          downloads: app.getPath('downloads'),
+          // module: app.getPath('module'),
+          temp: app.getPath('temp'),
+          // extensions: 'SET BELOW',
+          // dependencies: 'SET BELOW',
+          // resources: 'SET BELOW'
+        },
+      }
+
+      ipcMain.handle('_electron-manager-message', async (event, message) => {
+        message = message || {};
+        message.payload = message.payload || {};
+
+        console.log('=====HERE', message);
+
+        if (message.command === 'global:get') {
+          // console.log('=====GET 2', message.payload.path, message.payload.value);
+          return self.global().get(message.payload.path, message.payload.value)
+        } else if (message.command === 'global:set') {
+          return self.global().set(message.payload.path, message.payload.value)
+        } else if (message.command === 'global:register') {
+          const senderWc = self.electron.webContents.fromId(_.get(event, 'sender.id', -1))
+          if (senderWc) {
+            self._globalListenersWCs = self._globalListenersWCs.concat(senderWc)
+          }
+        }
+      })
+
+      if (options.openAtLogin) {
+        await self.app().setLoginItemSettings().catch(e => console.error);
+      }
+
+      if (options.setProtocolHandler) {
+        await self.app().setAsDefaultProtocolClient(self.options.appId).catch(e => console.error);
+      }
+
+      return resolve(self);
+    } else {
+      self.electron.ipcRenderer.on('_electron-manager-message', function (event, message) {
+        message = message || {};
+        message.payload = message.payload || {};
+
+        console.log('-----MESSAGE', message);
+
+        if (message.command === 'global:set') {
+          const resolvedPath = `_global${message.payload.path ? '.' + message.payload.path : ''}`;
+          // console.log('-----GLOBAL:SET');
+          return _.set(self, resolvedPath, message.payload.value)
+          // return self.global().set(message.payload.path, message.payload.value)
+        }
+      })
+      if (options.registerGlobalListener !== false) {
+        await self.electron.ipcRenderer.invoke('_electron-manager-message', {command: 'global:register'})
+      }
+      // await self.global().get();
+      await self.electron.ipcRenderer.invoke('_electron-manager-message', {command: 'global:get'})
+      .then(r => {
+        console.log('=====r', r);
+        self._global = r;
+        // _.set(self._global, '', r)
+      })
+      return resolve(self);
+    }
+  });
+}
+
+ElectronManager.prototype.global = function () {
+  const self = this;
+  return {
+    get: function (path, value) {
+      return new Promise(function(resolve, reject) {
+        const resolvedPath = `_global${path ? '.' + path : ''}`
+        console.log('=====GET 0', resolvedPath, value);
+
+        if (self._location === 'main') {
+          // console.log('=====GET 3', path, value);
+          return resolve(_.get(self, resolvedPath, value))
+        } else {
+          // console.log('=====GET 1', path, value);
+          // return resolve(self.electron.ipcRenderer.invoke('_electron-manager-message', {command: 'global:get', payload: {path: path, value: value}}))
+          return resolve(_.get(self, resolvedPath, value))
+        }
+      });
+    },
+    set: function (path, value) {
+      return new Promise(async function(resolve, reject) {
+        const resolvedPath = `_global${path ? '.' + path : ''}`;
+
+        if (self._location === 'main') {
+          const setResult = _.set(self, resolvedPath, value);
+
+          self._globalListenersWCs
+          .forEach((wc, i) => {
+            console.log('===SENDING 1', path, value);
+            wc.send('_electron-manager-message', {
+              command: 'global:set',
+              payload: {path: path, value: value},
+              // payload: {path: path, value: value},
+            })
+          });
+
+          return resolve(setResult)
+        } else {
+          const setResult = _.set(self, resolvedPath, value);
+          console.log('===SENDING 2', path, value);
+          await self.electron.ipcRenderer.invoke('_electron-manager-message', {command: 'global:set', payload: {path: path, value: value}})
+          // await self.electron.ipcRenderer.invoke('_electron-manager-message', {penis: 'PENIS', command: 'global:set'})
+          return resolve(setResult)
+        }
+      });
+    },
+  }
+}
+
+
+/*
   ElectronManager Sub-Classes
 */
-ElectronManager.prototype.app = function() {
+ElectronManager.prototype.app = function () {
   const self = this;
   return {
     setAsDefaultProtocolClient: async (protocol, options) => {
       options = options || {};
       options.appId = options.appId || self.options.appId;
+      protocol = protocol || options.appId;
       // options.appName = options.appName || self.options.appName;
       self.electron.app.setAsDefaultProtocolClient(protocol);
       if (self.properties().isLinux()) {
@@ -207,7 +376,7 @@ ElectronManager.prototype.app = function() {
 };
 
 
-ElectronManager.prototype.properties = function() {
+ElectronManager.prototype.properties = function () {
   const self = this;
   return {
     isDevelopment: function () {
