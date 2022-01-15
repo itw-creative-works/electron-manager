@@ -526,22 +526,26 @@ function updateYaml(hash) {
 
 function codeSign() {
   return new Promise(function(resolve, reject) {
-    console.log(chalk.blue('Signing', FILE_PATH, KEY, PASSWORD));
+
+    console.log(chalk.blue('Signing', productName, FILE_PATH, FILE_PATH_NEW_SIGNED, KEY, PASSWORD));
+    
+    const command = `
+      osslsigncode sign -verbose -pkcs11engine /usr/local/mac-dev/lib/engines-1.1/libpkcs11.dylib -pkcs11module /usr/local/lib/libeTPkcs11.dylib -h sha256 \
+      -n ${productName} \
+      -t http://timestamp.sectigo.com \
+      -certs /Users/ianwiedenman/Documents/GitHub/_global/code-signing/ITW-Creative-Works.pem \
+      -key '${KEY}' -pass '${PASSWORD}' -in ${FILE_PATH_NEW} -out ${FILE_PATH_NEW_SIGNED}
+      `
+
+    console.log('command', command);
 
     let doneSigning = false;
-    for (var i = 0; i < 10; i++) {
+    for (var i = 0; i < 3; i++) {
       if (doneSigning) {
         break;
       }
       try {
-        executeSync(
-          `
-          osslsigncode sign -verbose -pkcs11engine /usr/local/mac-dev/lib/engines-1.1/libpkcs11.dylib -pkcs11module /usr/local/lib/libeTPkcs11.dylib -h sha256 \
-          -n ${productName} \
-          -t http://timestamp.sectigo.com \
-          -certs /Users/ianwiedenman/Documents/GitHub/_global/code-signing/ITW-Creative-Works.pem \
-          -key '${KEY}' -pass '${PASSWORD}' -in ${FILE_PATH_NEW} -out ${FILE_PATH_NEW_SIGNED}
-          `,
+        executeSync(command,
           {
             stdio: 'inherit'
           }

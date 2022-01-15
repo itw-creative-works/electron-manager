@@ -4,6 +4,8 @@
 const { exec, execFile } = require('child_process');
 let jetpack;
 let electronIsDev;
+let Store;
+let Updater;
 const _ = require('lodash');
 
 /*
@@ -21,6 +23,8 @@ function ElectronManager(options) {
   // Export libraries for use here
   self._libraries = {};
   self.electron = self.options.electron || require('electron');
+  self.remote = self.options.remote;
+  self.electronUpdater = self.options.electronUpdater;
 
   self._global = {};
   self._location = undefined;
@@ -58,11 +62,22 @@ ElectronManager.prototype.initialize = function (options) {
     if (self._location === 'main') {
       const { ipcMain, app } = self.electron;
       const os = require('os');
+      Store = require('electron-store')
+
+      self.remote = self.remote || require('@electron/remote/main');
+      self.remote.initialize();
+      self.windows = [];
+      self.allowQuit = false;
+      self.isQuitting = false;
 
       options.openAtLogin = typeof options.openAtLogin === 'undefined' ? true : options.openAtLogin;
       options.setProtocolHandler = typeof options.setProtocolHandler === 'undefined' ? true : options.setProtocolHandler;
+      options.hideIfOpenedAtLogin = typeof options.hideIfOpenedAtLogin === 'undefined' ? true : options.hideIfOpenedAtLogin;
+      options.autoUpdateInterval = typeof options.autoUpdateInterval === 'undefined' ? 60000 * 60 * 12 : options.autoUpdateInterval;
 
       self._globalListenersWCs = self._globalListenersWCs || [];
+      self._registeredRenderers = self._registeredRenderers || [];
+      self._updateTimeout;
 
       // Initialize Global
       self._global = {
@@ -102,6 +117,19 @@ ElectronManager.prototype.initialize = function (options) {
         },
       }
 
+      Store.initRenderer();
+
+      if (options.hideIfOpenedAtLogin) {
+        await self.app().wasOpenedAtLogin()
+        .then(wasOpenedAtLogin => {
+          if (wasOpenedAtLogin) {
+            app.dock.hide();
+            app.hide();
+          }
+        })
+        .catch(e => console.error);
+      }
+
       ipcMain.handle('_electron-manager-message', async (event, message) => {
         message = message || {};
         message.payload = message.payload || {};
@@ -118,6 +146,17 @@ ElectronManager.prototype.initialize = function (options) {
           if (senderWc) {
             self._globalListenersWCs = self._globalListenersWCs.concat(senderWc)
           }
+        } else if (message.command === 'renderer:register') {
+          const senderWc = self.electron.webContents.fromId(_.get(event, 'sender.id', -1))
+          if (senderWc) {
+            self._registeredRenderers = self._registeredRenderers.concat(senderWc)
+          }
+        } else if (message.command === 'activity:last-action') {
+          clearTimeout(self._updateTimeout);
+          self._updateTimeout = setTimeout(function () {
+            Updater = Updater || require('./libraries/updater.js')
+            Updater.update({Manager: self});
+          }, options.autoUpdateInterval);
         }
       })
 
@@ -127,6 +166,16 @@ ElectronManager.prototype.initialize = function (options) {
 
       if (options.setProtocolHandler) {
         await self.app().setAsDefaultProtocolClient(self.options.appId).catch(e => console.error);
+      }
+
+      self.sendToRegisteredRenderers = function (command, payload) {
+        self._registeredRenderers
+        .forEach((wc, i) => {
+          wc.send('_electron-manager-message', {
+            command: command,
+            payload: payload,
+          })
+        });
       }
 
       return resolve(self);
@@ -144,9 +193,26 @@ ElectronManager.prototype.initialize = function (options) {
           // return self.global().set(message.payload.path, message.payload.value)
         }
       })
+
       if (options.registerGlobalListener !== false) {
         await self.electron.ipcRenderer.invoke('_electron-manager-message', {command: 'global:register'})
       }
+
+      if (options.mainRenderer === true) {
+        await self.electron.ipcRenderer.invoke('_electron-manager-message', {command: 'renderer:register'})
+
+        const _sendActivity = _.throttle(function () {
+          self.electron.ipcRenderer.invoke('_electron-manager-message', {command: 'activity:last-action'})
+        }, 5000, {leading: true, trailing: true})
+        try {
+          _sendActivity()
+          document.addEventListener('blur', () => _sendActivity)
+          document.addEventListener('click', () => _sendActivity)
+        } catch (e) {
+
+        }
+      }
+
       // await self.global().get();
       await self.electron.ipcRenderer.invoke('_electron-manager-message', {command: 'global:get'})
       .then(r => {
@@ -158,6 +224,15 @@ ElectronManager.prototype.initialize = function (options) {
     }
   });
 }
+
+ElectronManager.prototype.getRegisteredRenderers = function () {
+  const self = this;
+  if (self._location === 'main') {
+    return self._globalListenersWCs || [];
+  }
+  throw new Error('Cannot get registered renderers from a non-main process')
+}
+
 
 ElectronManager.prototype.global = function () {
   const self = this;

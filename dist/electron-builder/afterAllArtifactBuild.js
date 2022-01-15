@@ -1,7 +1,8 @@
+// const Manager = require('electron-manager');
 const { notarize } = require('electron-notarize-dmg');
 const argv = require('yargs').argv;
 const chalk = require('chalk');
-const tokens = require('./._tokens.json');
+// const tokens = require('./._tokens.json');
 const path = require('path');
 // const builder = require(path.resolve(process.cwd(), 'electron-builder.json'));
 
@@ -10,8 +11,7 @@ exports.default = async function notarizing(context) {
   const appBundleId = configuration.appId;
 
   if (!argv.p && !argv.publish) {
-    console.log(chalk.green('Skipping notarization/signing because this is not a publish.'));
-    return;
+    return console.log(chalk.green('Skipping notarization/signing because this is not a publish.'));
   }
 
   if (!process.env.GH_TOKEN) {
@@ -30,7 +30,7 @@ exports.default = async function notarizing(context) {
     appBundleId: appBundleId,
     dmgPath: dmgPath,
     appleId: process.env.APPLEID,
-    appleIdPassword: tokens.applepassword || `@keychain:AC_PASSWORD`,
+    appleIdPassword: `@keychain:code-signing`,
     staple: false,
   })
 };

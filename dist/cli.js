@@ -10,6 +10,8 @@ const chalk = require('chalk');
 const _ = require('lodash');
 const path = require('path');
 const argv = require('yargs').argv;
+const powertools = require('node-powertools');
+const buildScript = new (require('./electron-builder/build-script.js'))();
 
 function Main() {}
 
@@ -19,80 +21,59 @@ Main.prototype.process = async function (args) {
   self.argv = argv;
   self.npu_packageJSON = require('../package.json');
 
+  self.proj_path = process.cwd();
   try {
-    self.proj_path = process.cwd();
     self.proj_packageJSONPath = path.resolve(self.proj_path, './package.json');
     self.proj_packageJSON = require(self.proj_packageJSONPath);
   } catch (e) {
-    console.error(chalk.red(`Could not read package.json: ${e}`));
-    return
+    return console.error(chalk.red(`Could not read package.json: ${e}`));
   }
 
-  for (var i = 0; i < args.length; i++) {
-    self.options[args[i]] = true;
+  try {
+    self.proj_electronBuilderPackageJSONPath = path.resolve(self.proj_path, './electron-builder.json');
+    self.proj_electronBuilderPackageJSON = require(self.proj_electronBuilderPackageJSONPath);
+  } catch (e) {
+    return console.error(chalk.red(`Could not read electron-builder.json: ${e}`));
   }
+
+  try {
+    self.proj_buildFilePath = path.resolve(self.proj_path, './src/development/build.js');
+    self.proj_buildFile = require(self.proj_buildFilePath);
+  } catch (e) {
+    console.error(chalk.yellow(`Could not find build.js at ${self.proj_buildFilePath}: ${e}`));
+  }
+
+  Object.keys(argv)
+  .forEach((key, i) => {
+    self.options[key] = argv[key];
+  });
+
+  argv._
+  .forEach((key, i) => {
+    self.options[key] = true;
+  });
 
   if (self.options.v || self.options.version || self.options['-v'] || self.options['-version']) {
-    return console.log(chalk.blue(`Node Power User is v${chalk.bold(self.npu_packageJSON.version)}`));
+    return console.log(chalk.blue(`Electron Manager is v${chalk.bold(self.npu_packageJSON.version)}`));
   }
 
-  if (self.options.pv || self.options['project-version'] || self.options.project) {
-    return console.log(chalk.blue(`The current project (${chalk.bold(self.proj_packageJSON.name)}) is v${chalk.bold(self.proj_packageJSON.version)}`));
-  }
-
-  if (self.options.clean) {
-    const NPM_INSTALL_FLAG = self.options['--no-optional'] || self.options['-no-optional'] || self.options['no-optional'] ? '--no-optional' : ''
-    const NPM_CLEAN = `rm -fr node_modules && rm -fr package-lock.json && npm cache clean --force && npm install ${NPM_INSTALL_FLAG} && npm rb`;
-    console.log(chalk.blue(`Running: ${NPM_CLEAN}...`));
-    return await asyncCommand(NPM_CLEAN)
-    .then(r => {
-      console.log(chalk.green(`Finished cleaning`));
-    })
-    .catch(e => {
-      console.log(chalk.green(`Error cleaning: ${e}`));
+  if (self.options.build) {
+    self.options.publish = powertools(typeof self.options.publish === 'undefined' ? true : self.options.publish, 'boolean');
+    if (!self.options.platform) {
+      return console.error(chalk.yellow(`You need to provide a valid platform option`));
+    }
+    buildScript.build({
+      platform: self.options.platform,
+      publish: self.options.publish,
+      package: self.proj_packageJSON,
+      electronBuilder: self.proj_electronBuilderPackageJSON,
+      buildFile: self.proj_buildFile,
     })
   }
-
-  if (self.options.bump) {
-    return bump(self);
-  }
-
 
 };
 
 module.exports = Main;
-
-function bump(self) {
-  const semver = require('semver');
-  let level = '';
-  const version = self.proj_packageJSON.version;
-  // let version = '3.1.0-beta.0';
-  let newVersion = [semver.major(version), semver.minor(version), semver.patch(version)];
-  let newVersionPost = version.split('-')[1];
-  let newVersionString = '';
-
-  if (self.options.break || self.options.breaking || self.options.major || self.options['3']) {
-    level = 'breaking';
-    newVersion[0]++;
-    newVersion[1] = 0;
-    newVersion[2] = 0;
-  } else if (self.options.feature || self.options.features || self.options.med || self.options.medium || self.options['2']) {
-    level = 'feature';
-    newVersion[1]++;
-    newVersion[2] = 0;
-  } else {
-    level = 'patch';
-    newVersion[2]++;
-  }
-  newVersionString = newVersion.join('.') + (newVersionPost ? `-${newVersionPost}` : '');
-
-  self.proj_packageJSON.version = newVersionString;
-
-  jetpack.write(self.proj_packageJSONPath, self.proj_packageJSON);
-
-  console.log(chalk.blue(`Bumped package.json from ${chalk.bold(version)} to ${chalk.bold(newVersionString)}`));
-}
-
 
 async function asyncCommand(command) {
   return new Promise(function(resolve, reject) {

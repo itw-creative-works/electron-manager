@@ -1,7 +1,8 @@
+// const Manager = require('electron-manager');
 const { notarize } = require('electron-notarize');
 const argv = require('yargs').argv;
 const chalk = require('chalk');
-const tokens = require('./._tokens.json');
+// const tokens = require('./._tokens.json');
 // const log = require("builder-util/out/log").log;
 
 exports.default = async function afterSign(context) {
@@ -11,8 +12,7 @@ exports.default = async function afterSign(context) {
   const appBundleId = packager.config.appId;
 
   if (!argv.p && !argv.publish) {
-    console.log(chalk.green('Skipping notarization/signing because this is not a publish.'));
-    return;
+    return console.log(chalk.green('Skipping notarization/signing because this is not a publish.'));
   }
 
   if (!process.env.GH_TOKEN) {
@@ -23,7 +23,7 @@ exports.default = async function afterSign(context) {
   if (electronPlatformName === 'darwin') {
     if (!process.env.APPLEID) {
       console.log(chalk.red('You need to set the APPLEID environment variable.'));
-      return
+      return process.exit(1);
     }
 
     console.info('Notarizing', {appBundleId: appBundleId, appPath: appPath});
@@ -32,7 +32,7 @@ exports.default = async function afterSign(context) {
       appBundleId: appBundleId,
       appPath: appPath,
       appleId: process.env.APPLEID,
-      appleIdPassword: tokens.applepassword || `@keychain:AC_PASSWORD`,
+      appleIdPassword: `@keychain:code-signing`,
     });
   } else {
     console.log(chalk.green(`No notarization/signing is necessary for ${electronPlatformName}.`));

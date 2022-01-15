@@ -1,34 +1,40 @@
 const chalk = require('chalk');
-const package = require('../../package.json');
-const builder = require('../../electron-builder.json');
+// const package = require('../../package.json');
+// const builder = require('../../electron-builder.json');
 const exec = require('child_process').exec;
 const { spawn } = require('child_process');
-const argv = require('yargs').argv;
-const platform = require('os').platform();
-let buildFile;
-try {
-  buildFile = require('./build.js');
-} catch (e) {
+// const argv = require('yargs').argv;
+// const platform = require('os').platform();
+// let buildFile;
+// try {
+//   buildFile = require('./build.js');
+// } catch (e) {
+//
+// }
+//
+// const publish = !!argv.publish;
+// const devMode = !!argv.dev || !!argv.devmode;
+// const platformCode = argv.platform === 'win' ? '-w' : (argv.platform === 'mac' ? '-m' : '-l');
+// if (!argv.platform) {
+//   throw new Error('No platform specified!');
+// }
+
+function BuildScript() {
 
 }
 
-const publish = !!argv.publish;
-const devMode = !!argv.dev || !!argv.devmode;
-const platformCode = argv.platform === 'win' ? '-w' : (argv.platform === 'mac' ? '-m' : '-l');
-if (!argv.platform) {
-  throw new Error('No platform specified!');
-}
-
-(async function() {
+BuildScript.prototype.build = async function (options) {
   let caughtError = false;
+  const platformCode = options.platform === 'win' ? '-w' : (options.platform === 'mac' ? '-m' : '-l');
+  console.log('----options', options);
   console.log(chalk.blue(`
   \n\n\n\n\n
   --------------------------
-  Project v${package.version} (${package.edition}) is being built ${publish ? 'and published ' : ''}on ${argv.platform}!
+  Project v${options.package.version} is being built ${options.publish ? 'and published ' : ''} on ${options.platform}!
   --------------------------
   `));
 
-  if (buildFile) {
+  if (options.buildFile) {
     await buildFile();
   }
 
@@ -40,22 +46,25 @@ if (!argv.platform) {
   if (caughtError) { return; }
 
   // APPX build
-  if (argv.platform === 'appx') {
+  if (options.platform === 'appx') {
+    console.log('Building appx');
     await asyncCmd('electron-builder', ['-w', 'appx'])
       .catch(err => {
         caughtError = err;
         console.error(chalk.red('Error executing command:', typeof err === 'string' ? err : err.toString()));
       })
     if (caughtError) { return; }
-  } else if (argv.platform === 'snap') {
-    await asyncCmd('electron-builder', ['--linux', 'snap'].concat(publish ? ['-p', 'always'] : []).concat(devMode ? ['-c.snap.confinement=devmode'] : []))
+  } else if (options.platform === 'snap') {
+    console.log('Building snap');
+    await asyncCmd('electron-builder', ['--linux', 'snap'].concat(options.publish ? ['-p', 'always'] : []).concat(devMode ? ['-c.snap.confinement=devmode'] : []))
       .catch(err => {
         caughtError = err;
         console.error(chalk.red('Error executing command:', typeof err === 'string' ? err : err.toString()));
       })
     if (caughtError) { return; }
   } else {
-    await asyncCmd('electron-builder', [platformCode].concat(publish ? ['-p', 'always'] : []))
+    console.log(`Building ${platformCode}`);
+    await asyncCmd('electron-builder', [platformCode].concat(options.publish ? ['-p', 'always'] : []))
       .catch(err => {
         caughtError = err;
         console.error(chalk.red('Error executing command:', typeof err === 'string' ? err : err.toString()));
@@ -66,13 +75,22 @@ if (!argv.platform) {
   console.log(chalk.blue(`
   \n\n\n\n\n
   --------------------------
-  Project v${package.version} (${package.edition}) has been built ${publish ? 'and published ' : ''}on ${argv.platform}!
+  Project v${options.package.version} (${options.package.edition}) has been built ${options.publish ? 'and published ' : ''}on ${options.platform}!
   --------------------------
   ** The build:post process needs to be executed in the root of this project (OUTSIDE DOCKER) **
     - npm run build:post
 
   `));
-}());
+
+
+};
+
+module.exports = BuildScript;
+
+
+// (async function() {
+//
+// }());
 
 function asyncCmd(command, args) {
   console.log('>>>', command, args);
