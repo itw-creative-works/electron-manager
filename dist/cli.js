@@ -37,8 +37,10 @@ Main.prototype.process = async function (args) {
   }
 
   try {
-    self.proj_buildFilePath = path.resolve(self.proj_path, './src/development/build.js');
-    self.proj_buildFile = require(self.proj_buildFilePath);
+    if (self.options.build) {
+      self.proj_buildFilePath = path.resolve(self.proj_path, './src/development/build.js');
+      self.proj_buildFile = require(self.proj_buildFilePath);
+    }
   } catch (e) {
     console.error(chalk.yellow(`Could not find build.js at ${self.proj_buildFilePath}: ${e}`));
   }

@@ -26,7 +26,7 @@ function BuildScript() {
 BuildScript.prototype.build = async function (options) {
   let caughtError = false;
   const platformCode = options.platform === 'win' ? '-w' : (options.platform === 'mac' ? '-m' : '-l');
-  console.log('----options', options);
+
   console.log(chalk.blue(`
   \n\n\n\n\n
   --------------------------
@@ -47,7 +47,6 @@ BuildScript.prototype.build = async function (options) {
 
   // APPX build
   if (options.platform === 'appx') {
-    console.log('Building appx');
     await asyncCmd('electron-builder', ['-w', 'appx'])
       .catch(err => {
         caughtError = err;
@@ -55,7 +54,6 @@ BuildScript.prototype.build = async function (options) {
       })
     if (caughtError) { return; }
   } else if (options.platform === 'snap') {
-    console.log('Building snap');
     await asyncCmd('electron-builder', ['--linux', 'snap'].concat(options.publish ? ['-p', 'always'] : []).concat(devMode ? ['-c.snap.confinement=devmode'] : []))
       .catch(err => {
         caughtError = err;
@@ -63,7 +61,6 @@ BuildScript.prototype.build = async function (options) {
       })
     if (caughtError) { return; }
   } else {
-    console.log(`Building ${platformCode}`);
     await asyncCmd('electron-builder', [platformCode].concat(options.publish ? ['-p', 'always'] : []))
       .catch(err => {
         caughtError = err;
