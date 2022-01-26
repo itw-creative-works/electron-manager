@@ -1,5 +1,4 @@
 let electronUpdater;
-let electron;
 let status = {
   status: 'not-started', // not-started, checking, error, not-available, downloading, downloaded
   percent: 0,
@@ -15,7 +14,7 @@ Updater.update = async function (options) {
   }
 
   if (!electronUpdater) {
-    electronUpdater = options.Manager.electronUpdater || require('electron-updater');
+    electronUpdater = options.Manager.libraries.electronUpdater || require('electron-updater');
     electronUpdater = electronUpdater.autoUpdater;
 
     electronUpdater.on('error', function (error) {

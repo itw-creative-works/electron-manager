@@ -30,7 +30,7 @@ BuildScript.prototype.build = async function (options) {
   console.log(chalk.blue(`
   \n\n\n\n\n
   --------------------------
-  Project v${options.package.version} is being built ${options.publish ? 'and published ' : ''} on ${options.platform}!
+  Project v${options.package.version} is being built ${options.publish ? 'and published ' : ''}on ${options.platform}!
   --------------------------
   `));
 
@@ -72,10 +72,10 @@ BuildScript.prototype.build = async function (options) {
   console.log(chalk.blue(`
   \n\n\n\n\n
   --------------------------
-  Project v${options.package.version} (${options.package.edition}) has been built ${options.publish ? 'and published ' : ''}on ${options.platform}!
+  Project v${options.package.version} has been built ${options.publish ? 'and published ' : ''}on ${options.platform}!
   --------------------------
   ** The build:post process needs to be executed in the root of this project (OUTSIDE DOCKER) **
-    - npm run build:post
+    - npx em build:post
 
   `));
 

@@ -1,5 +1,7 @@
 // const Manager = require('electron-manager');
-const { notarize } = require('electron-notarize');
+const path = require('path')
+// const { notarize } = require('electron-notarize');
+const { notarize } = require(path.resolve(process.cwd(), 'node_modules', 'electron-notarize'));
 const argv = require('yargs').argv;
 const chalk = require('chalk');
 // const tokens = require('./._tokens.json');

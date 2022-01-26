@@ -55,6 +55,8 @@ Main.prototype.process = async function (args) {
     self.options[key] = true;
   });
 
+  console.log('Processing', self.options);
+
   if (self.options.v || self.options.version || self.options['-v'] || self.options['-version']) {
     return console.log(chalk.blue(`Electron Manager is v${chalk.bold(self.npu_packageJSON.version)}`));
   }

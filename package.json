@@ -1,6 +1,6 @@
 {
   "name": "electron-manager",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "An NPM module with tools, helper functions, and utilities for building a flawless Electron app 🚀",
   "main": "dist/index.js",
   "bin": {
@@ -33,6 +33,7 @@
   },
   "homepage": "https://itwcreativeworks.com",
   "dependencies": {
+    "@sentry/electron": "^2.5.4",
     "auto-launch": "^5.0.5",
     "chalk": "^4.1.2",
     "electron-is-dev": "^2.0.0",
@@ -40,14 +41,19 @@
     "electron-is-snap": "^1.0.2",
     "electron-store": "^8.0.1",
     "electron-updater": "^4.3.9",
-    "fs-jetpack": "^4.1.0",
+    "fs-jetpack": "^4.3.1",
     "json5": "^2.2.0",
     "lodash": "^4.17.21",
     "moment": "^2.29.1",
     "node-powertools": "^0.0.10",
-    "web-manager": "^2.1.26"
+    "promo-server": "^0.0.4",
+    "web-manager": "^2.1.32"
   },
   "devDependencies": {},
+  "peerDependencies": {
+    "electron-notarize": "^1.0.0",
+    "electron-notarize-dmg": "^1.0.0"
+  },
   "_peerDependencies": {
     "electron": "13.x.x"
   }
