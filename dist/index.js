@@ -319,8 +319,8 @@ ElectronManager.prototype.initialize = function (options) {
         if (options.webManagerConfig) {
           self.libraries.webManager = new (require('./libraries/web-manager.js'))(self);
           self.libraries.webManager = await self.libraries.webManager.init(options.webManagerConfig);
-          console.log('--self.libraries.webManager', self.libraries.webManager);
-          console.log('--self.libraries.promoServer', self.libraries.promoServer);
+          // console.log('--self.libraries.webManager', self.libraries.webManager);
+          // console.log('--self.libraries.promoServer', self.libraries.promoServer);
         }
 
         // if (options.setupPromoHandler) {
