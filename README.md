@@ -1,14 +1,13 @@
 <p align="center">
-  <a href="https://cdn.itwcreativeworks.com/assets/itw-creative-works/images/logo/itw-creative-works-brandmark-black-x.svg">
-    <img src="https://cdn.itwcreativeworks.com/assets/itw-creative-works/images/logo/itw-creative-works-brandmark-black-x.svg">
+  <a href="https://itwcreativeworks.com">
+    <img src="https://cdn.itwcreativeworks.com/assets/itw-creative-works/images/logo/itw-creative-works-brandmark-black-x.svg" width="100px">
   </a>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/github/package-json/v/itw-creative-works/electron-manager.svg">
   <br>
-  <img src="https://img.shields.io/david/itw-creative-works/electron-manager.svg">
-  <img src="https://img.shields.io/david/dev/itw-creative-works/electron-manager.svg">
+  <img src="https://img.shields.io/librariesio/release/npm/electron-manager.svg">
   <img src="https://img.shields.io/bundlephobia/min/electron-manager.svg">
   <img src="https://img.shields.io/codeclimate/maintainability-percentage/itw-creative-works/electron-manager.svg">
   <img src="https://img.shields.io/npm/dm/electron-manager.svg">
@@ -25,19 +24,19 @@
   <strong>Electron Manager</strong> is an NPM module for Electron developers with tools, helper functions, and utilities for building a flawless Electron app 🚀
 </p>
 
-## Install
+## 📦 Install Electron Manager
 Install with npm:
 ```shell
 npm install electron-manager
 ```
 **Note**: This module requires a peer dependency of Electron. The required version can be found in the package.json.
 
-## Features
+## 🦄 Features
 * Correctly handles a **ton** of things that Electron falls short on in cross-platform cases like: `setAsDefaultProtocolClient`, `getApplicationNameForProtocol`, `isDefaultProtocolClient`, and more
 * Provides a simple cross-platform method to set your app to **auto launch** at startup (Includes Windows Store and some Linux distros)
 * Provides an easy cross-platform method to set your app as the **default browser**
 
-## Example Setup
+## 📘 Example Setup
 After installing via npm, simply `require` the library and begin enjoying this simple tool 🧰.
 ```js
 // In your main.js file
@@ -146,26 +145,48 @@ await Manager.app().wasOpenedAtLogin({
 // Output: Boolean
 ```
 
-## Other libraries and features
+## 🧩 Important API Notes
+### Default DOM operations
+* `brand-name-element`: Set to `productName` in `package.json`
+* `app-id-element`: Set to `name` in `package.json`
+* `current-version-element`: Set to `version` in `package.json`
+* `current-year-element`: Set to **the current year**
+* `manager-initialized-element`: Removed when `ElectronManager` finishes initializing.
+* `upgrade-account-btn`: Enabled if `user.plan.id` === `basic`
+
+### App arguments
+Use arguments like `npm start -- --name="value"` to test and streamline your development
+* `--useDevelopmentURLs="true"` (`true`): Will use localhost:4000 instead of live URLS
+  * Can be `true` or `false`
+* `--enableLiveSentry="false"` (`false`): Will actually send errors to Sentry if `true`
+  * Can be `true` or `false`
+* `--was-opened-at-login="false"` (`false`): Change **Electron Manager**'s behavior for handling if the app was opened at login.
+  * Can be `true` or `false`
+* `--devUpdateStatus="available"` (`available`): Change the `electron-updater` flow.
+  * `available`: Will show an update is available and "install" it
+  * `unavailable`: Will show an update is unavailable
+  * `error`: Will show an error
+
+### Other libraries and features
 This is just the beginning. More great features and fixes will be coming soon
 
-## Final Words
+## 🗨️ Final Words
 If you are still having difficulty, we would love for you to post a question to [the Electron is Snap issues page](https://github.com/itw-creative-works/electron-manager/issues). It is much easier to answer questions that include your code and relevant files! So if you can provide them, we'd be extremely grateful (and more likely to help you find the answer!)
 
-## Projects Using this Library
-[Somiibo](https://somiibo.com/): A Social Media Bot with an open-source module library. <br>
-[JekyllUp](https://jekyllup.com/): A website devoted to sharing the best Jekyll themes. <br>
-[Slapform](https://slapform.com/): A backend processor for your HTML forms on static sites. <br>
-[Sniips](https://sniips.com/): A modern, hackable snippet manager <br>
-[Proxifly](https://proxifly.com/): An API to get free proxies for your services. <br>
-[Optiic](https://optiic.dev/): A free OCR image processing API. <br>
-[SoundGrail Music App](https://app.soundgrail.com/): A resource for producers, musicians, and DJs. <br>
+## 📚 Projects Using this Library
+[Somiibo](https://somiibo.com/): A Social Media Bot with an open-source module library.
+[JekyllUp](https://jekyllup.com/): A website devoted to sharing the best Jekyll themes.
+[Slapform](https://slapform.com/): A backend processor for your HTML forms on static sites.
+[Sniips](https://sniips.com/): A modern, hackable snippet manager
+[Proxifly](https://proxifly.com/): An API to get free proxies for your services.
+[Optiic](https://optiic.dev/): A free OCR image processing API.
+[SoundGrail Music App](https://app.soundgrail.com/): A resource for producers, musicians, and DJs.
 
 Ask us to have your project listed! :)
 
-## Other Great Libraries
-[node-powertools](https://www.npmjs.com/package/node-powertools): An NPM module for backend and frontend developers that exposes powerful utilities and tools. <br>
-[electron-is-snap](https://www.npmjs.com/package/electron-is-snap): An NPM module for checking if your app is running in a snap environment <br>
-[optiic](https://www.npmjs.com/package/optiic): An OCR image processing API. <br>
-[proxifly](https://www.npmjs.com/package/proxifly): An API to find proxies for your apps. <br>
-[slapform](https://www.npmjs.com/package/slapform): A form backend API. <br>
+## 📚 Other Great Libraries
+[node-powertools](https://www.npmjs.com/package/node-powertools): An NPM module for backend and frontend developers that exposes powerful utilities and tools.
+[electron-is-snap](https://www.npmjs.com/package/electron-is-snap): An NPM module for checking if your app is running in a snap environment
+[optiic](https://www.npmjs.com/package/optiic): An OCR image processing API.
+[proxifly](https://www.npmjs.com/package/proxifly): An API to find proxies for your apps.
+[slapform](https://www.npmjs.com/package/slapform): A form backend API.

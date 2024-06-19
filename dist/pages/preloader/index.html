@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <!-- Required Meta Tags Always Come First -->
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+  <!-- Title -->
+  <title>Loading...</title>
+
+  <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600&display=swap" rel="stylesheet">
+
+  <style>
+    body,
+    html {
+      height: 100%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      margin: 0;
+      padding: 0;
+      font-family: 'Open Sans', sans-serif;
+    }
+
+    .column {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .heading {
+      text-align: center;
+      margin-top: 0.5rem;
+      margin-bottom: 0;
+    }
+
+    .loader img {
+      width: 100px;
+      height: 100px;
+    }
+
+    /* .loader {
+      animation: jump 1.0s ease-in infinite;
+    } */
+    .loader {
+      animation-name: bounce;
+      animation-delay: 0s;
+      animation-direction: normal;
+      animation-duration: 1s;
+      animation-iteration-count: infinite;
+      animation-timing-function: cubic-bezier(0.28, 0.84, 0.42, 1);
+    }
+
+    .container {
+      animation: fade-in .15s ease-in 1;
+    }
+
+    @keyframes fade-in {
+      0% {
+        opacity: 0;
+      }
+
+      100% {
+        opacity: 1;
+      }
+    }
+
+    @keyframes jump {
+      0% {
+        transform: translateY(0) scale(1);
+      }
+
+      10% {
+        transform: translateY(0) scale(1);
+      }
+
+      20% {
+        transform: translateY(0) scale(1.15, .8);
+      }
+
+      30% {
+        transform: translateY(-25px) scaleY(1.1);
+      }
+
+      50% {
+        transform: translateY(-40px) scale(1);
+      }
+
+      80% {
+        transform: translateY(-25px) scale(1);
+      }
+
+      90% {
+        transform: translateY(0) scale(1.15, .8);
+      }
+
+      100% {
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    @keyframes bounce {
+      0% {
+        transform: scale(1, 1) translateY(0);
+      }
+
+      10% {
+        transform: scale(1.1, 0.9) translateY(0);
+      }
+
+      30% {
+        transform: scale(0.9, 1.1) translateY(-1.0em);
+      }
+
+      50% {
+        transform: scale(1.05, 0.95) translateY(0);
+      }
+
+      57% {
+        transform: scale(1, 1) translateY(-0.125em);
+      }
+
+      64% {
+        transform: scale(1, 1) translateY(0);
+      }
+
+      100% {
+        transform: scale(1, 1) translateY(0);
+      }
+    }
+
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <div class="column">
+      <div class="loader">
+        <!-- Image with blank data value starting -->
+        <img id="preloader-icon" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" alt="loader" />
+      </div>
+
+      <span class="heading">Getting things ready...</span>
+    </div>
+  </div>
+</body>
+
+</html>

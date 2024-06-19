@@ -1,8 +1,7 @@
 const chalk = require('chalk');
 // const package = require('../../package.json');
 // const builder = require('../../electron-builder.json');
-const exec = require('child_process').exec;
-const { spawn } = require('child_process');
+const cp = require('child_process');
 // const argv = require('yargs').argv;
 // const platform = require('os').platform();
 // let buildFile;
@@ -38,10 +37,31 @@ BuildScript.prototype.build = async function (options) {
     await buildFile();
   }
 
+  function _logError(e) {
+    console.error(chalk.red('Error executing command:', typeof e === 'string' ? e : e.toString()));
+  }
+
+  // await asyncCmd('pwd')
+  //   .catch(err => {
+  //     caughtError = err;
+  //   })
+
+  if (platformCode === '-m') {
+    await asyncCmd('xattr', ['-cr', '*'])
+      .catch(err => {
+        // caughtError = err;
+      })
+    await asyncCmd('rm', ['-r', '~/Library/Caches/com.apple.amp.itmstransporter/UploadTokens'])
+      .catch(err => {
+        // caughtError = err;
+      })
+    if (caughtError) { return; }
+  }
+
   await asyncCmd('npm', ['install'])
   // await asyncCmd('npm', ['ci'])
     .catch(err => {
-      console.error(chalk.red('Error executing command:', typeof err === 'string' ? err : err.toString()));
+      // caughtError = err;
     })
   if (caughtError) { return; }
 
@@ -50,21 +70,18 @@ BuildScript.prototype.build = async function (options) {
     await asyncCmd('electron-builder', ['-w', 'appx'])
       .catch(err => {
         caughtError = err;
-        console.error(chalk.red('Error executing command:', typeof err === 'string' ? err : err.toString()));
       })
     if (caughtError) { return; }
   } else if (options.platform === 'snap') {
     await asyncCmd('electron-builder', ['--linux', 'snap'].concat(options.publish ? ['-p', 'always'] : []).concat(devMode ? ['-c.snap.confinement=devmode'] : []))
       .catch(err => {
         caughtError = err;
-        console.error(chalk.red('Error executing command:', typeof err === 'string' ? err : err.toString()));
       })
     if (caughtError) { return; }
   } else {
     await asyncCmd('electron-builder', [platformCode].concat(options.publish ? ['-p', 'always'] : []))
       .catch(err => {
         caughtError = err;
-        console.error(chalk.red('Error executing command:', typeof err === 'string' ? err : err.toString()));
       })
     if (caughtError) { return; }
   }
@@ -90,9 +107,12 @@ module.exports = BuildScript;
 // }());
 
 function asyncCmd(command, args) {
-  console.log('>>>', command, args);
   return new Promise(function(resolve, reject) {
-    const ls = spawn(command, args);
+    const full = `${command} ${(args || []).join(' ')}`;
+
+    console.log('Executing:', full, command, args);
+    // const ls = cp.spawn(command, args);
+    const ls = cp.exec(full);
 
     ls.stdout.on('data', (data) => {
       console.log(`${data}`.replace('\n', ''));
@@ -104,7 +124,7 @@ function asyncCmd(command, args) {
     });
 
     ls.on('close', (code) => {
-      console.log(chalk.green(`child process exited with code ${code}`));
+      console.log(chalk.green(`child process for command="${full}" exited with code ${code}`));
       return resolve(code);
     });
   });

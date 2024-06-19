@@ -1,42 +1,58 @@
-// const Manager = require('electron-manager');
 const path = require('path')
-// const { notarize } = require('electron-notarize');
-const { notarize } = require(path.resolve(process.cwd(), 'node_modules', 'electron-notarize'));
-const argv = require('yargs').argv;
-const chalk = require('chalk');
-// const tokens = require('./._tokens.json');
-// const log = require("builder-util/out/log").log;
+const { notarize } = require(path.resolve(process.cwd(), 'node_modules', '@electron/notarize'));
+// const Manager = new (require('electron-manager'))();
+const Manager = new (require(path.resolve(process.cwd(), 'node_modules', 'electron-manager')))();
+const chalk = Manager.require('chalk');
+const scriptName = '[afterSign.js]';
 
-exports.default = async function afterSign(context) {
-  const { electronPlatformName, appOutDir, outDir, packager } = context;
-  const appName = packager.appInfo.productFilename;
-  const appPath = `${appOutDir}/${appName}.app`;
-  const appBundleId = packager.config.appId;
+exports.default = async function (context) {
+  
+  if (context.electronPlatformName === 'darwin') {
+    const appName = context.packager.appInfo.productFilename;
+    const appPath = path.join(context.appOutDir, `${appName}.app`);
+    const appBundleId = context.packager.config.appId;
+    const notarizationMethod = process.env.APPLE_NOTARIZATION_METHOD ? process.env.APPLE_NOTARIZATION_METHOD : 'legacy';
 
-  if (!argv.p && !argv.publish) {
-    return console.log(chalk.green('Skipping notarization/signing because this is not a publish.'));
-  }
-
-  if (!process.env.GH_TOKEN) {
-    console.log(chalk.red('You need to set the GH_TOKEN environment variable.'))
-    return process.exit(1);
-  }
-
-  if (electronPlatformName === 'darwin') {
-    if (!process.env.APPLEID) {
-      console.log(chalk.red('You need to set the APPLEID environment variable.'));
-      return process.exit(1);
+    if (context.packager.info.options.publish !== 'always') {
+      return console.log(chalk.blue(scriptName, `Skipping notarization/signing because this is not a publish.`));
     }
 
-    console.info('Notarizing', {appBundleId: appBundleId, appPath: appPath});
+    console.log(chalk.blue(scriptName, `Notarizing:`), {notarizationMethod: notarizationMethod, appName: appName, appBundleId: appBundleId, appPath: appPath});
 
-    return await notarize({
-      appBundleId: appBundleId,
-      appPath: appPath,
-      appleId: process.env.APPLEID,
-      appleIdPassword: `@keychain:code-signing`,
-    });
+    if (notarizationMethod === 'legacy') {
+      await notarize({
+        tool: notarizationMethod,
+        appPath: appPath,
+        appBundleId: appBundleId,
+        appleId: process.env.APPLE_ID,
+        appleIdPassword: process.env.APPLE_PASSWORD || `@keychain:apple-password`,
+      })
+      .catch(e => {
+        return error(e)
+      })      
+    } else {
+      await notarize({
+        tool: notarizationMethod,
+        appPath: appPath,
+        appleId: process.env.APPLE_ID,
+        appleIdPassword: process.env.APPLE_PASSWORD || `@keychain:apple-password`,
+        teamId: process.env.APPLE_TEAM_ID,
+      })
+      .catch(e => {
+        return error(e)
+      })
+    }
+
+    console.log(chalk.green(scriptName, `Done notarizing: ${appPath}`));
   } else {
-    console.log(chalk.green(`No notarization/signing is necessary for ${electronPlatformName}.`));
+    console.log(chalk.blue(scriptName, `No notarization/signing is necessary for ${context.electronPlatformName}.`));
   }
 };
+
+function error(e) {
+  console.log(chalk.red(scriptName, `${e.message}`));
+
+  setTimeout(() => { process.exit(1); }, 1);
+
+  throw new Error(e)
+}

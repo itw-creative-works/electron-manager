@@ -1,20 +1,21 @@
 {
   "name": "electron-manager",
-  "version": "0.0.8",
+  "version": "0.0.249",
   "description": "An NPM module with tools, helper functions, and utilities for building a flawless Electron app 🚀",
   "main": "dist/index.js",
   "bin": {
     "electron-manager": "./bin/electron-manager",
     "electronmanager": "./bin/electron-manager",
-    "eman": "./bin/electron-manager",
-    "em": "./bin/electron-manager"
+    "eman": "./bin/electron-manager"
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node ./src/cli.js"
+    "start": "node ./src/cli.js",
+    "prepare": "node -e \"require('prepare-package')()\"",
+    "prepare:watch": "nodemon -w ./src -e '*' --exec 'npm run prepare'"
   },
   "engines": {
-    "node": ">=6.0.0"
+    "node": ">=12"
   },
   "author": "ITW Creative Works",
   "license": "MIT",
@@ -32,29 +33,63 @@
     "url": "https://github.com/itw-creative-works/electron-manager/issues"
   },
   "homepage": "https://itwcreativeworks.com",
+  "notes": {
+    "peer": {
+      "electron-builder": "22.11.3: because higher versions require node version or something. CHANGED TO 23.3.3 for my M1 mac w/ CI BUILDS!",
+      "electron-updater": "^4.6.5: Because IDK. CHANGED to 5.2.1 for my M1 mac w/ CI BUILDS!",
+      "electron": "0.0.0: Because including it AT ALL in peerDependencies causes issues."
+    }
+  },
+  "preparePackage": {
+    "input": "./src",
+    "output": "./dist",
+    "replace": {}
+  },
   "dependencies": {
-    "@sentry/electron": "^2.5.4",
-    "auto-launch": "^5.0.5",
-    "chalk": "^4.1.2",
-    "electron-is-dev": "^2.0.0",
-    "electron-is-packaged": "^1.0.2",
-    "electron-is-snap": "^1.0.2",
-    "electron-store": "^8.0.1",
-    "electron-updater": "^4.3.9",
-    "fs-jetpack": "^4.3.1",
-    "json5": "^2.2.0",
-    "lodash": "^4.17.21",
-    "moment": "^2.29.1",
-    "node-powertools": "^0.0.10",
-    "promo-server": "^0.0.4",
-    "web-manager": "^2.1.32"
+    "@octokit/rest": "18.12.0",
+    "@sentry/electron": "2.5.4",
+    "auto-launch": "5.0.6",
+    "chalk": "4.1.2",
+    "discord-rpc-electron": "4.0.1",
+    "dompurify": "3.0.5",
+    "electron-is-dev": "2.0.0",
+    "electron-is-packaged": "1.0.2",
+    "electron-is-snap": "^1.0.5",
+    "electron-log": "4.4.8",
+    "electron-rebuilder": "^1.0.2",
+    "electron-store": "8.1.0",
+    "fs-jetpack": "4.3.1",
+    "glob": "7.2.3",
+    "itwcw-package-analytics": "^1.0.4",
+    "json5": "2.2.3",
+    "jszip": "3.10.1",
+    "keychain": "1.5.0",
+    "lodash": "4.17.21",
+    "macaddress": "0.5.3",
+    "mime-types": "2.1.35",
+    "moment": "2.29.4",
+    "node-powertools": "^1.4.4",
+    "original-fs": "1.2.0",
+    "promo-server": "^1.0.3",
+    "puppeteer": "20.8.0",
+    "semver": "7.5.4",
+    "simple-plist": "1.3.1",
+    "universal-analytics": "0.5.3",
+    "uuid": "8.3.2",
+    "web-manager": "^3.2.51",
+    "winreg": "1.2.4",
+    "wonderful-fetch": "^1.1.12",
+    "yaml": "1.10.2",
+    "yargs": "17.7.2"
   },
-  "devDependencies": {},
+  "devDependencies": {
+    "prepare-package": "^1.1.12"
+  },
   "peerDependencies": {
-    "electron-notarize": "^1.0.0",
-    "electron-notarize-dmg": "^1.0.0"
-  },
-  "_peerDependencies": {
-    "electron": "13.x.x"
+    "@electron/notarize": "^2.1.0",
+    "@electron/remote": "^2.0.10",
+    "electron-builder": "23.3.3",
+    "electron-notarize-dmg": "^1.0.0",
+    "electron-updater": "5.2.1"
   }
 }

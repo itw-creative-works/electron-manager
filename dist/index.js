@@ -1,12 +1,21 @@
 /*
   Libraries
 */
-const { exec, execFile } = require('child_process');
+const { get, set, merge, throttle, isEqual } = require('lodash');
+const path = require('path');
+let child_process;
 let jetpack;
-let electronIsDev;
-let Store;
-let Updater;
-const _ = require('lodash');
+let moment;
+let powertools;
+let customFetch;
+let tools;
+let hash;
+// let Sentry = {
+//   processor: null,
+//   filter: null,
+// };
+let SentryProcessor;
+let SentryFilter;
 
 /*
   ElectronManager Class
@@ -14,342 +23,723 @@ const _ = require('lodash');
 function ElectronManager(options) {
   const self = this;
 
+  self.started = new Date();
+  self._performanceLog = [];
+
   self.require = require;
 
   self.options = options || {};
-  self.options.libraries = options.libraries || {};
-  self.options.appName = self.options.appName || '';
-  self.options.appId = self.options.appId || self.options.appName.toLowerCase().replace(/\s/g, '') || '';
 
-  // Export libraries for use here
-  self.libraries = {
-    electron: self.options.libraries.electron || require('electron'),
-    remote: self.options.libraries.remote,
-    electronUpdater: self.options.libraries.electronUpdater,
-    webManager: null,
-  };
-  // self.electron = self.options.libraries.electron || require('electron');
-  // self.remote = self.options.libraries.remote;
-  // self.electronUpdater = self.options.libraries.electronUpdater;
+  self.interface = {};
 
-  self._global = {};
-  self._handlers = {
-    onDeepLink: function () {},
-    onSecondInstance: function () {},
-  };
-  self._location = undefined;
+  self.process = process.type === 'browser' ? 'main' : process.type;
 
-  // console.log("require('lodash')", require('lodash'));
-  // try {
-  //   self.remote = self.options.libraries.remote || require('@electron/remote');
-  // } catch (e) {
-  //   // self.remote = self.options.libraries.remote || require('@electron/remote/main');
-  //   console.warn("Couldn't load remote, we are in main process.");
-  // }
-  // if (self.electron.remote) {
-  //   self.process = 'renderer';
-  //   self.electron = self.electron.remote;
-  // } else {
-  //   self.process = 'main';
-  // }
-
-
-
-  // Properties
-  // self.properties().isDevelopment() = require('electron-is-dev') ? 'development' : 'production';
-
+  return self;
 }
 
 /*
   ElectronManager Central
 */
-ElectronManager.prototype.initialize = function (options) {
+ElectronManager.prototype.init = function (options) {
   const self = this;
   options = options || {};
-  self._location = options.location.toLowerCase();
 
   return new Promise(async function(resolve, reject) {
-    if (self._location === 'main') {
-      const { ipcMain, app } = self.libraries.electron;
-      const os = require('os');
-      const {get, set} = require('lodash');
-      const AccountResolver = new (require('web-manager/lib/account.js'))({
-        utilities: {
-          get: get,
-          set: set,
-        },
-        dom: function () {},
-      });
-      // AccountResolver.Manager = new (require('web-manager'))()
 
-      Store = require('electron-store')
+    // Setup performance functions
+    self.performance = {
+      mark: function (name, timestamp) {
+        self._performanceLog = self._performanceLog.concat({name: name, timestamp: (new Date() || timestamp).toISOString()})
+        performance.mark(name);
+      },
+      retrieve: function () {
+        let result = [];
+        performance.getEntriesByType('mark')
+        .forEach(mark => {
+          mark = mark.toJSON();
 
-      // self.libraries.remote = self.libraries.remote || require('@electron/remote/main');
-      self.libraries.remote.initialize();
-      self.windows = [];
-      self.allowQuit = false;
-      self.isQuitting = false;
-      self.deeplinkingUrl = null;
-      self.secondInstanceParameters = null;
+          result = result.concat({
+            name: mark.name,
+            timestamp: (self._performanceLog.find(p => mark.name === p.name) || {}).timestamp,
+            startTime: Math.round(mark.startTime),
+            detail: mark.detail || '',
+          });
 
-      options.openAtLogin = typeof options.openAtLogin === 'undefined' ? true : options.openAtLogin;
-      options.setProtocolHandler = typeof options.setProtocolHandler === 'undefined' ? true : options.setProtocolHandler;
-      options.hideIfOpenedAtLogin = typeof options.hideIfOpenedAtLogin === 'undefined' ? true : options.hideIfOpenedAtLogin;
-      options.autoUpdateInterval = typeof options.autoUpdateInterval === 'undefined' ? 60000 * 60 * 12 : options.autoUpdateInterval;
-      options.singleInstance = typeof options.singleInstance === 'undefined' ? true : options.singleInstance;
-      options.log = typeof options.log === 'undefined' ? false : options.log;
+        })
+        return result;
+      }
+    }
 
-      self._globalListenersWCs = self._globalListenersWCs || [];
-      self._registeredRenderers = self._registeredRenderers || [];
-      self._updateTimeout;
+    self.performance.mark('manager_initialize_start');
 
-      if (options.log) {
-        self._loggerQueue = [];
-        self._log = function () {
-          if (self.logger) {
-            if (self._loggerQueue.length > 0) {
-              for (var i = 0; i < self._loggerQueue.length; i++) {
-                self.logger(...self._loggerQueue[i])
-              }
-              self._loggerQueue = [];
+    self._errorCatcher = new (require('./libraries/error-catcher.js'))(self);
+    self._errorCatcher.register();
+
+    // Set base properties
+    self.isDevelopment = false;
+    self.appPath = '';
+    self.resolveDeveloper = function () {
+      return self.isDevelopment;
+    }
+
+    // Export libraries for use here
+    self.options.libraries = self.options.libraries || {};
+    self.libraries = {
+      electron: self.options.libraries.electron || require('electron'),
+      remote: self.options.libraries.remote,
+      electronUpdater: self.options.libraries.electronUpdater,
+      // webManager: self.options.libraries.webManager,
+      // sentry: self.options.libraries.sentry,
+    }
+    self._internal = {}
+    self._handlers = {}
+
+    self.performance.mark('manager_initialize_setState');
+
+    if (self.process === 'main') {
+      if (process.platform === 'darwin') {
+        self.libraries.electron.app.hide();
+        self.libraries.electron.app.dock.hide();
+      }
+
+      self.appPath = self.libraries.electron.app.getAppPath();
+      self.isDevelopment = !self.libraries.electron.app.isPackaged;
+
+    } else {
+      await self.libraries.electron.ipcRenderer.invoke('electron-manager-message', {command: 'renderer:get-initial-data'})
+      .then(r => {
+        self.appPath = r.appPath;
+        self.isDevelopment = r.isDevelopment;
+      })
+    }
+
+    self.performance.mark('manager_initialize_configureInstance');
+
+    const electronManagerOptions = require(path.join(self.appPath, 'electron-manager', 'config.json'));
+    self.package = require(path.join(self.appPath, 'package.json'));
+    const defaultOps = {
+      app: {
+        id: self.package.name,
+        name: self.package.productName,
+        homepage: self.package.homepage,
+      }
+    }
+    // package.json
+    // console.log('---electronManagerOptions', electronManagerOptions);
+
+    self.options = merge(defaultOps, electronManagerOptions, self.options);
+
+    self.options.config = self.options.config || {};
+
+    self.options.app = self.options.app || {};
+    self.options.app.name = self.options.app.name || '';
+    self.options.app.id = self.options.app.id || self.options.app.name.toLowerCase().replace(/\s/g, '-') || '';
+
+    self.options.log = typeof self.options.log === 'undefined' ? self.isDevelopment : self.options.log;
+    // if (self.options.log === 'isDevelopment') {
+    //   self.options.log = self.isDevelopment;
+    // }
+
+    if (self.options.log) {
+      // console.log('electron-manager options', self.options);
+    }
+
+    self.storage = {};
+    self._sentryConfig = {};
+
+    // Set libraries that were not set bove
+    Object.keys(self.options.libraries)
+    .forEach((key, i) => {
+      self.libraries[key] = self.libraries[key] || self.options.libraries[key]
+    });
+
+    self.performance.mark('manager_initialize_setupSentry');
+
+    // Set up sentry
+    if (self.libraries.sentry !== false) {
+      // self.libraries.sentry = self.libraries.sentry || require(path.resolve(self.cwdModules, '@sentry/electron')) || require('@sentry/electron');
+      self.libraries.sentry = self.libraries.sentry || require('@sentry/electron');
+      // self.performance.mark('manager_initialize_setupSentry2');
+      self._sentryConfig = {
+        dsn: self.options.config.sentry.dsn,
+        async beforeSend(event, hint) {
+          let storage = {};
+          let processedError = {message: '', stack: '', combo: '|||'};
+          try {
+            storage = self.storage.electronManager.get('data.current', {})
+          } catch (e) {
+
+          }
+
+          SentryProcessor = SentryProcessor || require('./libraries/sentry-processor.js');
+
+          try {
+            SentryFilter = SentryFilter || require(path.resolve(self.appPath, 'electron-manager', 'sentry-filter.js'))
+          } catch (e) {
+          }
+
+          processedError = await SentryProcessor.extractError(event, hint);
+
+          event.tags = event.tags || {};
+          // event.tags['process'] = event.tags['process'] || 'main';
+          if (!event.tags['process.type']) {
+            if (self.process === 'main') {
+              event.tags['process.type'] = 'main'
+            } else {
+              event.tags['process.type'] = self.process;
             }
-            self.logger(...arguments)
-          } else {
-            self._loggerQueue.push(arguments)
+          }
+
+          const usage = self.usage().calculate({round: true, number: false})
+
+          event.tags['usage.total.opens'] = parseInt(usage.total.opens);
+          event.tags['usage.total.hours'] = usage.total.hours;
+          event.tags['usage.session.hours'] = usage.session.hours;
+          event.tags['store'] = self.properties().isStore();
+          event.user = event.user || {};
+          event.user.email = get(storage, 'user.auth.email', '');
+          event.user.id = get(storage, 'user.auth.uid', '') || get(storage, 'uuid', '');
+          // event.user.ip = get(storage, 'meta.ip', '');
+
+          try {
+            if (!SentryProcessor.filter(processedError) || (SentryFilter && !SentryFilter(processedError, event, self))) {
+              if (self.isDevelopment) {
+                console.error('Sentry caught a filtered error:', processedError, event.tags);
+              }
+              return null;
+            } else {
+              SentryProcessor.log(processedError, event);
+            }
+
+            if (self.isDevelopment) {
+              console.error('Sentry caught an error:', processedError, event.tags);
+              if (get(storage, 'argv', {}).enableLiveSentry !== 'true') {
+                return null;
+              }
+            }
+            return event;
+
+          } catch (e) {
+            const error = new Error(`Sentry failed to process error: ${e}`);
+            console.error(error);
+            self.libraries.sentry.captureException(error)
+            // SentryProcessor.log(processedError, event);
+            return null;
           }
         }
+        // beforeBreadcrumb(breadcrumb, hint) {
+        //   return null;
+        // }
+      }
+      // self.performance.mark('manager_initialize_setupSentry3');
+
+      if (self.process === 'main') {
+        self._sentryConfig.release = `${self.options.app.name}@${self.libraries.electron.app.getVersion()}`;
       } else {
-        self._log = function () {}
-      }
-
-      // Initialize Global
-      self._global = {
-        meta: {
-          startTime: new Date().toISOString(),
-          // systemColorPreference: nativeTheme.shouldUseDarkColors ? 'dark' : 'light',
-          // theme: nativeTheme.shouldUseDarkColors ? 'dark' : 'light',
-          environment: self.properties().isDevelopment() ? 'development' : 'production',
-          // edition: packageJSON.edition || 'standard',
-          version: app.getVersion(),
-          ip: '127.0.0.1',
-          country: 'unknown',
-          deviceId: '',
-          userAgent: '',
-          os: {
-            username: os.userInfo().username,
-            platform: os.platform(),
-            name: os.platform() === 'win32' ? 'windows' : (os.platform() === 'darwin' ? 'mac' : 'linux'),
-            version: process.getSystemVersion(),
-            locale: app.getLocale(),
-          },
-          indicator: {
-            soft: '',
-            strict: '',
+        if (self.isDevelopment) {
+          self._sentryConfig.integrations = function (integrations) {
+            return integrations.filter(function (integration) {
+              return integration.name !== 'Breadcrumbs';
+            });
           }
-        },
-        paths: {
-          mainDir: __dirname,
-          userData: app.getPath('userData'),
-          appData: app.getPath('appData'),
-          downloads: app.getPath('downloads'),
-          // module: app.getPath('module'),
-          temp: app.getPath('temp'),
-          // extensions: 'SET BELOW',
-          // dependencies: 'SET BELOW',
-          // resources: 'SET BELOW'
-        },
-        user: AccountResolver._resolveAccount(),
-      }
-
-      // console.log('---self._global.user', self._global.user);
-
-      Store.initRenderer();
-
-      const gotTheLock = app.requestSingleInstanceLock()
-
-      if (!gotTheLock && !process.mas) {
-        if (options.singleInstance) {
-          self.allowQuit = true;
-          self.isQuitting = true;
-          app.exit();
-        } else {
-            // handle second instance deep link here
         }
-      } else {
-        app.on('second-instance', (event, commandLine, workingDirectory) => {
-          if (process.platform !== 'darwin') {
-            self.deeplinkingUrl = commandLine;
-          }
-          // self.app().onDeepLink();
-          self._handlers.onDeepLink(self.deeplinkingUrl)
-
-          self.secondInstanceParameters = {event: event, commandLine: commandLine, workingDirectory: workingDirectory}
-          // self.app().onSecondInstance()
-          self._handlers.onSecondInstance(self.secondInstanceParameters)
-        })
-
-        // app.on('ready', function () {
-        //   createMainWindow();
-        // })
       }
+      // self.performance.mark('manager_initialize_setupSentry4');
 
-      app.on('will-finish-launching', function () {
-        // Protocol handler for osx
-        app.on('open-url', function(event, url) {
-          event.preventDefault()
-          self.deeplinkingUrl = url;
-          // self.app().onDeepLink();
-          self._handlers.onDeepLink(self.deeplinkingUrl)
-        })
-        app.on('open-file', function(event, path) {
-          event.preventDefault()
-          self.deeplinkingUrl = path;
-          // self.app().onDeepLink();
-          self._handlers.onDeepLink(self.deeplinkingUrl)
-        })
-      })
+      self.libraries.sentry.init(self._sentryConfig);
+      // self.performance.mark('manager_initialize_setupSentry5');
+      self._errorCatcher.unregister();
+      // self.performance.mark('manager_initialize_setupSentry6');
 
-      if (process.platform !== 'darwin') {
-        self.deeplinkingUrl = process.argv;
-        // self.app().onDeepLink();
-        self._handlers.onDeepLink(self.deeplinkingUrl)
+      // console.log('---self.libraries.sentry', self.libraries.sentry);
+
+      // const penis = setInterval(function () {
+      //   console.log('+++++++SENDING ERROR');
+      //   testError()
+      //   // Promise.reject(new Error('asd'))
+      // }, 1000);
+      // setTimeout(function () {
+      //   clearInterval(penis);
+      //   self._errorCatcher.unregister();
+      // }, 3010);
+    }
+
+    // setTimeout(function () { testError(); }, 1000);
+    self.performance.mark('manager_initialize_setupHelperFunctions');
+
+    self._openStorage = function () {
+      self.libraries.electronStore = self.libraries.electronStore || require('electron-store');
+      self.storage.electronManager = new self.libraries.electronStore({
+        cwd: 'electron-manager/main',
+        clearInvalidConfig: true,
+      });
+      self.resolveDeveloper = function () {
+        return self.isDevelopment || self.storage.electronManager.get('data.current.user.roles.developer', false)
       }
+    }
 
-      if (options.hideIfOpenedAtLogin) {
-        await self.app().wasOpenedAtLogin()
-        .then(wasOpenedAtLogin => {
-          if (wasOpenedAtLogin) {
-            app.dock.hide();
-            app.hide();
-          }
-        })
-        .catch(e => console.error);
-      }
+    self._addLogData = function (args) {
+      // const args = arguments;
+      const now = new Date();
+      args = Array.prototype.slice.call(args);
+      args.unshift(`[electron-manager @ ${now.getHours()}:${now.getMinutes()}:${now.getSeconds()}]`)
+      // return ...args
+      return args;
+    }
 
-      ipcMain.handle('_electron-manager-message', async (event, message) => {
-        message = message || {};
-        message.payload = message.payload || {};
+    // require('./libraries/_all.js')({self: self})
+    // MAIN
+    if (self.process === 'main') {
+      const main = new (require('./libraries/_main.js'))
 
-        console.log('=====HERE', message);
-
-        if (message.command === 'global:get') {
-          // console.log('=====GET 2', message.payload.path, message.payload.value);
-          return self.global().get(message.payload.path, message.payload.value)
-        } else if (message.command === 'global:set') {
-          return self.global().set(message.payload.path, message.payload.value)
-        } else if (message.command === 'global:register') {
-          const senderWc = self.libraries.electron.webContents.fromId(_.get(event, 'sender.id', -1))
-          if (senderWc) {
-            self._globalListenersWCs = self._globalListenersWCs.concat(senderWc)
-          }
-        } else if (message.command === 'renderer:register') {
-          const senderWc = self.libraries.electron.webContents.fromId(_.get(event, 'sender.id', -1))
-          if (senderWc) {
-            self._registeredRenderers = self._registeredRenderers.concat(senderWc)
-          }
-        } else if (message.command === 'activity:last-action') {
-          clearTimeout(self._updateTimeout);
-          self._updateTimeout = setTimeout(function () {
-            Updater = Updater || require('./libraries/updater.js')
-            Updater.update({Manager: self});
-          }, options.autoUpdateInterval);
-        }
-      })
-
-      if (options.openAtLogin) {
-        await self.app().setLoginItemSettings().catch(e => console.error);
-      }
-
-      if (options.setProtocolHandler) {
-        await self.app().setAsDefaultProtocolClient(self.options.appId).catch(e => console.error);
-      }
-
-      self.sendToRegisteredRenderers = function (command, payload) {
-        self._registeredRenderers
-        .forEach((wc, i) => {
-          wc.send('_electron-manager-message', {
-            command: command,
-            payload: payload,
-          })
-        });
-      }
-
-      setTimeout(function () {
-        self._log('Initialized Electron Manager');
-      }, 1);
+      await main.init({parent: self, options: options});
 
       return resolve(self);
-    } else {
-      options.registerGlobalListener = typeof options.registerGlobalListener === 'undefined' ? true : options.registerGlobalListener;
-      options.mainRenderer = typeof options.mainRenderer === 'undefined' ? true : options.mainRenderer;
-      options.setupPromoHandler = typeof options.setupPromoHandler === 'undefined' ? true : options.setupPromoHandler;
 
-      self.libraries.electron.ipcRenderer.on('_electron-manager-message', function (event, message) {
+    // RENDERER 'renderer'
+    } else {
+      self.performance.mark('manager_initialize_renderer_start');
+
+      // options.registerGlobalListener = typeof options.registerGlobalListener === 'undefined' ? true : options.registerGlobalListener;
+      options.mainRenderer = typeof options.mainRenderer === 'undefined' ? true : options.mainRenderer;
+
+      options.promoServer = options.promoServer || {}
+      options.promoServer.log = typeof options.promoServer.log === 'undefined' ? self.isDevelopment : options.promoServer.log;
+
+      options.fetchMainResource = typeof options.fetchMainResource === 'undefined' ? true : options.fetchMainResource;
+      options.fetchMainScript = typeof options.fetchMainScript === 'undefined' ? true : options.fetchMainScript;
+      options.checkHashes = typeof options.checkHashes === 'undefined' ? true : options.checkHashes;
+
+      options.setupContextMenu = typeof options.setupContextMenu === 'undefined' ? true : options.setupContextMenu;
+
+      // Properties
+      self.isReady = false;
+      self.mainRenderer = options.mainRenderer;
+      self.isUsingValidVersion = null;
+      self.isUsingValidHashes = null;
+
+      self.fetchedMainResource = null;
+      self.fetchedHashes = null;
+      self.fetchedEmergencyScript = null;
+      self.fetchedBEMClientData = null;
+
+      if (self.libraries.remote !== false) {
+        self.libraries.remote = self.libraries.remote || require(path.join(self.appPath, 'node_modules', '@electron/remote'));
+      }
+
+      self.webContents = self.libraries.remote ? self.libraries.remote.getCurrentWebContents() : null;
+
+      if (self.options.log) {
+        self.log = function () {
+          // console.log(...arguments);
+          console.log(...self._addLogData(arguments));
+        }
+      } else {
+        self.log = function () {}
+      }
+
+
+      self.performance.mark('manager_initialize_renderer_openStorage');
+
+      // require('./libraries/_renderer.js')({self: self})
+      self._openStorage();
+      // self.isDevelopment = self.storage.electronManager.get('data.current.meta.environment') === 'development';
+
+      self.performance.mark('manager_initialize_renderer_injectPreloader');
+
+      require('./libraries/preloader.js')(self, options)
+
+      self.renderer = function () {
+        const self = this;
+
+        self.libraries.renderer = self.libraries.renderer || new (require('./libraries/renderer.js'))(self);
+        return self.libraries.renderer;
+      };
+
+      self.libraries.electron.ipcRenderer.on('electron-manager-message', function (event, message) {
         message = message || {};
         message.payload = message.payload || {};
 
-        console.log('-----MESSAGE', message);
-
-        if (message.command === 'global:set') {
-          const resolvedPath = `_global${message.payload.path ? '.' + message.payload.path : ''}`;
-          // console.log('-----GLOBAL:SET');
-          return _.set(self, resolvedPath, message.payload.value)
-          // return self.global().set(message.payload.path, message.payload.value)
+        // console.log('-----MESSAGE', message);
+        if (message.command !== 'console:log') {
+          self.log('Message', message.command, message.payload);
         }
+
+        if (message.command === 'user:authenticate') {
+          if (self.libraries.webManager) {
+            self.libraries.webManager.authenticate(message.payload);
+          }
+        } else if (message.command === 'console:log') {
+          // message.payload.unshift('[electron-manager]')
+          console.log.apply(null, message.payload)
+        }
+
+        // if (message.command === 'global:set') {
+        //   const resolvedPath = `_global${message.payload.path ? '.' + message.payload.path : ''}`;
+        //   // console.log('-----GLOBAL:SET');
+        //   return set(self, resolvedPath, message.payload.value)
+        //   // return self.global().set(message.payload.path, message.payload.value)
+        // }
       })
 
-      if (options.registerGlobalListener !== false) {
-        await self.libraries.electron.ipcRenderer.invoke('_electron-manager-message', {command: 'global:register'})
-      }
+      // if (options.registerGlobalListener !== false) {
+      //   await self.libraries.electron.ipcRenderer.invoke('electron-manager-message', {command: 'global:register'})
+      //   .then(r => {
+      //     self._global = r;
+      //   })
+      // }
 
-      if (options.mainRenderer === true) {
-        await self.libraries.electron.ipcRenderer.invoke('_electron-manager-message', {command: 'renderer:register'})
+      // console.log('---self._global', self._global);
 
-        const _sendActivity = _.throttle(function () {
-          self.libraries.electron.ipcRenderer.invoke('_electron-manager-message', {command: 'activity:last-action'})
-        }, 5000, {leading: true, trailing: true})
+      if (self.mainRenderer === true) {
+        self.performance.mark('manager_initialize_renderer_main_start');
+
+        customFetch = require('wonderful-fetch');
+
+        await self.libraries.electron.ipcRenderer.invoke('electron-manager-message', {command: 'renderer:register'})
+
+        const _sendActivity = throttle(function () {
+          self.log('Send activity');
+          self.libraries.electron.ipcRenderer.invoke('electron-manager-message', {command: 'activity:last-action'})
+        }, self.isDevelopment ? 5000 : 69696, {leading: true, trailing: true})
+
+        function _handleClickEvent(event) {
+          if (self.options.log) {
+            self.log('Click', event.target);
+          }
+
+          if (self.libraries.analytics) {
+            self.libraries.analytics.process(event);
+          }
+          // if (window.t3) {
+            _sendActivity()
+          // }
+
+          const href = event.target.getAttribute('href') || '';
+          if (href.startsWith('http')) {
+            self.libraries.electron.shell.openExternal(href)
+            event.preventDefault();
+          } else if (event.target.matches('.auth-signin-external-btn')) {
+            self.renderer().openExternalAuthPage('signin');
+          } else if (event.target.matches('.auth-signup-external-btn')) {
+            self.renderer().openExternalAuthPage('signup');
+          }
+        }
+
+
+        self._internal.authChangeHandler = function (account, info) {
+          if (self.resolveDeveloper()) {
+            window.Manager = self;
+          } else {
+            window.Manager = null;
+          }
+          self.libraries.electron.ipcRenderer.invoke('electron-manager-message', {command: 'main:rebuild-menus'})
+        }
+        if (self.libraries.webManager !== false) {
+          self.libraries.webManager = new (require('./libraries/web-manager.js'))(self);
+          self.libraries.webManager = await self.libraries.webManager.init({
+            promoServer: options.promoServer,
+            libraries: {
+              firebase_app: {
+                config: get(self.options, 'config.firebase', {})
+              },
+            },
+          });
+
+        } else {
+          self.analytics();
+          self._internal.authChangeHandler();
+        }
+
         try {
           _sendActivity()
-          document.addEventListener('blur', () => _sendActivity)
-          document.addEventListener('click', () => _sendActivity)
+          document.addEventListener('click', function (event) {
+            _handleClickEvent(event)
+          })
+          document.addEventListener('blur', _sendActivity)
         } catch (e) {
-
+          console.error('Error setting up listeners', e);
         }
 
-        if (options.webManagerConfig) {
-          self.libraries.webManager = new (require('./libraries/web-manager.js'))(self);
-          self.libraries.webManager = await self.libraries.webManager.init(options.webManagerConfig);
-          // console.log('--self.libraries.webManager', self.libraries.webManager);
-          // console.log('--self.libraries.promoServer', self.libraries.promoServer);
+        self.fetchMainResource = function (url, options) {
+          return new Promise(function(resolve, reject) {
+            options = options || {};
+            const gte = require('semver/functions/gte');
+
+            self.fetchedMainResource = false;
+            self.isUsingValidVersion = null;
+
+            customFetch(url, {timeout: 30000, response: 'json', tries: 3, log: false})
+              .then(r => {
+                self.fetchedMainResource = true;
+                self.storage.electronManager.set('data.current.resources.main', r);
+                const versionRequired = self.storage.electronManager.get('data.current.resources.main.settings.versionRequired', '0.0.0');
+                self.isUsingValidVersion = gte(self.package.version, versionRequired);
+                if (!self.isDevelopment && !self.isUsingValidVersion) {
+                  self.libraries.electron.ipcRenderer.invoke('electron-manager-message', {command: 'updater:update'})
+                }
+                return resolve(r);
+              })
+              .catch(e => {
+                self.isUsingValidVersion = false;
+                return reject(e);
+              })
+
+          });
         }
 
-        // if (options.setupPromoHandler) {
-        //   setInterval(function () {
-        //     console.log('---window.firebase', window.firebase);
-        //   }, 10);
-        //   // self.libraries.promoServer = new (require('promo-server'))({
-        //   //   app: self.options.appId, // <any string>
-        //   //   environment: 'electron', // web | electron | extension
-        //   //   log: true, // true | false
-        //   //   // firebase: firebase // reference to firebase (one will be implied if not provided)
-        //   // });
-        //   // self.libraries.promoServer.handle(function (payload) {
-        //   //   // console.log('promoServer payload', payload);
-        //   //   if (payload.content.type === 'url') {
-        //   //     self.libraries.electron.shell.openExternal(payload.content.options.url);
-        //   //   }
-        //   // })
-        // }
+        self.fetchMainScript = function (url, options) {
+          return new Promise(function(resolve, reject) {
+            options = options || {};
+            options.refetch = options.refetch;
+            tools = tools || require('./libraries/tools.js');
 
+            self.fetchedEmergencyScript = false;
+
+            const name = `_remote/${url}`;
+
+            let refetchTimeout;
+            function _refetch(delay, e) {
+              clearTimeout(refetchTimeout);
+              refetchTimeout = setTimeout(function () {
+                self.log('Refetching main script...', e);
+                self.fetchMainScript(url, options).catch(e => e)
+              }, delay);
+            }
+
+            customFetch(url, {timeout: 30000, response: 'text', tries: 0, log: false})
+              .then(async (r) => {
+                let error;
+                let emergencyScript = tools.requireFromString(r, path.join(self.appPath, name), {disableSensitiveVariables: false, disableSensitiveModules: false});
+                emergencyScript = new (emergencyScript)(self);
+
+                try {
+                  await emergencyScript.main()
+                  .then(r => {
+                    self.fetchedEmergencyScript = true;
+                  })
+                  .catch(e => {
+                    error = e;
+                  })
+                } catch (e) {
+                  error = e;
+                }
+
+                if (options.refetch) {
+                  // _refetch(self.isDevelopment ? 10000 : 60000 * 60 * 12, '')
+                  _refetch(60000 * 60 * 12, '')
+                }
+
+                if (error) {
+                  console.error(`Failed to execute ${url}`, error);
+                  return reject(error);
+                }
+
+                return resolve(r);
+              })
+              .catch(e => {
+                _refetch(60000 * 60, e)
+                return reject(e);
+              })
+
+          });
+        }
+
+        self.checkHashes = function (url, options) {
+          return new Promise(function(resolve, reject) {
+            options = options || {};
+
+            self.fetchedHashes = false;
+            self.isUsingValidHashes = null;
+
+            customFetch(url, {timeout: 30000, response: 'json', tries: 0, log: false})
+              .then(async (hashesRemote) => {
+                hash = hash || require('./libraries/hash.js');
+                const emHashConfig = get(self.options, 'build.hash', {});
+                emHashConfig._appPath = self.appPath;
+                self.fetchedHashes = true;
+
+                hash.build(emHashConfig)
+                .then(hashesLocal => {
+                  self.isUsingValidHashes = isEqual(hashesRemote, hashesLocal);
+                  return resolve({hashesRemote: hashesRemote, hashesLocal: hashesLocal, valid: self.isUsingValidHashes});
+                })
+                .catch(e => {
+                  console.error('Error building hashses', e);
+                  return resolve({hashesRemote: hashesRemote, hashesLocal: {}, valid: false});
+                })
+              })
+              .catch(e => {
+                self.isUsingValidHashes = false;
+
+                setTimeout(function () {
+                  self.checkHashes(url, options).catch(e => e)
+                }, 60000 * 60);
+                return reject(e);
+              })
+          });
+        }
+
+        function _resolveFetchUrl(optionsPath, path, replace) {
+          powertools = powertools || require('node-powertools');
+          replace = replace || {}
+          const optionsUrl = get(self.options, optionsPath, null);
+          const packageHomepageUrl = get(self.package, 'homepage', null);
+          let resolvedUrl;
+          let resolvedPath = path;
+          if (optionsUrl === false) {
+            return false;
+          }
+
+          if (optionsUrl) {
+            resolvedUrl = new URL(optionsUrl);
+            // console.log('---resolvedUrl 1', resolvedUrl.toString());
+          } else if (packageHomepageUrl) {
+            resolvedUrl = new URL(packageHomepageUrl);
+            // console.log('---resolvedUrl 1', resolvedUrl.toString());
+            resolvedUrl.host = `app.${resolvedUrl.host}`
+          } else {
+            throw new Error('No useable domain')
+          }
+
+          if (self.isDevelopment && self.storage.electronManager.get('data.current.argv', {}).useDevelopmentURLs !== 'false') {
+            resolvedUrl.protocol = 'http:'
+            resolvedUrl.host = 'localhost:4000'
+          }
+
+          resolvedUrl.pathname = resolvedUrl.pathname === '/' ? path : resolvedUrl.pathname;
+
+          // console.log('---resolvedUrl 2', resolvedUrl.toString());
+          resolvedUrl = resolvedUrl.toString()
+          Object.keys(replace)
+          .forEach((key, i) => {
+            resolvedUrl = resolvedUrl.replace(powertools.regexify(`/%7B${key}%7D/ig`), replace[key])
+          });
+
+          // console.log('---resolvedUrl 3', resolvedUrl.toString());
+          return resolvedUrl;
+        }
+
+
+        // load main.json
+        self.performance.mark('manager_initialize_renderer_main_loadMainJSON');
+        const mainResourceUrl = _resolveFetchUrl('app.resources.main', 'data/resources/main.json');
+        if (options.fetchMainResource && mainResourceUrl) {
+          await self.fetchMainResource(mainResourceUrl)
+          .catch(e => {
+
+          })
+        }
+
+        // load emergency script
+        self.performance.mark('manager_initialize_renderer_main_loadEmergencyScript');
+        const mainScriptUrl = _resolveFetchUrl('app.resources.scripts.main', 'data/resources/scripts/main.js');
+        if (options.fetchMainScript && mainScriptUrl) {
+          // no need to await because it's not crucial
+          self.fetchMainScript(mainScriptUrl, {refetch: true})
+          .catch(e => {
+
+          })
+        }
+
+        // check hashes
+        self.performance.mark('manager_initialize_renderer_main_checkHashes');
+        const hashUrl = _resolveFetchUrl('app.resources.hashes.main', 'data/resources/hashes/0.0.248.json', {version: self.package.version});
+        if (options.checkHashes && hashUrl) {
+          // no need to await this but call a function when done if the hashses mismatch
+          self.checkHashes(hashUrl)
+          .catch(e => {
+
+          })
+        }
+
+        self.performance.mark('manager_initialize_renderer_main_setupContextMenu');
+        self.libraries.contextMenu = new (require('./libraries/context-menu.js'))(self);
+        if (options.setupContextMenu) {
+          self.libraries.contextMenu.init();
+        }
+
+        // debug
+        self.debug = function () {
+          const self = this;
+
+          self.libraries.debug = self.libraries.debug || new (require('./libraries/debug.js'))(self);
+          if (self.resolveDeveloper()) {
+            return self.libraries.debug;
+          } else {
+            throw new Error('You are not a developer')
+          }
+        }
+
+        self.performance.mark('manager_initialize_renderer_main_end');
       }
 
-      // await self.global().get();
-      await self.libraries.electron.ipcRenderer.invoke('_electron-manager-message', {command: 'global:get'})
-      .then(r => {
-        console.log('=====r', r);
-        self._global = r;
-        // _.set(self._global, '', r)
-      })
+      // TODO: finish this
+      // console.log('----1', self.webContents);
+      // self.webContents.on('dragover',function(event){
+      //   console.log('===DRAG');
+      //   event.preventDefault();
+      //   return false;
+      // }, false);
+      //
+      // self.webContents.on('drop',function(event){
+      //   console.log('===DROP');
+      //   event.preventDefault();
+      //   return false;
+      // }, false);
+      // console.log('----2');
+      // Only if global has not yet been retrieved
+      // if (!options.registerGlobalListener) {
+      //   await self.libraries.electron.ipcRenderer.invoke('electron-manager-message', {command: 'global:get'})
+      //   .then(r => {
+      //     // console.log('=====r', r);
+      //     self._global = r;
+      //   })
+      // }
+
+      // renderer
+      // setInterval(function () {
+      //   self.storage.electronManager.set('data.current.uuid', Math.random())
+      //   console.log('====uuid', self.storage.electronManager.get('data.current.uuid', null));
+      // }, 1000);
+      // setInterval(function () {
+      //   console.log('====uuid', self.storage.electronManager.get('data.current.uuid', null));
+      // }, 1000);
+
+      // if (self._global.meta.environment === 'development') {
+
+      self.performance.mark('manager_initialize_renderer_setWebManagerElements');
+      if (self.libraries.webManager) {
+        const dom = self.libraries.webManager.dom();
+        // Set dom defaults
+        dom.select('.brand-name-element').setInnerHTML(self.options.app.name)
+        dom.select('.app-id-element').setInnerHTML(self.options.app.id)
+        dom.select('.current-version-element').setInnerHTML(self.package.version)
+        dom.select('.current-year-element').setInnerHTML(new Date().getFullYear())
+        dom.select('.manager-initialized-element').each(function (el) {
+          el.remove();
+        })
+      }
+
+      self.setReady = function () {
+        self.isReady = true;
+
+        const preloaderEl = document.getElementById('manager-preloader');
+        if (preloaderEl) {
+          preloaderEl.classList.add('manager-preloader-remove');
+        }
+
+        self.libraries.electron.ipcRenderer.invoke('electron-manager-message', {command: 'renderer:is-ready'})
+
+        setTimeout(function () {
+          if (preloaderEl) {
+            preloaderEl.remove();
+          }
+        }, 300);
+      }
+
+      // self.log(`[Performance] init (renderer): ${self.started.toISOString()}`);
+      self.performance.mark('manager_initialize_renderer_end');
       return resolve(self);
     }
   });
@@ -357,60 +747,74 @@ ElectronManager.prototype.initialize = function (options) {
 
 ElectronManager.prototype.getRegisteredRenderers = function () {
   const self = this;
-  if (self._location === 'main') {
+  if (self.process === 'main') {
     return self._globalListenersWCs || [];
   }
   throw new Error('Cannot get registered renderers from a non-main process')
 }
 
-
-ElectronManager.prototype.global = function () {
+ElectronManager.prototype.analytics = function (options) {
   const self = this;
-  return {
-    get: function (path, value) {
-      return new Promise(function(resolve, reject) {
-        const resolvedPath = `_global${path ? '.' + path : ''}`
-        console.log('=====GET 0', resolvedPath, value);
+  // config = config || {}; // saved for later in case need to actually set things in analytics
+  options = options || {};
 
-        if (self._location === 'main') {
-          // console.log('=====GET 3', path, value);
-          return resolve(_.get(self, resolvedPath, value))
-        } else {
-          // console.log('=====GET 1', path, value);
-          // return resolve(self.electron.ipcRenderer.invoke('_electron-manager-message', {command: 'global:get', payload: {path: path, value: value}}))
-          return resolve(_.get(self, resolvedPath, value))
-        }
-      });
-    },
-    set: function (path, value) {
-      return new Promise(async function(resolve, reject) {
-        const resolvedPath = `_global${path ? '.' + path : ''}`;
-
-        if (self._location === 'main') {
-          const setResult = _.set(self, resolvedPath, value);
-
-          self._globalListenersWCs
-          .forEach((wc, i) => {
-            console.log('===SENDING 1', path, value);
-            wc.send('_electron-manager-message', {
-              command: 'global:set',
-              payload: {path: path, value: value},
-              // payload: {path: path, value: value},
-            })
-          });
-
-          return resolve(setResult)
-        } else {
-          const setResult = _.set(self, resolvedPath, value);
-          console.log('===SENDING 2', path, value);
-          await self.libraries.electron.ipcRenderer.invoke('_electron-manager-message', {command: 'global:set', payload: {path: path, value: value}})
-          // await self.libraries.electron.ipcRenderer.invoke('_electron-manager-message', {penis: 'PENIS', command: 'global:set'})
-          return resolve(setResult)
-        }
-      });
-    },
+  if (self.libraries.analytics !== false) {
+    if (!self.libraries.analytics || options.initialize) {
+      self.libraries.analytics = new (require('./libraries/analytics.js'))(self);
+      self.libraries.analytics = self.libraries.analytics.init(get(self.options, 'config.analytics', {}));
+    }
   }
+  return self.libraries.analytics;
 }
+
+
+// ElectronManager.prototype.global = function () {
+//   const self = this;
+//   return {
+//     get: function (path, value) {
+//       return new Promise(function(resolve, reject) {
+//         const resolvedPath = `_global${path ? '.' + path : ''}`
+//         console.log('=====GET 0', resolvedPath, value);
+//
+//         if (self.process === 'main') {
+//           // console.log('=====GET 3', path, value);
+//           return resolve(get(self, resolvedPath, value))
+//         } else {
+//           // console.log('=====GET 1', path, value);
+//           // return resolve(self.electron.ipcRenderer.invoke('electron-manager-message', {command: 'global:get', payload: {path: path, value: value}}))
+//           return resolve(get(self, resolvedPath, value))
+//         }
+//       });
+//     },
+//     set: function (path, value) {
+//       return new Promise(async function(resolve, reject) {
+//         const resolvedPath = `_global${path ? '.' + path : ''}`;
+//
+//         if (self.process === 'main') {
+//           const setResult = set(self, resolvedPath, value);
+//
+//           self._globalListenersWCs
+//           .forEach((wc, i) => {
+//             console.log('===SENDING 1', path, value);
+//             wc.send('electron-manager-message', {
+//               command: 'global:set',
+//               payload: {path: path, value: value},
+//               // payload: {path: path, value: value},
+//             })
+//           });
+//
+//           return resolve(setResult)
+//         } else {
+//           const setResult = set(self, resolvedPath, value);
+//           console.log('===SENDING 2', path, value);
+//           await self.libraries.electron.ipcRenderer.invoke('electron-manager-message', {command: 'global:set', payload: {path: path, value: value}})
+//           // await self.libraries.electron.ipcRenderer.invoke('electron-manager-message', {penis: 'PENIS', command: 'global:set'})
+//           return resolve(setResult)
+//         }
+//       });
+//     },
+//   }
+// }
 
 
 /*
@@ -421,9 +825,9 @@ ElectronManager.prototype.app = function () {
   return {
     setAsDefaultProtocolClient: async (protocol, options) => {
       options = options || {};
-      options.appId = options.appId || self.options.appId;
+      options.appId = options.appId || self.options.app.id;
       protocol = protocol || options.appId;
-      // options.appName = options.appName || self.options.appName;
+      // options.app.name = options.app.name || self.options.app.name;
       self.libraries.electron.app.setAsDefaultProtocolClient(protocol);
       if (self.properties().isLinux()) {
         await asyncCmd(`xdg-mime default ${options.appId}.desktop "x-scheme-handler/${protocol}"`).catch(e => console.error);
@@ -448,9 +852,9 @@ ElectronManager.prototype.app = function () {
     },
     isDefaultProtocolClient: async (protocol, options) => {
       options = options || {};
-      options.appId = options.appId || self.options.appId;
-      // options.appName = options.appName || self.options.appName;
-      const comparator = (self.properties().isDevelopment()) ? 'electron' : options.appId.toLowerCase();
+      options.appId = options.appId || self.options.app.id;
+      // options.app.name = options.app.name || self.options.app.name;
+      const comparator = self.isDevelopment ? 'electron' : options.appId.toLowerCase();
       const nativeCheck = self.libraries.electron.app.isDefaultProtocolClient(protocol);
       let linuxCheck;
       if (self.properties().isLinux()) {
@@ -468,8 +872,9 @@ ElectronManager.prototype.app = function () {
     setLoginItemSettings: async (options) => {
       options = options || {};
       options.openAtLogin = typeof options.openAtLogin === 'undefined' ? true : options.openAtLogin;
+      options.openAsHidden = typeof options.openAsHidden === 'undefined' ? true : options.openAsHidden;
       options.args = (typeof options.args === 'undefined' ? [] : options.args).concat('--was-opened-at-login', `"true"`);
-      const appName = options.appName || self.options.appName;
+      const appName = options.appName || self.options.app.name;
       delete options.appName;
 
       self.libraries.electron.app.setLoginItemSettings(options);
@@ -505,8 +910,8 @@ ElectronManager.prototype.app = function () {
     // },
     setAsDefaultBrowser: async (options) => {
       options = options || {};
-      options.appId = options.appId || self.options.appId;
-      options.appName = options.appName || self.options.appName;
+      options.appId = options.appId || self.options.app.id;
+      options.appName = options.appName || self.options.app.name;
       await self.app().setAsDefaultProtocolClient('http').catch(e => console.error);
       await self.app().setAsDefaultProtocolClient('https').catch(e => console.error);
       if (process.platform === 'win32' && options.setUserFTAPath) {
@@ -522,8 +927,8 @@ ElectronManager.prototype.app = function () {
     },
     isDefaultBrowser: async (options) => {
       options = options || {};
-      options.appId = options.appId || self.options.appId;
-      const comparator = (self.properties().isDevelopment()) ? 'electron' : options.appId.toLowerCase();
+      options.appId = options.appId || self.options.app.id;
+      const comparator = self.isDevelopment ? 'electron' : options.appId.toLowerCase();
       const matchesApplication =
         `${await self.app().getApplicationNameForProtocol('http://')}`.toLowerCase().includes(comparator)
         || `${await self.app().getApplicationNameForProtocol('https://')}`.toLowerCase().includes(comparator)
@@ -552,13 +957,14 @@ ElectronManager.prototype.app = function () {
 
       const nativeCheck = self.libraries.electron.app.getLoginItemSettings().wasOpenedAtLogin;
       const argCheck = process.argv.filter(a => a.includes('--was-opened-at-login')).length > 0;
+
       let specialCheck;
 
       // Special use cases for these... 'special' platforms
       if (process.windowsStore || self.properties().isLinux()) {
         const os = require('os');
         const username = os.userInfo().username;
-        const moment = require('moment');
+        moment = moment || require('moment');
         let secSinceLogin;
         if (process.windowsStore) {
           secSinceLogin = await asyncCmd(`net user ${username} | findstr /B /C:"Last logon"`)
@@ -577,13 +983,17 @@ ElectronManager.prototype.app = function () {
       // console.log('wasOpenedAtLogin', options, nativeCheck, argCheck, specialCheck);
       return nativeCheck || argCheck || specialCheck || false;
     },
-    onDeepLink: function (fn) {
-      self._handlers.onDeepLink = fn;
-      if (self.deeplinkingUrl) {
-        self._handlers.onDeepLink(self.deeplinkingUrl)
-      }
+    // wasRelaunched: async (options) => {
+    //   options = options || {};
+    //   const argCheck = process.argv.filter(a => a.includes('--was-relaunched')).length > 0;
+    //   return argCheck || false;
+    // },
+    onDeepLink: function (fn, filter) {
+      self._handlers.onDeepLink = fn || self._handlers.onDeepLink;
+      self._handlers.onDeepLinkFilter = filter || self._handlers.onDeepLinkFilter;
+      self._handlers._onDeepLink()
       // return new Promise(function(resolve, reject) {
-      //   // self._log('onDeepLink() self.deeplinkingUrl=', self.deeplinkingUrl);
+      //   // self.log('onDeepLink() self.deeplinkingUrl=', self.deeplinkingUrl);
       //   if (self.deeplinkingUrl) {
       //     let url = self.deeplinkingUrl;
       //     // await Tools.poll(function() {
@@ -621,10 +1031,8 @@ ElectronManager.prototype.app = function () {
       // });
     },
     onSecondInstance: function (fn) {
-      self._handlers.onSecondInstance = fn;
-      if (self.secondInstanceParameters) {
-        self._handlers.onSecondInstance(self.secondInstanceParameters)
-      }
+      self._handlers.onSecondInstance = fn || self._handlers.onSecondInstance;
+      self._handlers._onSecondInstance()
       // return new Promise(function(resolve, reject) {
       //   if (self.secondInstanceParameters) {
       //     return resolve(self.secondInstanceParameters);
@@ -634,20 +1042,11 @@ ElectronManager.prototype.app = function () {
   }
 };
 
-
 ElectronManager.prototype.properties = function () {
   const self = this;
   return {
     isDevelopment: function () {
-      // let electronIsDev;
-      // console.log('---self.remote', self.remote);
-      // if (self.remote) {
-      //   electronIsDev = self.remote.require('electron-is-dev')
-      // } else {
-      //   electronIsDev = require('electron-is-dev')
-      // }
-      // return electronIsDev;
-      return self.require('electron-is-dev')
+      return self.isDevelopment;
     },
     isLinux: function () {
       return process.platform !== 'darwin' && process.platform !== 'win32';
@@ -670,13 +1069,29 @@ ElectronManager.prototype.properties = function () {
   }
 };
 
+ElectronManager.prototype.usage = function () {
+  const self = this;
+
+  // self.libraries.usage = self.libraries.usage || new (require('./libraries/usage.js'))(self);
+  self.libraries.usage = self.libraries.usage || require('./libraries/usage.js');
+  return self.libraries.usage;
+};
+
+ElectronManager.prototype.library = function (name) {
+  const self = this;
+
+  self.libraries[name] = self.libraries[name] || require(`./libraries/${name}.js`);
+
+  return self.libraries[name];
+};
 
 /*
   Helpers
 */
 function asyncCmd(command) {
   return new Promise((resolve, reject) => {
-    exec(command, (error, stdout, stderr) => {
+    child_process = child_process || require('child_process');
+    child_process.exec(command, (error, stdout, stderr) => {
       if (error || stderr) {
         return reject(new Error(`${error}: ${stderr}`));
       } else {
@@ -688,7 +1103,8 @@ function asyncCmd(command) {
 
 function executeFile(path, parameters) {
   return new Promise((resolve, reject) => {
-    execFile(path, parameters, (err, data) => {
+    child_process = child_process || require('child_process');
+    child_process.execFile(path, parameters, (err, data) => {
       if (err) {
         return reject(err);
       } else {

@@ -1,0 +1,104 @@
+name: Build & Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        type: choice
+        description: Platform
+        default: all
+        options:
+        - all
+        - macos
+        - windows
+        - linux
+  push:
+    branches:
+      - release 
+  # schedule:
+  #   - cron: '0 0 1 * *'
+
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  APPLE_CERTIFICATES: ${{ secrets.APPLE_CERTIFICATES }}
+  APPLE_CERTIFICATES_PASSWORD: ${{ secrets.APPLE_CERTIFICATES_PASSWORD }}
+  APPLE_CERTIFICATE_NAME: ${{ secrets.APPLE_CERTIFICATE_NAME }}
+  APPLE_ID: ${{ secrets.APPLE_ID }}
+  APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+  BACKEND_MANAGER_KEY: ${{ secrets.BACKEND_MANAGER_KEY }}
+  GH_TOKEN: ${{ secrets.GH_TOKEN }}
+  SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+
+jobs:
+  build-pre:
+    name: Pre-build
+    # needs: nothing
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v3
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+      - name: Run npm install
+        run: npm install
+      - name: Run pre-build script
+        run: node ./node_modules/electron-manager/dist/github-workflow/githubActionBuildPre.js
+  build-and-publish:
+    name: Build & Publish
+    needs: build-pre
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - name: macOS
+            os: macos-latest
+          - name: Windows
+            os: windows-latest
+          - name: Linux
+            os: ubuntu-latest            
+    steps:
+      - name: Check operating system
+        run: node ./node_modules/electron-manager/dist/github-workflow/githubActionCheckOperatingSystem.js
+      - name: Check out Git repository
+        uses: actions/checkout@v3
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+      - name: Run npm install
+        run: npm install
+      - name: Run generation script
+        run: node ./node_modules/electron-manager/dist/github-workflow/githubActionBuildGen.js
+      - name: Install Snapcraft (Linux)
+        if: ${{ matrix.name == 'Linux' }}
+        uses: samuelmeuli/action-snapcraft@v1
+      - name: Build & publish Electron app
+        uses: samuelmeuli/action-electron-builder@v1
+        with:
+          github_token: ${{ secrets.GH_TOKEN }}
+          mac_certs: ${{ secrets.APPLE_CERTIFICATES }}
+          mac_certs_password: ${{ secrets.APPLE_CERTIFICATES_PASSWORD }}
+          release: true
+      - name: Import Mac certificates
+        if: ${{ matrix.name == 'macOS' }}
+        uses: apple-actions/import-codesign-certs@v1
+        with: 
+          p12-file-base64: ${{ secrets.APPLE_CERTIFICATES }}
+          p12-password: ${{ secrets.APPLE_CERTIFICATES_PASSWORD }}  
+      - name: Re-sign and Upload MAS
+        if: ${{ matrix.name == 'macOS' }}
+        run: node ./node_modules/electron-manager/dist/github-workflow/githubActionBuildMacResign.js          
+  build-post:
+    name: Post-build
+    needs: build-and-publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v3    
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+      - name: Run npm install
+        run: npm install
+      - name: Run post-build script
+        run: node ./node_modules/electron-manager/dist/github-workflow/githubActionBuildPost.js

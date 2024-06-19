@@ -1,0 +1,102 @@
+name: Build & Publish
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - release 
+  # schedule:
+  #   - cron: '0 0 1 * *'
+
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  APPLE_CERTIFICATES: ${{ secrets.APPLE_CERTIFICATES }}
+  APPLE_CERTIFICATES_PASSWORD: ${{ secrets.APPLE_CERTIFICATES_PASSWORD }}
+  APPLE_CERTIFICATE_NAME: ${{ secrets.APPLE_CERTIFICATE_NAME }}
+  APPLE_ID: ${{ secrets.APPLE_ID }}
+  APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+  BACKEND_MANAGER_KEY: ${{ secrets.BACKEND_MANAGER_KEY }}
+  GH_TOKEN: ${{ secrets.GH_TOKEN }}
+  SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+
+jobs:
+  build-pre:
+    name: Pre-build
+    # needs: nothing
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v3
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+      - name: Run npm install
+        run: npm install
+      - name: Run pre-build script
+        run: node ./electron-manager/_generated/github-workflow/githubActionBuildPre.js 
+  build-and-publish:
+    name: Build & Publish
+    needs: build-pre
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          # - name: Linux
+          #   os: ubuntu-latest
+          - name: macOS
+            os: macos-latest
+          # - name: Windows
+          #   os: windows-latest
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v3
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+      - name: Log Node.js version
+        run: node -v
+      - name: Install Snapcraft (Linux)
+        if: ${{ matrix.name == 'Linux' }}
+        uses: samuelmeuli/action-snapcraft@v1
+      - name: Build & publish Electron app
+        uses: samuelmeuli/action-electron-builder@v1
+        with:
+          github_token: ${{ secrets.GH_TOKEN }}
+          mac_certs: ${{ secrets.APPLE_CERTIFICATES }}
+          mac_certs_password: ${{ secrets.APPLE_CERTIFICATES_PASSWORD }}
+          release: true
+      - name: Import certificates
+        if: ${{ matrix.name == 'macOS' }}
+        run: |
+          # https://docs.github.com/en/actions/deployment/deploying-xcode-applications/installing-an-apple-certificate-on-macos-runners-for-xcode-development
+          # create variables
+          CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          # import certificate and provisioning profile from secrets
+          echo -n "$APPLE_CERTIFICATES" | base64 --decode --output $CERTIFICATE_PATH
+          # create temporary keychain
+          security create-keychain -p "$APPLE_CERTIFICATES_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$APPLE_CERTIFICATES_PASSWORD" $KEYCHAIN_PATH
+          # import certificate to keychain
+          security import $CERTIFICATE_PATH -P "$APPLE_CERTIFICATES_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+          # log
+          security cms -D -i /Users/runner/work/electron-boilerplate/electron-boilerplate/dist/mas/Deployment\ Playground.app/Contents/embedded.provisionprofile          
+      - name: Re-sign and Upload MAS
+        if: ${{ matrix.name == 'macOS' }}
+        run: node ./electron-manager/_generated/github-workflow/githubActionBuildMacResign.js          
+  build-post:
+    name: Post-build
+    needs: build-and-publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v3    
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+      - name: Run npm install
+        run: npm install
+      - name: Run post-build script
+        run: node ./electron-manager/_generated/github-workflow/githubActionBuildPost.js
