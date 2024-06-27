@@ -14,7 +14,7 @@ on:
           - linux
   push:
     branches:
-      - release 
+      - release
   # schedule:
   #   - cron: '0 0 1 * *'
 
@@ -41,9 +41,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out Git repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
+        with:
+          node-version: 16
       - name: Run npm install
         run: npm install
       - name: Run pre-build script
@@ -63,25 +65,27 @@ jobs:
             run: ${{ inputs.platform == 'all' || inputs.platform == 'windows' }}
           - name: Linux
             os: ubuntu-latest
-            run: ${{ inputs.platform == 'all' || inputs.platform == 'linux' }}          
+            run: ${{ inputs.platform == 'all' || inputs.platform == 'linux' }}
     steps:
       - name: Log operating system
         run: echo "os=${{ matrix.os }}, choice=$INPUT_PLATFORM, run=${{ matrix.run }}"
       - name: Check out Git repository
         if: ${{ matrix.run }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Setup Node.js
         if: ${{ matrix.run }}
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
+        with:
+          node-version: 16
       - name: Run npm install
         if: ${{ matrix.run }}
-        run: npm install  
+        run: npm install
       - name: Run generation script
         if: ${{ matrix.run }}
         run: node ./node_modules/electron-manager/dist/github-workflow/githubActionBuildGen.js
       - name: Install Snapcraft (Linux)
         if: ${{ matrix.run && matrix.name == 'Linux' }}
-        uses: samuelmeuli/action-snapcraft@v1
+        uses: samuelmeuli/action-snapcraft@v2
       - name: Build & publish Electron app
         if: ${{ matrix.run }}
         uses: samuelmeuli/action-electron-builder@v1
@@ -92,22 +96,24 @@ jobs:
           release: true
       - name: Import Mac certificates
         if: ${{ matrix.run && matrix.name == 'macOS' }}
-        uses: apple-actions/import-codesign-certs@v1
-        with: 
+        uses: apple-actions/import-codesign-certs@v3
+        with:
           p12-file-base64: ${{ secrets.APPLE_CERTIFICATES }}
-          p12-password: ${{ secrets.APPLE_CERTIFICATES_PASSWORD }}  
+          p12-password: ${{ secrets.APPLE_CERTIFICATES_PASSWORD }}
       - name: Re-sign and Upload MAS
         if: ${{ matrix.run && matrix.name == 'macOS' }}
-        run: node ./node_modules/electron-manager/dist/github-workflow/githubActionBuildMacResign.js          
+        run: node ./node_modules/electron-manager/dist/github-workflow/githubActionBuildMacResign.js
   build-post:
     name: Post-build
     needs: build-and-publish
     runs-on: ubuntu-latest
     steps:
       - name: Check out Git repository
-        uses: actions/checkout@v3    
+        uses: actions/checkout@v4
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
+        with:
+          node-version: 16
       - name: Run npm install
         run: npm install
       - name: Run post-build script
@@ -116,4 +122,4 @@ jobs:
         uses: kolpav/purge-artifacts-action@v1
         with:
           token: ${{ secrets.GH_TOKEN }}
-          expire-in: 0 # Set this to 0 to delete all artifacts            
+          expire-in: 0 # Set this to 0 to delete all artifacts

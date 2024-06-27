@@ -44,8 +44,8 @@ BuildScriptPost.prototype.process = async function (options) {
   if (options.arguments.retrigger) {
     // Retrigger CI server if it failed
     caughtError = await process_retriggerCIServer(options.arguments.retrigger).catch(e => e)
-    if (caughtError instanceof Error) {return error(caughtError)}    
-    
+    if (caughtError instanceof Error) {return error(caughtError)}
+
   } else {
     // Start workflow
     caughtError = await process_startWorkflow().catch(e => e)
@@ -72,7 +72,7 @@ BuildScriptPost.prototype.process = async function (options) {
       return error(new Error(`Workflow failed`));
     } else {
       console.log(chalk.green(scriptName, `Workflow ${activeRun.id} finished: created=${activeRun.created_at}, status=${activeRun.status}, conclusion=${activeRun.conclusion}`));
-    }    
+    }
   }
 
   // Wait for CI Server to finish
@@ -92,7 +92,7 @@ function error(e) {
   console.log(chalk.red(scriptName, `${e.message}`));
   if (activeRun && activeRun.conclusion !== 'failure') {
     console.log('\n');
-    console.log(chalk.yellow(scriptName, `You can retrigger this CI Server Build with: ${chalk.bold(`npx eman build --retrigger=${activeRun.id}`)}`));    
+    console.log(chalk.yellow(scriptName, `You can retrigger this CI Server Build with: ${chalk.bold(`npx eman build --retrigger=${activeRun.id}`)}`));
   }
   throw new Error(e)
 }
@@ -100,26 +100,27 @@ function error(e) {
 
 function process_checkUncomitted() {
   return new Promise(function(resolve, reject) {
-    
+
     console.log(chalk.blue(scriptName, `Checking for uncommitted changes...`));
-    
+
     asyncCommand('git status --porcelain')
     .then(async uncommitted => {
       if (uncommitted) {
         console.log(chalk.yellow(scriptName, `There are uncommitted changes that will not be included in your build... \n ${uncommitted}`));
-        await powertools.wait(2000);
+        console.log(chalk.yellow(scriptName, `⛔️⛔️⛔️ Quit now if you need to commit your changes...`));
+        await powertools.wait(5000);
       }
       return resolve()
     })
-    .catch(e => reject(e))    
+    .catch(e => reject(e))
   });
 }
 
 function process_startWorkflow() {
   return new Promise(function(resolve, reject) {
-    
+
     console.log(chalk.blue(scriptName, `Starting workflow for owner=${owner}, repo=${repo}...`));
-    
+
     octokit.rest.actions.createWorkflowDispatch({
       owner: owner,
       repo: repo,
@@ -130,15 +131,15 @@ function process_startWorkflow() {
       console.log(chalk.green(scriptName, `Started workflow successfully`));
       return resolve(workflow)
     })
-    .catch(e => reject(e)) 
+    .catch(e => reject(e))
   });
 }
 
 function process_waitForWorkflowStart() {
   return new Promise(function(resolve, reject) {
-    
+
     console.log(chalk.blue(scriptName, `Waiting for workflow to start...`));
-    
+
     powertools.poll(async (i) => {
       console.log(chalk.yellow(scriptName, `Waiting for workflow to start - ${getElapsed()}`));
       await octokit.rest.actions.listWorkflowRuns({
@@ -160,16 +161,16 @@ function process_waitForWorkflowStart() {
     .then(r => {
       console.log(chalk.green(scriptName, `Workflow ${activeRun.id} started: created=${activeRun.created_at}, status=${activeRun.status}, conclusion=${activeRun.conclusion}`));
       resolve(r)
-    }) 
-    .catch(e => reject(new Error(`Workflow did mot start successfully in time: ${e}`))) 
+    })
+    .catch(e => reject(new Error(`Workflow did mot start successfully in time: ${e}`)))
   });
 }
 
 function process_waitForWorkflowComplete() {
   return new Promise(function(resolve, reject) {
-    
+
     console.log(chalk.blue(scriptName, `Waiting for workflow to finish...`));
-    
+
     powertools.poll(async (i) => {
       let done = false;
       console.log(chalk.yellow(scriptName, `Waiting for workflow to finish - ${getElapsed()}`));
@@ -193,7 +194,7 @@ function process_waitForWorkflowComplete() {
     }, {interval: 30000, timeout: 0})
     .then(r => {
       return resolve(activeRun)
-    }) 
+    })
     .catch(e => reject(new Error(`Workflow did mot finish successfully in time: ${e}`)) )
   });
 }
@@ -201,7 +202,7 @@ function process_waitForWorkflowComplete() {
 function process_waitForCIServerComplete() {
   return new Promise(function(resolve, reject) {
     let caughtError;
-    
+
     console.log(chalk.blue(scriptName, `Waiting for CI server to finish...`));
 
     powertools.poll(async (i) => {
@@ -221,7 +222,7 @@ function process_waitForCIServerComplete() {
           payload: {
             path: `ci-builds/${activeRun.id}`,
           }
-        }    
+        }
       })
       .then(response => {
         const status = get(response, 'status');
@@ -256,7 +257,7 @@ function process_waitForCIServerComplete() {
       })
       .catch(e => {
         console.warn(chalk.red(scriptName, `Failed to fetch CI status: ${e.message}`));
-      })  
+      })
       return done;
     }, {interval: 30000, timeout: 1000 * 60 * 30})
     .then(r => {
@@ -265,7 +266,7 @@ function process_waitForCIServerComplete() {
     .catch(e => {
       reject(new Error(`CI server did mot finish successfully in time: ${e}`))
     })
-    
+
   });
 }
 
@@ -319,7 +320,7 @@ function process_retriggerCIServer(id) {
             }
           }
         }
-      }    
+      }
     })
     .then(async r => {
       console.log(chalk.green(scriptName, `Successfully retriggerred CI Server Build: ${activeRun.id}`));
@@ -329,7 +330,7 @@ function process_retriggerCIServer(id) {
 
       resolve(r)
     })
-    .catch(e => reject(e))  
+    .catch(e => reject(e))
 
   });
 }
@@ -352,7 +353,7 @@ function asyncCommand(command) {
           return resolve(stdout);
         }
       }
-    );       
+    );
   });
 }
 

@@ -16,6 +16,8 @@ const octokit = new Octokit({
 
 const scriptName = '[build-prepare.js]';
 
+const codeSignDir = path.join(process.env.HOME, 'Developer/Code-Signing');
+
 // const XMLParser = new (require('fast-xml-parser').XMLParser)
 const demandedPackages = [
   {
@@ -266,6 +268,17 @@ async function process_generateIcons(options) {
 
 async function process_checkAppleFiles(options) {
   console.log(chalk.blue(scriptName, `Checking required Apple files...`));
+
+  // Copy Profile to the build folder if it exists
+  const profilePath = path.join(codeSignDir, `Profiles/${options.package.productName.replace(/ /g, '_')}.provisionprofile`);
+  const profileExists = jetpack.exists(profilePath);
+  const profilePathNew = path.join(process.cwd(), 'build/embedded.provisionprofile')
+  if (profileExists) {
+    console.log(chalk.blue(scriptName, `Copying Provision Profile from ${profilePath} to ${profilePathNew}`));
+    jetpack.copy(profilePath, profilePathNew, { overwrite: true });
+  }
+
+  // Loop through each required file
   requiredAppleFiles
   .forEach(file => {
     const fullPath = path.join(process.cwd(), 'build', file.name);
@@ -354,7 +367,11 @@ function process_updateRepoSecrets() {
       console.log(chalk.blue(scriptName, `Encrypting ${secret}...`));
 
       // Read
-      const value = jetpack.read(path.join(process.env.HOME, `Developer/Code-Signing/Secrets/${secret}.txt`)).trim();
+      const value = jetpack.read(path.join(codeSignDir, `Secrets/${secret}.txt`)).trim();
+
+      if (!value) {
+        return reject(new Error(`Missing secret ${secret}`))
+      }
 
       // Convert the message and key to Uint8Array's (Buffer implements that interface)
       const messageBytes = Buffer.from(value);

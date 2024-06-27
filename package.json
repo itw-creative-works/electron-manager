@@ -1,6 +1,6 @@
 {
   "name": "electron-manager",
-  "version": "0.0.249",
+  "version": "0.0.250",
   "description": "An NPM module with tools, helper functions, and utilities for building a flawless Electron app 🚀",
   "main": "dist/index.js",
   "bin": {
@@ -68,7 +68,7 @@
     "macaddress": "0.5.3",
     "mime-types": "2.1.35",
     "moment": "2.29.4",
-    "node-powertools": "^1.4.4",
+    "node-powertools": "^1.4.5",
     "original-fs": "1.2.0",
     "promo-server": "^1.0.3",
     "puppeteer": "20.8.0",
