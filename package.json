@@ -1,6 +1,6 @@
 {
   "name": "electron-manager",
-  "version": "0.0.250",
+  "version": "0.0.251",
   "description": "An NPM module with tools, helper functions, and utilities for building a flawless Electron app 🚀",
   "main": "dist/index.js",
   "bin": {
@@ -86,8 +86,8 @@
     "prepare-package": "^1.1.12"
   },
   "peerDependencies": {
-    "@electron/notarize": "^2.1.0",
-    "@electron/remote": "^2.0.10",
+    "@electron/notarize": "^2.3.2",
+    "@electron/remote": "^2.1.2",
     "electron-builder": "23.3.3",
     "electron-notarize-dmg": "^1.0.0",
     "electron-updater": "5.2.1"
