@@ -1,6 +1,5 @@
 const path = require('path')
 const { notarize } = require(path.resolve(process.cwd(), 'node_modules', 'electron-notarize-dmg'));
-// const Manager = new (require('electron-manager'))();
 const Manager = new (require(path.resolve(process.cwd(), 'node_modules', 'electron-manager')))();
 const chalk = Manager.require('chalk');
 const scriptName = '[afterAllArtifactBuild.js]';
@@ -36,7 +35,7 @@ exports.default = async function (context) {
 
 function error(e) {
   console.log(chalk.red(scriptName, `${e.message}`));
-  
+
   setTimeout(() => { process.exit(1); }, 1);
 
   throw new Error(e)
