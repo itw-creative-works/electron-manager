@@ -7,6 +7,7 @@ const scriptName = '[afterAllArtifactBuild.js]';
 exports.default = async function (context) {
   const appBundleId = context.configuration.appId;
   const dmgPath = context.artifactPaths.find(p => p.endsWith('.dmg'));
+  const notarizationMethod = process.env.APPLE_NOTARIZATION_METHOD ? process.env.APPLE_NOTARIZATION_METHOD : 'legacy';
 
   if (!dmgPath) {
     return console.log(chalk.blue(scriptName, `No notarization/signing is necessary for non .dmg files.`));
@@ -16,12 +17,7 @@ exports.default = async function (context) {
     return console.log(chalk.blue(scriptName, `Skipping notarization/signing because this is not a publish.`));
   }
 
-  // TEMP TRY THIS (JUn 27, 2025)
-  if (true)  {
-    return console.log(chalk.blue(scriptName, `Skipping notarization/signing because not sure if this is necessary.`));
-  }
-
-  console.log(chalk.blue(scriptName, `Notarizing:`), {appBundleId: appBundleId, dmgPath: dmgPath});
+  console.log(chalk.blue(scriptName, `Notarizing:`), {notarizationMethod: notarizationMethod, appBundleId: appBundleId, dmgPath: dmgPath});
 
   await notarize({
     // tool: notarizationMethod,
