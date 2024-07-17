@@ -1,6 +1,6 @@
 {
   "name": "electron-manager",
-  "version": "0.0.256",
+  "version": "0.0.257",
   "description": "An NPM module with tools, helper functions, and utilities for building a flawless Electron app 🚀",
   "main": "dist/index.js",
   "bin": {
@@ -38,8 +38,9 @@
       "electron-builder": "22.11.3: because higher versions require node version or something. CHANGED TO 23.3.3 for my M1 mac w/ CI BUILDS!",
       "electron-updater": "^4.6.5: Because IDK. CHANGED to 5.2.1 for my M1 mac w/ CI BUILDS!",
       "electron": "0.0.0: Because including it AT ALL in peerDependencies causes issues.",
-      "puppeteer": "20.8.0: removed this on JUl 14, 2024 (not sure why it was here)",
-      "firebase": "9.23.0"
+      "puppeteer": "20.8.0: removed this on Jul 14 2024 (not sure why it was here)",
+      "electron-notarize-dmg": "^1.0.0: disabled Jun 27 2024, this because i dont think its necessary anymore",
+      "firebase": "9.23.0: Tried to update to 9.23.0 Jul 17 2024 but it broke the app (compat requires not working). Reverted to 8.10.1"
     }
   },
   "preparePackage": {
@@ -89,7 +90,6 @@
     "@electron/notarize": "2.3.2",
     "@electron/remote": "2.1.2",
     "electron-builder": "23.3.3",
-    "electron-notarize-dmg": "^1.0.0",
     "electron-updater": "5.2.1",
     "firebase": "8.10.1"
   }

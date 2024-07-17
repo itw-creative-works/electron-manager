@@ -1,5 +1,6 @@
-const path = require('path')
-const { notarize } = require(path.resolve(process.cwd(), 'node_modules', 'electron-notarize-dmg'));
+const path = require('path');
+// TEST: Disabled this (Jun 27, 2024)
+// const { notarize } = require(path.resolve(process.cwd(), 'node_modules', 'electron-notarize-dmg'));
 const Manager = new (require(path.resolve(process.cwd(), 'node_modules', 'electron-manager')))();
 const chalk = Manager.require('chalk');
 const scriptName = '[afterAllArtifactBuild.js]';
@@ -16,7 +17,7 @@ exports.default = async function (context) {
     return console.log(chalk.blue(scriptName, `Skipping notarization/signing because this is not a publish.`));
   }
 
-  // TEMP TRY THIS (JUn 27, 2025)
+  // TEST: Disabled this (Jun 27, 2024)
   if (true)  {
     return console.log(chalk.blue(scriptName, `Skipping notarization/signing because not sure if this is necessary.`));
   }
