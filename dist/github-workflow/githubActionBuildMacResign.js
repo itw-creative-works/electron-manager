@@ -3,6 +3,7 @@ const Manager = new (require(path.resolve(process.cwd(), 'node_modules', 'electr
 const chalk = Manager.require('chalk');
 const fetch = Manager.require('wonderful-fetch')
 const jetpack = Manager.require('fs-jetpack');
+const JSON5 = require('json5');
 const {get, set} = Manager.require('lodash');
 const { Octokit } = Manager.require('@octokit/rest');
 const octokit = new Octokit({
@@ -12,7 +13,7 @@ const octokit = new Octokit({
 const { exec } = require('child_process');
 
 const packageJSON = require(path.join(process.cwd(), 'package.json'));
-const electronManagerConfig = require(path.join(process.cwd(), 'electron-manager/config.json'));
+const electronManagerConfig = loadJSON5(path.join(process.cwd(), 'electron-manager', 'config.json'));
 const scriptName = '[githubActionBuildMacResign.js]';
 
 // @universal
@@ -26,18 +27,18 @@ exports.default = async function () {
   let caughtError;
 
   console.log(chalk.green(`\n*-*-*- MAS re-sign: Starting for ${packageJSON.productName} v${packageJSON.version} -*-*-*`));
-  
+
   // Make sure MAS is enabled
   if (jetpack.exists(masAppPath)) {
     // Re-sign MAS
     await process_resignAndPackage()
     .catch(e => caughtError = e)
-    if (caughtError) { return error(caughtError) }  
+    if (caughtError) { return error(caughtError) }
 
     // Upload MAS
     await process_uploadToMAS()
     .catch(e => caughtError = e)
-    if (caughtError) { return error(caughtError) }      
+    if (caughtError) { return error(caughtError) }
   } else {
     console.log(chalk.yellow(`Skipping because MAS doesn't exist: ${masAppPath}`));
   }
@@ -61,7 +62,7 @@ function asyncCommand(command) {
           return resolve(stdout);
         }
       }
-    );       
+    );
   });
 }
 
@@ -69,7 +70,7 @@ function asyncCommand(command) {
 function process_resignAndPackage() {
   return new Promise(async function(resolve, reject) {
       const resignScript = (jetpack.read(resignScriptPath) || '').split('\n')
-      
+
       console.log(chalk.blue(scriptName, `Re-signing and packaging: ${masPkgPath}...`));
 
       // Run re-signing commands
@@ -89,11 +90,11 @@ function process_resignAndPackage() {
           .replace(/{childPlist}/ig, 'build/entitlements.mas.inherit.plist')
           .replace(/{loginHelperPlist}/ig, 'build/entitlements.mas.loginhelper.plist')
           .replace(/{frameworksPath}/ig, `${masAppPath}/Contents/Frameworks`)
-          
+
         if (!command || command.startsWith('#')) { continue }
-        
+
         console.log(chalk.blue(scriptName, `Running command: ${command}`));
-        
+
         const commandResult = await asyncCommand(command).catch(e => e)
         if (commandResult instanceof Error) {
           return reject(commandResult);
@@ -122,9 +123,14 @@ function process_uploadToMAS() {
       console.log(chalk.red(scriptName, `Successfully uploaded MAS`));
       return resolve(r)
     })
-    .catch(e => reject(e))    
+    .catch(e => reject(e))
 
   });
+}
+
+// Load JSON5 file
+function loadJSON5(path) {
+  return JSON5.parse(jetpack.read(path));
 }
 
 // Log error

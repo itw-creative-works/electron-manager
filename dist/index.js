@@ -5,9 +5,10 @@ const { get, set, merge, throttle, isEqual } = require('lodash');
 const path = require('path');
 let child_process;
 let jetpack;
+let JSON5;
 let moment;
 let powertools;
-let customFetch;
+let wonderfulFetch;
 let tools;
 let hash;
 // let Sentry = {
@@ -94,18 +95,28 @@ ElectronManager.prototype.init = function (options) {
     self._internal = {}
     self._handlers = {}
 
+    // Mark performance
     self.performance.mark('manager_initialize_setState');
 
     if (self.process === 'main') {
+      // Start hidden on macOS
       if (process.platform === 'darwin') {
         self.libraries.electron.app.hide();
         self.libraries.electron.app.dock.hide();
       }
 
+      // Set app path
       self.appPath = self.libraries.electron.app.getAppPath();
+
+      // Set development mode
       self.isDevelopment = !self.libraries.electron.app.isPackaged;
 
+      // Set userData path
+      if (self.isDevelopment) {
+        self.libraries.electron.app.setPath('userData', `${self.libraries.electron.app.getPath('userData')} (Development)`);
+      }
     } else {
+      // Get initial data
       await self.libraries.electron.ipcRenderer.invoke('electron-manager-message', {command: 'renderer:get-initial-data'})
       .then(r => {
         self.appPath = r.appPath;
@@ -113,10 +124,14 @@ ElectronManager.prototype.init = function (options) {
       })
     }
 
+    // Mark performance
     self.performance.mark('manager_initialize_configureInstance');
 
-    const electronManagerOptions = require(path.join(self.appPath, 'electron-manager', 'config.json'));
+    // Set package.json
     self.package = require(path.join(self.appPath, 'package.json'));
+
+    // Set libraries
+    const electronManagerOptions = loadJSON5(path.join(self.appPath, 'electron-manager', 'config.json'));
     const defaultOps = {
       app: {
         id: self.package.name,
@@ -124,26 +139,30 @@ ElectronManager.prototype.init = function (options) {
         homepage: self.package.homepage,
       }
     }
-    // package.json
-    // console.log('---electronManagerOptions', electronManagerOptions);
 
+    // Set options
     self.options = merge(defaultOps, electronManagerOptions, self.options);
 
+    // Set libraries
     self.options.config = self.options.config || {};
 
+    // Set app options
     self.options.app = self.options.app || {};
     self.options.app.name = self.options.app.name || '';
     self.options.app.id = self.options.app.id || self.options.app.name.toLowerCase().replace(/\s/g, '-') || '';
 
+    // Set log options
     self.options.log = typeof self.options.log === 'undefined' ? self.isDevelopment : self.options.log;
     // if (self.options.log === 'isDevelopment') {
     //   self.options.log = self.isDevelopment;
     // }
 
+    // If log is enabled, log the options
     if (self.options.log) {
       // console.log('electron-manager options', self.options);
     }
 
+    // Set storage
     self.storage = {};
     self._sentryConfig = {};
 
@@ -157,11 +176,24 @@ ElectronManager.prototype.init = function (options) {
 
     // Set up sentry
     if (self.libraries.sentry !== false) {
-      // self.libraries.sentry = self.libraries.sentry || require(path.resolve(self.cwdModules, '@sentry/electron')) || require('@sentry/electron');
-      self.libraries.sentry = self.libraries.sentry || require('@sentry/electron');
-      // self.performance.mark('manager_initialize_setupSentry2');
+
+      // Require sentry
+      if (!self.libraries.sentry) {
+        if (self.process === 'main') {
+          self.libraries.sentry = require('@sentry/electron/main');
+        } else {
+          self.libraries.sentry = require('@sentry/electron/renderer');
+        }
+      }
+
+      // Setup sentry config
       self._sentryConfig = {
         dsn: self.options.config.sentry.dsn,
+        release: `${self.options.app.id}@${self.package.version}`,
+        // environment: self.isDevelopment ? 'development' : 'production',
+        replaysSessionSampleRate: self.options.config.sentry.replaysSessionSampleRate || 0.01,
+        replaysOnErrorSampleRate: self.options.config.sentry.replaysOnErrorSampleRate || 0.01,
+        integrations: [],
         async beforeSend(event, hint) {
           let storage = {};
           let processedError = {message: '', stack: '', combo: '|||'};
@@ -171,17 +203,23 @@ ElectronManager.prototype.init = function (options) {
 
           }
 
+          // Require sentry processor
           SentryProcessor = SentryProcessor || require('./libraries/sentry-processor.js');
 
+          // Require sentry filter
           try {
             SentryFilter = SentryFilter || require(path.resolve(self.appPath, 'electron-manager', 'sentry-filter.js'))
           } catch (e) {
           }
 
+          // Extract error
           processedError = await SentryProcessor.extractError(event, hint);
 
+          // Get usage
+          const usage = self.usage().calculate({round: true, number: false})
+
+          // Set tags
           event.tags = event.tags || {};
-          // event.tags['process'] = event.tags['process'] || 'main';
           if (!event.tags['process.type']) {
             if (self.process === 'main') {
               event.tags['process.type'] = 'main'
@@ -189,19 +227,19 @@ ElectronManager.prototype.init = function (options) {
               event.tags['process.type'] = self.process;
             }
           }
-
-          const usage = self.usage().calculate({round: true, number: false})
-
           event.tags['usage.total.opens'] = parseInt(usage.total.opens);
           event.tags['usage.total.hours'] = usage.total.hours;
           event.tags['usage.session.hours'] = usage.session.hours;
           event.tags['store'] = self.properties().isStore();
+
+          // Set user
           event.user = event.user || {};
           event.user.email = get(storage, 'user.auth.email', '');
           event.user.id = get(storage, 'user.auth.uid', '') || get(storage, 'uuid', '');
           // event.user.ip = get(storage, 'meta.ip', '');
 
           try {
+            // Block event if filtered
             if (!SentryProcessor.filter(processedError) || (SentryFilter && !SentryFilter(processedError, event, self))) {
               if (self.isDevelopment) {
                 console.error('Sentry caught a filtered error:', processedError, event.tags);
@@ -211,19 +249,24 @@ ElectronManager.prototype.init = function (options) {
               SentryProcessor.log(processedError, event);
             }
 
+            // Block event if in development and not enabled
             if (self.isDevelopment) {
               console.error('Sentry caught an error:', processedError, event.tags);
+
+              // Block event if not enabled
               if (get(storage, 'argv', {}).enableLiveSentry !== 'true') {
                 return null;
               }
             }
-            return event;
 
+            // Send event
+            return event;
           } catch (e) {
-            const error = new Error(`Sentry failed to process error: ${e}`);
-            console.error(error);
-            self.libraries.sentry.captureException(error)
-            // SentryProcessor.log(processedError, event);
+            setTimeout(function () {
+              self.libraries.sentry.captureException(new Error(`Sentry failed to process error: ${e}`));
+            }, 1000);
+
+            // Block event
             return null;
           }
         }
@@ -231,42 +274,57 @@ ElectronManager.prototype.init = function (options) {
         //   return null;
         // }
       }
-      // self.performance.mark('manager_initialize_setupSentry3');
 
-      if (self.process === 'main') {
-        self._sentryConfig.release = `${self.options.app.name}@${self.libraries.electron.app.getVersion()}`;
-      } else {
-        if (self.isDevelopment) {
-          self._sentryConfig.integrations = function (integrations) {
-            return integrations.filter(function (integration) {
-              return integration.name !== 'Breadcrumbs';
-            });
-          }
-        }
+      // Add renderer integrations
+      if (self.process !== 'main') {
+        // Add integration: browser tracing
+        self._sentryConfig.integrations.push(self.libraries.sentry.browserTracingIntegration());
+
+        // Add integration: replay
+        self._sentryConfig.integrations.push(self.libraries.sentry.replayIntegration({
+          maskAllText: false,
+          blockAllMedia: false,
+        }));
       }
-      // self.performance.mark('manager_initialize_setupSentry4');
 
+      // Add breadcrumb filter
+      // self._sentryConfig.integrations = function (integrations) {
+      //   return integrations.filter(function (integration) {
+      //     return integration.name !== 'Breadcrumbs';
+      //   });
+      // }
+      // self._sentryConfig.integrations.push();
+
+      // Setup integrations
+      // if (self.process === 'main') {
+      //   self._sentryConfig.release = `${self.options.app.name}@${self.libraries.electron.app.getVersion()}`;
+      // } else {
+      //   if (self.isDevelopment) {
+      //     self._sentryConfig.integrations = function (integrations) {
+      //       return integrations.filter(function (integration) {
+      //         return integration.name !== 'Breadcrumbs';
+      //       });
+      //     }
+      //   }
+      // }
+
+      // Check for DSN
+      if (!self._sentryConfig.dsn) {
+        console.warn('Sentry DSN not set. Sentry will not be initialized.');
+      }
+
+      // Initialize sentry
       self.libraries.sentry.init(self._sentryConfig);
-      // self.performance.mark('manager_initialize_setupSentry5');
+
+      // Unregister error catcher
       self._errorCatcher.unregister();
-      // self.performance.mark('manager_initialize_setupSentry6');
-
-      // console.log('---self.libraries.sentry', self.libraries.sentry);
-
-      // const penis = setInterval(function () {
-      //   console.log('+++++++SENDING ERROR');
-      //   testError()
-      //   // Promise.reject(new Error('asd'))
-      // }, 1000);
-      // setTimeout(function () {
-      //   clearInterval(penis);
-      //   self._errorCatcher.unregister();
-      // }, 3010);
     }
 
-    // setTimeout(function () { testError(); }, 1000);
+    // Mark performance
     self.performance.mark('manager_initialize_setupHelperFunctions');
 
+    // Setup helper functions
+    // Setup helper function: openStorage
     self._openStorage = function () {
       self.libraries.electronStore = self.libraries.electronStore || require('electron-store');
       self.storage.electronManager = new self.libraries.electronStore({
@@ -278,6 +336,7 @@ ElectronManager.prototype.init = function (options) {
       }
     }
 
+    // Setup helper function: addLogData
     self._addLogData = function (args) {
       // const args = arguments;
       const now = new Date();
@@ -287,8 +346,11 @@ ElectronManager.prototype.init = function (options) {
       return args;
     }
 
+    // ALL: 'all'
     // require('./libraries/_all.js')({self: self})
-    // MAIN
+
+
+    // MAIN: 'main'
     if (self.process === 'main') {
       const main = new (require('./libraries/_main.js'))
 
@@ -296,7 +358,7 @@ ElectronManager.prototype.init = function (options) {
 
       return resolve(self);
 
-    // RENDERER 'renderer'
+    // RENDERER: 'renderer'
     } else {
       self.performance.mark('manager_initialize_renderer_start');
 
@@ -337,7 +399,6 @@ ElectronManager.prototype.init = function (options) {
       } else {
         self.log = function () {}
       }
-
 
       self.performance.mark('manager_initialize_renderer_openStorage');
 
@@ -394,7 +455,7 @@ ElectronManager.prototype.init = function (options) {
       if (self.mainRenderer === true) {
         self.performance.mark('manager_initialize_renderer_main_start');
 
-        customFetch = require('wonderful-fetch');
+        wonderfulFetch = require('wonderful-fetch');
 
         await self.libraries.electron.ipcRenderer.invoke('electron-manager-message', {command: 'renderer:register'})
 
@@ -426,7 +487,7 @@ ElectronManager.prototype.init = function (options) {
           }
         }
 
-
+        // Setup auth change handler
         self._internal.authChangeHandler = function (account, info) {
           if (self.resolveDeveloper()) {
             window.Manager = self;
@@ -435,6 +496,8 @@ ElectronManager.prototype.init = function (options) {
           }
           self.libraries.electron.ipcRenderer.invoke('electron-manager-message', {command: 'main:rebuild-menus'})
         }
+
+        // Setup webManager or base analytics
         if (self.libraries.webManager !== false) {
           self.libraries.webManager = new (require('./libraries/web-manager.js'))(self);
           self.libraries.webManager = await self.libraries.webManager.init({
@@ -445,7 +508,6 @@ ElectronManager.prototype.init = function (options) {
               },
             },
           });
-
         } else {
           self.analytics();
           self._internal.authChangeHandler();
@@ -469,7 +531,7 @@ ElectronManager.prototype.init = function (options) {
             self.fetchedMainResource = false;
             self.isUsingValidVersion = null;
 
-            customFetch(url, {timeout: 30000, response: 'json', tries: 3, log: false})
+            wonderfulFetch(url, {timeout: 30000, response: 'json', tries: 3, log: false})
               .then(r => {
                 self.fetchedMainResource = true;
                 self.storage.electronManager.set('data.current.resources.main', r);
@@ -507,7 +569,7 @@ ElectronManager.prototype.init = function (options) {
               }, delay);
             }
 
-            customFetch(url, {timeout: 30000, response: 'text', tries: 0, log: false})
+            wonderfulFetch(url, {timeout: 30000, response: 'text', tries: 0, log: false})
               .then(async (r) => {
                 let error;
                 let emergencyScript = tools.requireFromString(r, path.join(self.appPath, name), {disableSensitiveVariables: false, disableSensitiveModules: false});
@@ -552,7 +614,7 @@ ElectronManager.prototype.init = function (options) {
             self.fetchedHashes = false;
             self.isUsingValidHashes = null;
 
-            customFetch(url, {timeout: 30000, response: 'json', tries: 0, log: false})
+            wonderfulFetch(url, {timeout: 30000, response: 'json', tries: 0, log: false})
               .then(async (hashesRemote) => {
                 hash = hash || require('./libraries/hash.js');
                 const emHashConfig = get(self.options, 'build.hash', {});
@@ -758,15 +820,17 @@ ElectronManager.prototype.analytics = function (options) {
   // config = config || {}; // saved for later in case need to actually set things in analytics
   options = options || {};
 
+  // Setup analytics
   if (self.libraries.analytics !== false) {
     if (!self.libraries.analytics || options.initialize) {
       self.libraries.analytics = new (require('./libraries/analytics.js'))(self);
-      self.libraries.analytics = self.libraries.analytics.init(get(self.options, 'config.analytics', {}));
+      self.libraries.analytics = self.libraries.analytics.init();
     }
   }
+
+  // Return the library
   return self.libraries.analytics;
 }
-
 
 // ElectronManager.prototype.global = function () {
 //   const self = this;
@@ -1112,6 +1176,13 @@ function executeFile(path, parameters) {
       }
     });
   });
+}
+
+function loadJSON5(path) {
+  JSON5 = JSON5 || require('json5');
+  jetpack = jetpack || require('fs-jetpack');
+
+  return JSON5.parse(jetpack.read(path));
 }
 
 /*

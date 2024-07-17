@@ -47,6 +47,7 @@ Tray.prototype.init = function (options) {
     const fileWin = jetpack.list(buildPath).find(file => file.includes('.ico'));
     const fileLinux = jetpack.list(buildPath).find(file => file.includes('.png') && !file.includes('Template'));
 
+    // Wait for the app to be ready
     app.whenReady().then(() => {
       // if (self.instance) {
       //   self.instance.destroy()
@@ -64,6 +65,7 @@ Tray.prototype.init = function (options) {
         }
       };
 
+      // Set the tray instance depending on the status and platform
       if (self.initialized) {
         self.instance.removeAllListeners();
       } else {
@@ -76,8 +78,10 @@ Tray.prototype.init = function (options) {
         }
       }
 
+      // Generate default
       self.generateDefault();
 
+      // Generate from template
       try {
         self.generate = require(path.join(appPath, 'electron-manager', 'tray-menu.js'));
         self.generate(self);
@@ -86,14 +90,19 @@ Tray.prototype.init = function (options) {
         console.error('Failed to build from template', e);
       }
 
+      // Dedupe the menu
       self.dedupe();
 
+      // Set the context menu
       self.contextMenu = Menu.buildFromTemplate(self.menuTemplate);
 
+      // Set the tooltip
       self.instance.setToolTip(Manager.options.app.name);
+
+      // Set the title
       // self.instance.setTitle(Manager.options.app.name);
 
-      // console.log('----HERE');
+      // Handle the click event
       self.instance.on('click', function (event, bounds, position) {
         // console.log('----click');
         if (self._internal.handlers.onClick(...arguments) === false) {
@@ -110,29 +119,37 @@ Tray.prototype.init = function (options) {
         }
       })
 
+      // Handle the right-click event
       self.instance.on('right-click', function (event, bounds) {
         if (self._internal.handlers.onRightClick(...arguments) === false) {
           return
         };
       })
 
+      // Handle the double-click event
       self.instance.on('double-click', function (event, bounds) {
         if (self._internal.handlers.onDoubleClick(...arguments) === false) {
           return
         };
       })
 
+      // Handle the show event
       self.contextMenu.on('menu-will-show', function (event) {
-        Manager.analytics().event({category: self.analyticsCategory, action: 'open'})
+        Manager.analytics().event(`${self.analyticsCategory}_open`);
       })
 
+      // Handle the close event
       self.contextMenu.on('menu-will-close', function (event) {
-        Manager.analytics().event({category: self.analyticsCategory, action: 'close'})
+        Manager.analytics().event(`${self.analyticsCategory}_close`);
       })
 
+      // Open the context menu
       self.instance.setContextMenu(self.contextMenu);
 
+      // Set initialized
       self.initialized = true;
+
+      // Resolve
       return resolve(self);
     })
   });

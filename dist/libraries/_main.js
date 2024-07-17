@@ -133,10 +133,6 @@ Main.prototype.init = async function (params) {
 
   };
 
-  if (parent.isDevelopment) {
-    app.setPath('userData', `${app.getPath('userData')} (Development)`);
-  }
-
   parent.performance.mark('manager_initialize_main_openStorage');
 
   parent._openStorage();
@@ -255,17 +251,18 @@ Main.prototype.init = async function (params) {
       // resources: 'SET BELOW'
     },
     uuid: get(newData, 'uuid', null) || uuid.v4(),
+    sessionId: uuid.v4(),
     user: AccountResolver._resolveAccount(),
   };
 
+  // Set dev config
   if (parent.isDevelopment) {
     newData.user.roles.developer = true;
     newData.argv = require('yargs').argv;
   }
 
+  // Reapply config
   parent.storage.electronManager.set('data.current', newData);
-  // console.log('---A', new Date().toISOString());
-  // console.log('---B', newData);
 
   // setInterval(function () {
   //   console.log(parent.storage.electronManager.get('data.current.meta'));
@@ -501,8 +498,6 @@ Main.prototype.init = async function (params) {
         options.preferences.minHeight = typeof options.preferences.minHeight === 'undefined' ? 342 : options.preferences.minHeight;
         // options.preferences.backgroundThrottling = typeof options.preferences.backgroundThrottling === 'undefined' ? false : options.preferences.backgroundThrottling;
 
-        options.showMiniPreloader = typeof options.showMiniPreloader === 'undefined' ? true : options.showMiniPreloader;
-
         win.main = typeof options.main === 'undefined' ? false : options.main;
         win.ready = typeof options.ready === 'undefined' ? false : options.ready;
         win.allowWindowOpens = typeof options.allowWindowOpens === 'undefined' ? !!win.main : options.allowWindowOpens;
@@ -510,6 +505,7 @@ Main.prototype.init = async function (params) {
         win.handleNeedsToBeShown = typeof options.handleNeedsToBeShown === 'undefined' ? !!win.main : options.handleNeedsToBeShown;
         win.enableRemoteModule = typeof options.enableRemoteModule === 'undefined' ? !!win.main : options.enableRemoteModule;
         win.preventDevTools = typeof options.preventDevTools === 'undefined' ? !!win.main : options.preventDevTools;
+        win.showMiniPreloader = typeof options.showMiniPreloader === 'undefined' ? !!win.main : options.showMiniPreloader;
         win.preferences = options.preferences;
 
         let failedWindowTimeout;
@@ -520,27 +516,34 @@ Main.prototype.init = async function (params) {
           failedWindowTimeout = setTimeout(function () {
             parent.log('Failed to open window in time', win.id);
 
-            if (!parent.isDevelopment) {
+            if (parent.isDevelopment) {
+              // Show window
+              win.browserWindow.show();
+              // Open devtools
+              win.browserWindow.webContents.openDevTools({ mode: 'undocked', activate: true });
+            } else {
+              // Trigger an update
               parent.libraries.updater.update();
-            }
 
-            parent.app().wasOpenedAtLogin()
-            .then(wasOpenedAtLogin => {
-              if (!wasOpenedAtLogin) {
-                parent.window().show('main');
-              }
-            })
+              // Show the window if it wasn't opened at login
+              parent.app().wasOpenedAtLogin()
+              .then(wasOpenedAtLogin => {
+                if (!wasOpenedAtLogin) {
+                  parent.window().show('main');
+                }
+              })
+            }
           }, parent.isDevelopment ? 1000 * 5 : 1000 * 30);
         }
 
-        if (parent.isDevelopment) {
-          setTimeout(function () {
-            if (!win.browserWindow.isVisible()) {
-              parent.log('EMERGENCY DEVMODE MAIN WINDOW SHOW', win.id);
-              win.browserWindow.show();
-            }
-          }, 10000);
-        }
+        // if (parent.isDevelopment) {
+        //   setTimeout(function () {
+        //     if (!win.browserWindow.isVisible()) {
+        //       parent.log('EMERGENCY DEVMODE MAIN WINDOW SHOW', win.id);
+        //       win.browserWindow.show();
+        //     }
+        //   }, 10000);
+        // }
 
         if (typeof options.showDuringPreload === 'undefined') {
           win.showDuringPreload = win.main ? !parent.initOptions.hideInitially : true;
@@ -575,7 +578,7 @@ Main.prototype.init = async function (params) {
         //   win.browserWindow.setSize(300, 300);
         // }
 
-        if (win.main && !preloaderWindow && win.showDuringPreload && options.showMiniPreloader) {
+        if (win.main && !preloaderWindow && win.showDuringPreload && win.showMiniPreloader) {
           preloaderWindow = new parent.libraries.electron.BrowserWindow({
             width: 300,
             height: 300,

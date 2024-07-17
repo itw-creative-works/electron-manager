@@ -6,6 +6,7 @@
 // https://github.com/sitepoint-editors/ginit
 
 const jetpack = require('fs-jetpack');
+const JSON5 = require('json5');
 const chalk = require('chalk');
 const _ = require('lodash');
 const path = require('path');
@@ -38,11 +39,11 @@ Main.prototype.process = async function (args) {
 
   try {
     self.proj_electronManagerConfigJSONPath = path.resolve(self.proj_path, 'electron-manager', 'config.json');
-    self.proj_electronManagerConfigJSON = require(self.proj_electronManagerConfigJSONPath);
-    self.proj_electronManagerConfigJSON.app = self.proj_electronManagerConfigJSON.app || {}
-    self.proj_electronManagerConfigJSON.app.name = self.proj_electronManagerConfigJSON.app.name || self.proj_packageJSON.productName || ''
-    self.proj_electronManagerConfigJSON.app.id = self.proj_electronManagerConfigJSON.app.id || self.proj_electronManagerConfigJSON.app.name.toLowerCase().replace(/\s/g, '-') || ''
-    self.proj_electronManagerConfigJSON.app.homepage = self.proj_electronManagerConfigJSON.app.homepage || self.proj_packageJSON.homepage || ''
+    self.proj_electronManagerConfigJSON = loadJSON5(self.proj_electronManagerConfigJSONPath);
+    self.proj_electronManagerConfigJSON.app = self.proj_electronManagerConfigJSON.app || {};
+    self.proj_electronManagerConfigJSON.app.name = self.proj_electronManagerConfigJSON.app.name || self.proj_packageJSON.productName || '';
+    self.proj_electronManagerConfigJSON.app.id = self.proj_electronManagerConfigJSON.app.id || self.proj_electronManagerConfigJSON.app.name.toLowerCase().replace(/\s/g, '-') || '';
+    self.proj_electronManagerConfigJSON.app.homepage = self.proj_electronManagerConfigJSON.app.homepage || self.proj_packageJSON.homepage || '';
   } catch (e) {
     return console.error(chalk.red(`Could not read electron-manager/config.json: ${e}`));
   }
@@ -94,7 +95,7 @@ Main.prototype.process = async function (args) {
 
   let build;
   if (self.options['build']) {
-    build = new (require('./building/build-main.js'))();  
+    build = new (require('./building/build-main.js'))();
   } else if (self.options['prepare'] || self.options['build:pre'] || self.options['build:prepare']) {
     build = new (require('./building/build-prepare.js'))();
   } else if (self.options['build:post']) {
@@ -112,10 +113,8 @@ Main.prototype.process = async function (args) {
       electronBuilder: self.proj_electronBuilderPackageJSON,
       buildFile: self.proj_buildFile,
     })
-  }  
+  }
 };
-
-module.exports = Main;
 
 async function asyncCommand(command) {
   return new Promise(function(resolve, reject) {
@@ -129,3 +128,9 @@ async function asyncCommand(command) {
     });
   });
 }
+
+function loadJSON5(path) {
+  return JSON5.parse(jetpack.read(path));
+}
+
+module.exports = Main;

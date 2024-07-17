@@ -1,4 +1,5 @@
 const jetpack = require('fs-jetpack');
+const JSON5 = require('json5');
 // const package = require('../../../../package.json');
 const path = require('path');
 const glob = require('glob');
@@ -17,7 +18,7 @@ Hash.build = function (options) {
     if (options && options.build && options.build.hash) {
       _options = options.build.hash;
     } else {
-      const electronManagerOptions = require(path.join(cwd, 'electron-manager', 'config.json'))
+      const electronManagerOptions = loadJSON5(path.join(cwd, 'electron-manager', 'config.json'))
       if (electronManagerOptions && electronManagerOptions.build && electronManagerOptions.build.hash) {
         _options = electronManagerOptions.build.hash;
       }
@@ -50,5 +51,9 @@ Hash.build = function (options) {
     })
   });
 };
+
+function loadJSON5(path) {
+  return JSON5.parse(jetpack.read(path));
+}
 
 module.exports = Hash;

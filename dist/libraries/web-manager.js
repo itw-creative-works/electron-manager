@@ -22,7 +22,8 @@ WM.prototype.init = function (options) {
       const uuidv4 = require('uuid').v4;
       const projectPackageJSON = require(path.join(Manager.appPath, 'package.json'));
       const WebManager = new (require('web-manager'));
-      const dom = WebManager.dom()
+      const WebManagerRequire = require('web-manager/lib/require.js');
+      const dom = WebManager.dom();
       const AccountResolver = new (require('web-manager/lib/account.js'))({
         utilities: {
           get: _.get,
@@ -31,36 +32,48 @@ WM.prototype.init = function (options) {
         dom: dom,
       });
 
+      // @@@TODO: FIGURE OUT HOW TO REQUIRE IT A BETTER WAY
+      // console.log(`WebManagerRequire`, WebManagerRequire)
+      // console.log(`WebManagerRequire('firebase/compat/app')`, WebManagerRequire('firebase/compat/app'))
+      // return;
+
+      // Get configuration
+      const firebase_app = options?.libraries?.firebase_app;
+      const firebase_auth = options?.libraries?.firebase_auth;
+      const firebase_firestore = options?.libraries?.firebase_firestore;
       const cacheBreaker = new Date().getTime();
+
+      // Setup configuration
       const Configuration = {
+        refreshNewVersion: {
+          enabled: false,
+        },
         libraries: {
           firebase_app: {
-            enabled: _.get(options, 'libraries.firebase_app.enabled', true),
-            load: function (m) {
-              return m.dom().loadScript({src: '../node_modules/firebase/firebase-app.js'})
-              .then(r => {
-                return m.dom().loadScript({src: '../node_modules/firebase/firebase-database.js'})
-              })
-              .catch(e => e)
+            enabled: firebase_app?.enabled || true,
+            config: firebase_app?.config || {},
+            load: async () => {
+              await dom.loadScript({src: '../node_modules/firebase/firebase-app.js'});
+              await dom.loadScript({src: '../node_modules/firebase/firebase-database.js'});
             },
-            config: _.get(options, 'libraries.firebase_app.config', {}),
           },
           firebase_auth: {
-            enabled: _.get(options, 'libraries.firebase_auth.enabled', true),
-            load: function (m) {
-              return m.dom().loadScript({src: '../node_modules/firebase/firebase-auth.js'})
+            enabled: firebase_auth?.enabled || true,
+            load: async () => {
+              await dom.loadScript({src: '../node_modules/firebase/firebase-auth.js'});
             },
           },
           firebase_firestore: {
-            enabled: _.get(options, 'libraries.firebase_firestore.enabled', true),
-            load: function (m) {
-              return m.dom().loadScript({src: '../node_modules/firebase/firebase-firestore.js'})
+            enabled: firebase_firestore?.enabled || true,
+            load: async () => {
+              await dom.loadScript({src: '../node_modules/firebase/firebase-firestore.js'});
             },
           },
           firebase_messaging: {
-            // enabled: _.get(options, 'libraries.firebase_messaging.enabled', true),
             enabled: false,
-            load: false,
+          },
+          firebase_appCheck: {
+            enabled: false,
           },
           cookieconsent: {
             enabled: false,
@@ -78,7 +91,7 @@ WM.prototype.init = function (options) {
       }
       const electronManagerConfig = Manager.storage.electronManager.get('data.config', {})
 
-      self._firebaseProjectId = _.get(options, 'libraries.firebase_app.config.projectId', '')
+      self._firebaseProjectId = options?.libraries?.firebase_app?.config?.projectId || '';
 
       self._sessionId = uuidv4();
       self._sessionListener = null;
@@ -135,7 +148,8 @@ WM.prototype.init = function (options) {
           },
           validRedirectHosts: ['itwcreativeworks.com'],
         }
-      }, function() {
+      }, function () {
+        // return console.log('++++HERE')
 
         // Auto resolve if it takes too long
         self._autoResolveTimeout = setTimeout(function () {
@@ -213,7 +227,7 @@ WM.prototype.init = function (options) {
               if (info.signInToken) {
                 url.searchParams.set('token', info.signInToken)
               }
-              
+
               url.searchParams.set('destination', originalUrl)
             } else {
               url.pathname = 'authentication-required'
@@ -230,8 +244,9 @@ WM.prototype.init = function (options) {
         async function _processResolveAccountQueue() {
           if (!self._resolveAccountLocked) {
             const firebaseUser = self._resolveAccountQueue[0].firebaseUser;
-            const firebaseUser_uid = _.get(firebaseUser, 'uid', '');
-            const firebaseUser_email = _.get(firebaseUser, 'email', '');
+            const firebaseUser_uid = firebaseUser?.uid || '';
+            const firebaseUser_email = firebaseUser?.email || '';
+
             let firebaseUser_token;
 
             self._resolveAccountLocked = true;
@@ -271,7 +286,7 @@ WM.prototype.init = function (options) {
                 command: 'special:setup-electron-manager-client',
                 payload: {
                   uid: firebaseUser_uid || Manager.storage.electronManager.get('data.current.meta.deviceId') || null,
-                  appId: _.get(Manager.options.config, 'app.id', null),
+                  appId: Manager.options.config?.app?.id || null,
                   config: electronManagerConfig,
                 }
               },
@@ -298,7 +313,7 @@ WM.prototype.init = function (options) {
 
               // Overwrite user with config
               if (Object.keys(bemResponse.config.data || {}).length > 0) {
-                _.merge(self._authUser, _.get(bemResponse, 'config.data.user', {}))
+                _.merge(self._authUser, bemResponse?.config?.data?.user || {})
                 Manager.libraries.electron.ipcRenderer.invoke('electron-manager-message', {command: 'special:alert-config', payload: bemResponse.config.data})
               }
 
@@ -308,7 +323,7 @@ WM.prototype.init = function (options) {
                 self._tempSignInToken = bemResponse.signInToken;
               }
 
-              const products = _.get(bemResponse, 'app.products', {});
+              const products = bemResponse?.app?.products || {};
 
               // Set uuid and init analytics
               Manager.storage.electronManager.set('data.current.uuid', bemResponse.uuid)
@@ -326,7 +341,7 @@ WM.prototype.init = function (options) {
 
               // Check plan against actual timeserver
               const now = new Date(bemResponse.timestamp);
-              const expires = new Date(_.get(self._authUser, 'plan.expires.timestamp', 0));
+              const expires = new Date(self._authUser?.plan?.expires?.timestamp || 0);
               const planIsExpired = now >= expires;
               if (planIsExpired) {
                 _.set(self._authUser, 'plan.id', 'basic')
@@ -338,12 +353,12 @@ WM.prototype.init = function (options) {
                 .forEach((key, i) => {
                   const product = products[key];
 
-                  if (_.get(self._authUser, 'plan.id', 'basic') === product.planId) {
+                  if ((self._authUser?.plan?.id || 'basic') === product.planId) {
                     const limits = product.limits || {};
                     // Set limits
                     Object.keys(limits)
                     .forEach((limit, i) => {
-                      const userDefinedLimit =  _.get(self._authUser, `plan.limits.${limit}`, undefined)
+                      const userDefinedLimit = self._authUser?.plan?.limits?.[limit] || undefined;
                       if (typeof userDefinedLimit === 'undefined') {
                         _.set(self._authUser, `plan.limits.${limit}`, limits[limit])
                       }
@@ -392,10 +407,10 @@ WM.prototype.init = function (options) {
               plan: self._authUser.plan.id,
               // timestamp: new Date().toISOString(),
               timestampUNIX: firebase.database.ServerValue.TIMESTAMP,
-              ip: _.get(globalMeta, 'ip', '0.0.0.0'),
-              version: _.get(globalMeta, 'version', ''),
-              deviceId: _.get(globalMeta, 'deviceId', ''),
-              platform: _.get(globalMeta, 'os.name', ''),
+              ip: globalMeta?.ip || '0.0.0.0',
+              version: globalMeta?.version || '',
+              deviceId: globalMeta?.deviceId || '',
+              platform: globalMeta?.os?.name || '',
               command: '',
               response: '',
             }
@@ -495,7 +510,7 @@ WM.prototype.init = function (options) {
                   .once('value')
                   .then(async (snap) => {
                     const connectedDevices = Object.keys(snap.val() || {}).length;
-                    const allowedDevices = _.get(self._authUser, `plan.limits.devices`, 1);
+                    const allowedDevices = self._authUser?.plan?.limits?.devices || 1;
                     self._authUserAdditionalInfo.connectedDevices = connectedDevices;
 
                     log(`Fetched devices ${connectedDevices}/${allowedDevices}`);
@@ -641,8 +656,9 @@ WM.prototype.init = function (options) {
       });
     }
 
+    // Wait for the dom to be ready
     if (
-        ['interactive', 'complete'].includes(document.readyState)
+      ['interactive', 'complete'].includes(document.readyState)
     ) {
       _ready();
     } else {
@@ -652,6 +668,5 @@ WM.prototype.init = function (options) {
     }
   });
 };
-
 
 module.exports = WM;

@@ -56,12 +56,12 @@ Menu.prototype.init = function (options) {
       // https://stackoverflow.com/questions/55009560/electron-listen-to-menu-will-show-event
       // self.instance.on('menu-will-show', (event) => {
       //   console.log('---instance show');
-      //   // Manager.analytics().event({category: self.analyticsCategory, action: 'open'})
+      //   // Manager.analytics().event(`${self.analyticsCategory}_open`);
       // })
       //
       // self.instance.on('menu-will-close', (event) => {
       //   console.log('---instance close');
-      //   // Manager.analytics().event({category: self.analyticsCategory, action: 'close'})
+      //   // Manager.analytics().event(`${self.analyticsCategory}_close`);
       // })
 
       self.initialized = true;
@@ -255,7 +255,7 @@ Menu.prototype.generateDefault = function () {
           id: 'edit/delete',
           label: '&Delete',
           role: 'delete',
-        },            
+        },
         {
           id: 'edit/select-all',
           label: 'Select &All',
@@ -314,7 +314,7 @@ Menu.prototype.generateDefault = function () {
             const mainWindow = Manager.window().get(1);
             if (mainWindow) {
               self.analytics(event);
-              
+
               mainWindow.browserWindow.setFullScreen(!mainWindow.browserWindow.isFullScreen())
             }
           }
@@ -411,7 +411,7 @@ Menu.prototype.generateDefault = function () {
 
             shell.showItemInFolder(app.getPath('exe'))
           },
-        },        
+        },
         {
           id: 'development/open-user-data',
           label: 'Open user data folder',
@@ -426,10 +426,19 @@ Menu.prototype.generateDefault = function () {
           label: 'Open logs folder',
           click: async (event) => {
             self.analytics(event);
-            
+
             shell.showItemInFolder(app.getPath('logs'))
           },
-        },        
+        },
+        // Separator
+        { type: 'separator' },
+        {
+          id: 'development/test-error',
+          label: 'Send test error',
+          click: async (event) => {
+            testError();
+          },
+        },
       ]
     },
 

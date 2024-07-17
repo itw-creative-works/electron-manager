@@ -189,7 +189,8 @@ Menu.init = function (library) {
     const self = this;
     const Manager = self.Manager;
 
-    Manager.analytics().event({category: self.analyticsCategory, action: 'choice', label: event.id})
+    // Send the event
+    Manager.analytics().event(`${self.analyticsCategory}_close`, {id: event.id});
 
     return self;
   };

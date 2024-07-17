@@ -465,9 +465,9 @@ function process_checkDependencies(options) {
         return error(new Error(`${item}: You need to install EXACTLY ${chalk.bold(`v${requestedVersion}`)} of ${chalk.bold(item)}`))
       } else {
         if (currentVersion) {
-          return warn(`${item}: ${chalk.bold(`v${currentVersion}`)} !== ${chalk.bold(`v${requestedVersion}`)}`)
+          return warn(`Checking peer dependency: ${item} ${chalk.bold(`v${currentVersion}`)} !== ${chalk.bold(`v${requestedVersion}`)}`)
         } else {
-          return warn(`${item}: ${chalk.bold('not installed')}`)
+          return warn(`Checking peer dependency: ${item} ${chalk.bold('is not installed')}`)
         }
       }
     }

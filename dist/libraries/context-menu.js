@@ -150,7 +150,7 @@ ContextMenu.prototype.generateDefault = function (payload) {
         self.webContents.pasteAndMatchStyle();
         self.analytics(event);
       }
-    },    
+    },
     {
       type: 'separator',
     },
@@ -305,18 +305,22 @@ ContextMenu.prototype.open = function (event, params) {
   //   };
   // })
 
+  // Handle the show event
   self.instance.on('menu-will-show', (event) => {
-    Manager.analytics().event({category: self.analyticsCategory, action: 'open'})
+    Manager.analytics().event(`${self.analyticsCategory}_open`);
   })
 
+  // Handle the close event
   self.instance.on('menu-will-close', (event) => {
     setTimeout(function () {
-      Manager.analytics().event({category: self.analyticsCategory, action: 'close'})
+      Manager.analytics().event(`${self.analyticsCategory}_close`);
     }, 1000);
   })
 
+  // Open the context menu
   self.instance.popup(self.webContents)
 
+  // Return the instance
   return self;
 };
 

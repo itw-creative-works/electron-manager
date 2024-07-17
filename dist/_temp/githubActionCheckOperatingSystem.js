@@ -2,6 +2,7 @@ const path = require('path')
 const Manager = new (require(path.resolve(process.cwd(), 'node_modules', 'electron-manager')))();
 const chalk = Manager.require('chalk');
 const fetch = Manager.require('wonderful-fetch')
+const JSON5 = require('json5');
 const jetpack = Manager.require('fs-jetpack');
 const {get, set} = Manager.require('lodash');
 const { Octokit } = Manager.require('@octokit/rest');
@@ -10,7 +11,7 @@ const octokit = new Octokit({
 });
 
 const packageJSON = require(path.join(process.cwd(), 'package.json'));
-const electronManagerConfig = require(path.join(process.cwd(), 'electron-manager/config.json'));
+const electronManagerConfig = loadJSON5(path.join(process.cwd(), 'electron-manager', 'config.json'));
 const scriptName = '[githubActionCheckOperatingSystem.js]';
 
 const choice = process.env.INPUT_PLATFORM;
@@ -22,7 +23,7 @@ exports.default = async function () {
   let caughtError;
 
   console.log(chalk.green(`\n*-*-*- Check Operating System: Starting for ${packageJSON.productName} v${packageJSON.version} -*-*-*`));
-  
+
   console.log(chalk.blue(scriptName, `Checking if choice matches platform: choice=${choice}, isMac=${isMac}, isWin=${isWin}, isLinux=${isLinux}`));
 
   if (
@@ -40,6 +41,10 @@ exports.default = async function () {
 // Run if called from command line
 if (require.main == module) {
   exports.default()
+}
+
+function loadJSON5(path) {
+  return JSON5.parse(jetpack.read(path));
 }
 
 function exit() {

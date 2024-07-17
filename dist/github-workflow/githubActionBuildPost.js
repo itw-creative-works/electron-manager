@@ -3,6 +3,7 @@ const Manager = new (require(path.resolve(process.cwd(), 'node_modules', 'electr
 const chalk = Manager.require('chalk');
 const fetch = Manager.require('wonderful-fetch')
 const jetpack = Manager.require('fs-jetpack');
+const JSON5 = require('json5');
 const {get, set} = Manager.require('lodash');
 const { Octokit } = Manager.require('@octokit/rest');
 const octokit = new Octokit({
@@ -10,14 +11,14 @@ const octokit = new Octokit({
 });
 
 const packageJSON = require(path.join(process.cwd(), 'package.json'));
-const electronManagerConfig = require(path.join(process.cwd(), 'electron-manager/config.json'));
+const electronManagerConfig = loadJSON5(path.join(process.cwd(), 'electron-manager', 'config.json'));
 const scriptName = '[githubActionBuildPost.js]';
 
 exports.default = async function () {
   let caughtError;
 
   console.log(chalk.green(`\n*-*-*- Post-build: Starting for ${packageJSON.productName} v${packageJSON.version} -*-*-*`));
-  
+
   // Register CI server listener
   // const serverListener = process_registerListener().catch(e => e)
 
@@ -49,7 +50,7 @@ if (require.main == module) {
 
 function process_registerListener() {
   return new Promise(function(resolve, reject) {
-    
+
   });
 }
 
@@ -82,12 +83,12 @@ function process_sendRequestToCI() {
               // mac: {
               //   complete: false,
               //   error: null,
-              // },     
+              // },
               // linux: {
               //   complete: false,
               //   error: null,
-              // },                   
-            },          
+              // },
+            },
             date: {
               timestamp: now.toISOString(),
               timestampUNIX: Math.round(now.getTime() / 1000),
@@ -95,21 +96,21 @@ function process_sendRequestToCI() {
             id: runId,
           }
         }
-      }    
+      }
     })
     .then(r => {
       console.log(chalk.green(scriptName, `Sent request to CI server`));
       return resolve(r)
     })
-    .catch(e => reject(e))    
-  });  
+    .catch(e => reject(e))
+  });
 }
 
 function process_buildHashes() {
   return new Promise(async function(resolve, reject) {
     const Hash = Manager.require(path.join(process.cwd(), 'node_modules/electron-manager/dist/libraries/hash.js'));
     const emHashConfig = get(electronManagerConfig, 'build.hash', {});
-   
+
     if (emHashConfig.repository) {
       emHashConfig.output = emHashConfig.output || 'data/resources/hashes';
       emHashConfig.output = path.join(emHashConfig.output, `${packageJSON.version}.json`)
@@ -122,8 +123,8 @@ function process_buildHashes() {
 
       const repoSplit = emHashConfig.repository.split('/');
       const owner = repoSplit[repoSplit.length - 2];
-      const repo = repoSplit[repoSplit.length - 1]; 
-      
+      const repo = repoSplit[repoSplit.length - 1];
+
       // Get and update content
       const existingSha = await octokit.rest.repos.getContent({
         owner: owner,
@@ -166,8 +167,8 @@ function process_buildHashes() {
         console.log(chalk.green(scriptName, `Saved hashes (${chalk.bold(Object.keys(hashed).length + ' files')}) to: ${emHashConfig.repository} @ ${emHashConfig.output}`));
         return resolve(r)
       })
-      .catch(e => reject(e))        
-   
+      .catch(e => reject(e))
+
 
     } else {
       console.log(chalk.yellow(scriptName, `Skipping hashes`));
@@ -175,6 +176,11 @@ function process_buildHashes() {
     }
 
   });
+}
+
+// Load JSON5 file
+function loadJSON5(path) {
+  return JSON5.parse(jetpack.read(path));
 }
 
 // Log error
