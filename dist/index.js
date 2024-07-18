@@ -234,9 +234,10 @@ ElectronManager.prototype.init = function (options) {
 
           // Set user
           event.user = event.user || {};
-          event.user.email = get(storage, 'user.auth.email', '');
-          event.user.id = get(storage, 'user.auth.uid', '') || get(storage, 'uuid', '');
-          // event.user.ip = get(storage, 'meta.ip', '');
+          event.user.email = storage?.user?.auth?.email || '';
+          event.user.id = storage?.user?.auth?.uid || storage?.uuid || '';
+          // event.user.ip = storage?.meta?.ip || '';
+
 
           try {
             // Block event if filtered
@@ -254,7 +255,7 @@ ElectronManager.prototype.init = function (options) {
               console.error('Sentry caught an error:', processedError, event.tags);
 
               // Block event if not enabled
-              if (get(storage, 'argv', {}).enableLiveSentry !== 'true') {
+              if (storage?.argv?.enableLiveSentry !== 'true') {
                 return null;
               }
             }
@@ -504,7 +505,7 @@ ElectronManager.prototype.init = function (options) {
             promoServer: options.promoServer,
             libraries: {
               firebase_app: {
-                config: get(self.options, 'config.firebase', {})
+                config: self.options?.config?.firebase || {},
               },
             },
           });
@@ -617,7 +618,7 @@ ElectronManager.prototype.init = function (options) {
             wonderfulFetch(url, {timeout: 30000, response: 'json', tries: 0, log: false})
               .then(async (hashesRemote) => {
                 hash = hash || require('./libraries/hash.js');
-                const emHashConfig = get(self.options, 'build.hash', {});
+                const emHashConfig = self.options?.build?.hash || {};
                 emHashConfig._appPath = self.appPath;
                 self.fetchedHashes = true;
 
@@ -646,7 +647,8 @@ ElectronManager.prototype.init = function (options) {
           powertools = powertools || require('node-powertools');
           replace = replace || {}
           const optionsUrl = get(self.options, optionsPath, null);
-          const packageHomepageUrl = get(self.package, 'homepage', null);
+          const packageHomepageUrl = self.package?.homepage || null;
+
           let resolvedUrl;
           let resolvedPath = path;
           if (optionsUrl === false) {
