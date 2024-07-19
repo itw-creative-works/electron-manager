@@ -650,43 +650,44 @@ ElectronManager.prototype.init = function (options) {
 
         function _resolveFetchUrl(optionsPath, path, replace) {
           powertools = powertools || require('node-powertools');
-          replace = replace || {}
-          const optionsUrl = get(self.options, optionsPath, null);
-          const packageHomepageUrl = self.package?.homepage || null;
+          replace = replace || {};
 
+          // Get URLs
+          const packageHomepageUrl = self.package?.homepage || null;
+          const optionsUrl = powertools.template(
+            get(self.options, optionsPath) || '',
+            replace,
+          )
+
+          // Resolve path
+          path = powertools.template(path, replace);
+
+          // Set resolvedUrl
           let resolvedUrl;
-          let resolvedPath = path;
+
+          // Skip if options explicitly set to false
           if (optionsUrl === false) {
             return false;
           }
 
+          // Resolve url
           if (optionsUrl) {
             resolvedUrl = new URL(optionsUrl);
-            // console.log('---resolvedUrl 1', resolvedUrl.toString());
           } else if (packageHomepageUrl) {
             resolvedUrl = new URL(packageHomepageUrl);
-            // console.log('---resolvedUrl 1', resolvedUrl.toString());
-            resolvedUrl.host = `app.${resolvedUrl.host}`
+            resolvedUrl.pathname = path;
           } else {
             throw new Error('No useable domain')
           }
 
+          // Use development urls IF development mode is enabled
           if (self.isDevelopment && self.storage.electronManager.get('data.current.argv', {}).useDevelopmentURLs !== 'false') {
             resolvedUrl.protocol = 'http:'
             resolvedUrl.host = 'localhost:4000'
           }
 
-          resolvedUrl.pathname = resolvedUrl.pathname === '/' ? path : resolvedUrl.pathname;
-
-          // console.log('---resolvedUrl 2', resolvedUrl.toString());
-          resolvedUrl = resolvedUrl.toString()
-          Object.keys(replace)
-          .forEach((key, i) => {
-            resolvedUrl = resolvedUrl.replace(powertools.regexify(`/%7B${key}%7D/ig`), replace[key])
-          });
-
-          // console.log('---resolvedUrl 3', resolvedUrl.toString());
-          return resolvedUrl;
+          // Resolve as string
+          return resolvedUrl.toString();
         }
 
 
@@ -712,9 +713,8 @@ ElectronManager.prototype.init = function (options) {
         }
 
         // check hashes
-        // @@@TODO: FIX THIS (HARDCODED)
         self.performance.mark('manager_initialize_renderer_main_checkHashes');
-        const hashUrl = _resolveFetchUrl('app.resources.hashes.main', 'data/resources/hashes/0.0.248.json', {version: self.package.version});
+        const hashUrl = _resolveFetchUrl('app.resources.hashes.main', 'data/resources/hashes/{v}.json', {v: self.package.version});
         if (options.checkHashes && hashUrl) {
           // no need to await this but call a function when done if the hashses mismatch
           self.checkHashes(hashUrl)
