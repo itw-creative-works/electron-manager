@@ -71,8 +71,10 @@ ElectronManager.prototype.init = function (options) {
       }
     }
 
+    // Mark performance
     self.performance.mark('manager_initialize_start');
 
+    // Set up error catcher
     self._errorCatcher = new (require('./libraries/error-catcher.js'))(self);
     self._errorCatcher.register();
 
@@ -98,6 +100,7 @@ ElectronManager.prototype.init = function (options) {
     // Mark performance
     self.performance.mark('manager_initialize_setState');
 
+    // Pre-handler for each process
     if (self.process === 'main') {
       // Start hidden on macOS
       if (process.platform === 'darwin') {
@@ -401,6 +404,7 @@ ElectronManager.prototype.init = function (options) {
         self.log = function () {}
       }
 
+      // Mark performance
       self.performance.mark('manager_initialize_renderer_openStorage');
 
       // require('./libraries/_renderer.js')({self: self})
@@ -420,6 +424,7 @@ ElectronManager.prototype.init = function (options) {
 
       self.libraries.electron.ipcRenderer.on('electron-manager-message', function (event, message) {
         message = message || {};
+        message.command = message.command || '';
         message.payload = message.payload || {};
 
         // console.log('-----MESSAGE', message);
@@ -707,6 +712,7 @@ ElectronManager.prototype.init = function (options) {
         }
 
         // check hashes
+        // @@@TODO: FIX THIS (HARDCODED)
         self.performance.mark('manager_initialize_renderer_main_checkHashes');
         const hashUrl = _resolveFetchUrl('app.resources.hashes.main', 'data/resources/hashes/0.0.248.json', {version: self.package.version});
         if (options.checkHashes && hashUrl) {

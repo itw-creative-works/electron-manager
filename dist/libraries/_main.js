@@ -42,9 +42,11 @@ Main.prototype.init = async function (params) {
   const { ipcMain, app } = parent.libraries.electron;
   const environment = parent.isDevelopment ? 'development' : 'production'
 
-  if (parent.isDevelopment) {
-    console.log(`\n\n\n\n\nLaunching ${app.getName()}... app=${app.getVersion()}, electron=${process.versions.electron}, node=${process.versions.node}`);
-  }
+  // Load package.json
+  const electronManagerPackage = require('../../package.json');
+
+  // Log
+  console.log(`\n\n\n\n\nLaunching ${app.getName()}: environment=${environment}, app=${app.getVersion()}, electron=${process.versions.electron}, node=${process.versions.node}, manager=${electronManagerPackage.version}`);
 
   // Set options
   options.hideInitially = typeof options.hideInitially === 'undefined' ? false : options.hideInitially;
@@ -109,29 +111,22 @@ Main.prototype.init = async function (params) {
         return true;
       }
 
-      // If no deep link, return
-      if (!parent.deeplinkingUrl) {
-        return;
-      }
+      // @@@: REMOVE
+      parent.storage.electronManager.set('data.current._test1', {
+        deeplinkingUrl: parent.deeplinkingUrl,
+      });
 
       // Convert to array if not already
       parent.deeplinkingUrl = Array.isArray(parent.deeplinkingUrl) ? parent.deeplinkingUrl : [parent.deeplinkingUrl];
 
       // Loop through all deeplinks
-      for (var i = 0, l = parent.deeplinkingUrl.length; i < l; i++) {
-        const s = parent.deeplinkingUrl[i];
-        if (s.startsWith(`${parent.options.app.id}://`) || parent._handlers.onDeepLinkFilter(s)) {
-          parent.log('onDeepLink()', s)
-          if (_internallyHandled(s)) {
-            continue
-          }
-          parent._handlers.onDeepLink(s)
-        }
-      }
-
-      // Loop through all deeplinks
       parent.deeplinkingUrl
       .forEach((url) => {
+        // If the URL is not valid, return
+        if (!url) {
+          return;
+        }
+
         // Check if its the app protocol OR if the filter allows it (allow -dev for development)
         if (
           !(url.startsWith(`${parent.options.app.id}://`) || url.startsWith(`${parent.options.app.id}-dev://`))
@@ -310,13 +305,13 @@ Main.prototype.init = async function (params) {
     uuid: get(newData, 'uuid', null) || uuid.v4(),
     sessionId: uuid.v4(),
     user: AccountResolver._resolveAccount(),
+    argv: require('yargs').argv,
     deeplink: {},
   };
 
   // Set dev config
   if (parent.isDevelopment) {
     newData.user.roles.developer = true;
-    newData.argv = require('yargs').argv;
   }
 
   // Reapply config
@@ -1138,14 +1133,18 @@ async function setupRestartManager(parent, command) {
     })
 }
 
-// @@@
 function _instanceLock(parent) {
   const app = parent.libraries.electron.app;
   const options = parent.initOptions;
 
+  // Mark performance
   parent.performance.mark('manager_initialize_main_instanceLock');
 
+  // Request single instance lock
   const isSingleInstance = app.requestSingleInstanceLock();
+
+  // Log
+  parent.log('isSingleInstance()', isSingleInstance);
 
   if (!isSingleInstance && !process.mas) {
     if (options.singleInstance) {
@@ -1157,6 +1156,10 @@ function _instanceLock(parent) {
     }
   } else {
     app.on('second-instance', (event, commandLine, workingDirectory) => {
+      // Log
+      parent.log('event:second-instance', commandLine, workingDirectory);
+
+      // Handle deep link
       if (process.platform !== 'darwin') {
         parent.deeplinkingUrl = commandLine;
       }
@@ -1167,6 +1170,7 @@ function _instanceLock(parent) {
         parent.window().show('main');
       }
 
+      // Handle second instance
       parent.secondInstanceParameters = {event: event, commandLine: commandLine, workingDirectory: workingDirectory}
       parent._handlers._onSecondInstance()
     })
@@ -1183,22 +1187,36 @@ async function _setupNonCriticalServices(parent) {
 
   parent._setupNonCriticalServicesRan = true;
 
+  // Mark performance
   parent.performance.mark('manager_initialize_main_setListeners2');
 
-  app.on('will-finish-launching', () => {
-    // Protocol handler for osx
-    app.on('open-url', (event, url) => {
-      event.preventDefault()
-      parent.deeplinkingUrl = url;
-      parent._handlers._onDeepLink()
-    })
-    app.on('open-file', (event, path) => {
-      event.preventDefault()
-      parent.deeplinkingUrl = path;
-      parent._handlers._onDeepLink()
-    })
-  })
+  // Event: open-url
+  app.on('open-url', (event, url) => {
+    // Log event
+    parent.log('event:open-url', url);
 
+    // Prevent default
+    event.preventDefault();
+    parent.deeplinkingUrl = url;
+
+    // Handle deep link
+    parent._handlers._onDeepLink();
+  });
+
+  // Event: open-file
+  app.on('open-file', (event, path) => {
+    // Log event
+    parent.log('event:open-file', path);
+
+    // Prevent default
+    event.preventDefault();
+    parent.deeplinkingUrl = path;
+
+    // Handle deep link
+    parent._handlers._onDeepLink();
+  });
+
+  // Handle deep link
   if (process.platform !== 'darwin') {
     parent.deeplinkingUrl = process.argv;
     parent._handlers._onDeepLink()
@@ -1212,13 +1230,17 @@ async function _setupNonCriticalServices(parent) {
     }
   })
 
+  // Mark performance
   parent.performance.mark('manager_initialize_main_setOpenAtLogin');
 
+  // Set open at login
   parent.app().setLoginItemSettings({openAtLogin: options.openAtLogin && !parent.isDevelopment})
     .catch(e => console.error);
 
+  // Mark performance
   parent.performance.mark('manager_initialize_main_setProtocolHandler');
 
+  // Set protocol handler
   if (options.setProtocolHandler) {
     await parent.app().setAsDefaultProtocolClient(parent.options.app.id)
     .catch(e => console.error);
@@ -1228,8 +1250,10 @@ async function _setupNonCriticalServices(parent) {
     }
   }
 
+  // Mark performance
   parent.performance.mark('manager_initialize_main_registerRestartManager');
 
+  // Register restart manager
   if (options.registerRestartManager) {
     app.whenReady().then(() => {
       parent.performance.mark('manager_initialize_main_appIsReady');
@@ -1240,6 +1264,7 @@ async function _setupNonCriticalServices(parent) {
     })
   }
 
+  // Mark performance
   parent.performance.mark('manager_initialize_main_setupAutoRestart');
 
   // Daily cron job
@@ -1247,7 +1272,11 @@ async function _setupNonCriticalServices(parent) {
     // Check if app has been open for more than X days and restart if so
     if (options.autoRestartDays > 0) {
       const days = moment().diff(moment(newData.meta.startTime), 'days', true)
-      parent.log(`Daily open check: ${days} days`);
+
+      // Log
+      parent.log(`cron(24hr): Open ${days} days`);
+
+      // Restart if needed
       if (days >= options.autoRestartDays) {
         parent.storage.electronManager.set('data.current.usage.visibilityState', 'hidden');
         parent.relaunch({force: true})
@@ -1260,18 +1289,23 @@ async function _setupNonCriticalServices(parent) {
     }
   }, 1000 * 60 * 60 * 24);
 
-  // Setup RPC
-  parent.performance.mark('manager_initialize_main_setupDiscordRPC');
-
+  // Setup Discord RPC
   parent.libraries.discordRPC = new (require('./discord-rpc.js'))(parent);
   if (options.setupDiscordRPC) {
     parent.libraries.discordRPC.init().catch(e => console.error(e));
   }
 
+  // Mark performance
+  parent.performance.mark('manager_initialize_main_setupDiscordRPC');
+
+  // Install browser extensions
   parent.libraries.installBrowserExtensions = new (require('./install-browser-extensions.js'))(parent);
   if (options.installBrowserExtensions) {
     parent.libraries.installBrowserExtensions.init().catch(e => console.error(e));
   }
+
+  // Mark performance
+  parent.performance.mark('manager_initialize_main_setupBrowserExtensions');
 
   // const mainLibrary = new (require('./libraries/analytics.js'))(parent, appPath);
   // parent.libraries.analytics = await parent.libraries.analytics.init(get(parent.options, 'config.analytics', {}));
