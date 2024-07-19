@@ -82,42 +82,99 @@ Main.prototype.init = async function (params) {
     onDeepLink: function () {},
     onDeepLinkFilter: function () {return false},
     _onDeepLink: function () {
-      function _internallyHandled(url) {
-        try {
-          url = new URL(url);
-          if (url.protocol === `${parent.options.app.id}:` && url.host === 'electron-manager') {
-            const command = url.searchParams.get('command') || '';
-            const payload = JSON.parse(url.searchParams.get('payload') || '{}');
-            if (command === 'user:authenticate') {
-              parent.sendToRegisteredRenderers(command, payload);
-              parent.window().show('main');
-            }
-            return true;
-          }
-        } catch (e) {
+      function _internallyHandled(parsed) {
+        const url = parsed.url;
+        const command = parsed.command;
+        const payload = parsed.payload;
+
+        // If the URL is not valid, return
+        if (!url) {
           return false;
+        }
+
+        // If the protocol OR host is not valid, return
+        if (url.protocol !== `${parent.options.app.id}:` || url.host !== 'electron-manager') {
+          return false;
+        }
+
+        // Process the command
+        if (command === 'user:authenticate') {
+          parent.sendToRegisteredRenderers(command, payload);
+          parent.window().show('main');
+        } else if (command === 'X') {
+          // Add more commands here
+        }
+
+        // If it's not internally handled, return since it's an electron-manager command
+        return true;
+      }
+
+      // If no deep link, return
+      if (!parent.deeplinkingUrl) {
+        return;
+      }
+
+      // Convert to array if not already
+      parent.deeplinkingUrl = Array.isArray(parent.deeplinkingUrl) ? parent.deeplinkingUrl : [parent.deeplinkingUrl];
+
+      // Loop through all deeplinks
+      for (var i = 0, l = parent.deeplinkingUrl.length; i < l; i++) {
+        const s = parent.deeplinkingUrl[i];
+        if (s.startsWith(`${parent.options.app.id}://`) || parent._handlers.onDeepLinkFilter(s)) {
+          parent.log('onDeepLink()', s)
+          if (_internallyHandled(s)) {
+            continue
+          }
+          parent._handlers.onDeepLink(s)
         }
       }
 
-      if (parent.deeplinkingUrl) {
-        if (Array.isArray(parent.deeplinkingUrl)) {
-          for (var i = 0, l = parent.deeplinkingUrl.length; i < l; i++) {
-            const s = parent.deeplinkingUrl[i];
-            if (s.startsWith(`${parent.options.app.id}://`) || parent._handlers.onDeepLinkFilter(s)) {
-              parent.log('onDeepLink()', s)
-              if (_internallyHandled(s)) {
-                continue
-              }
-              parent._handlers.onDeepLink(s)
-            }
-          }
-        } else {
-          if (_internallyHandled(parent.deeplinkingUrl)) {
-            return
-          }
-          parent._handlers.onDeepLink(parent.deeplinkingUrl)
+      // Loop through all deeplinks
+      parent.deeplinkingUrl
+      .forEach((url) => {
+        // Check if its the app protocol OR if the filter allows it (allow -dev for development)
+        if (
+          !(url.startsWith(`${parent.options.app.id}://`) || url.startsWith(`${parent.options.app.id}-dev://`))
+          && !parent._handlers.onDeepLinkFilter(url)
+        ) {
+          return;
         }
-      }
+
+        // Parse the URL
+        const parsed = {
+          url: null,
+          command: '',
+          payload: {},
+        }
+
+        // Parse the URL
+        try {
+          parsed.url = new URL(url);
+          parsed.command = parsed.url.searchParams.get('command') || '';
+          parsed.payload = JSON.parse(parsed.url.searchParams.get('payload') || '{}');
+        } catch (e) {
+          console.error('Failed to parse URL', url);
+        }
+
+        // If its internally handled, return
+        parent.log('onDeepLink()', url);
+
+        // Save the deeplink to disk
+        parent.storage.electronManager.set('data.current.deeplink', {
+          url: url,
+          command: parsed.command,
+          payload: parsed.payload
+        });
+
+        // Check if its internally handled
+        if (_internallyHandled(url, parsed)) {
+          return
+        }
+
+        // If not, send to handler
+        parent._handlers.onDeepLink(url, parsed.command, parsed.payload)
+
+      });
     },
     onSecondInstance: function () {},
     _onSecondInstance: function () {
@@ -130,7 +187,6 @@ Main.prototype.init = async function (params) {
     onLog: function () {},
     _onLogIsSet: false,
     _loggerQueue: [],
-
   };
 
   parent.performance.mark('manager_initialize_main_openStorage');
@@ -244,8 +300,9 @@ Main.prototype.init = async function (params) {
       userData: app.getPath('userData'),
       appData: app.getPath('appData'),
       downloads: app.getPath('downloads'),
-      // module: app.getPath('module'),
+      exe: app.getPath('exe'),
       temp: app.getPath('temp'),
+      // module: app.getPath('module'),
       // extensions: 'SET BELOW',
       // dependencies: 'SET BELOW',
       // resources: 'SET BELOW'
@@ -253,6 +310,7 @@ Main.prototype.init = async function (params) {
     uuid: get(newData, 'uuid', null) || uuid.v4(),
     sessionId: uuid.v4(),
     user: AccountResolver._resolveAccount(),
+    deeplink: {},
   };
 
   // Set dev config
@@ -411,7 +469,7 @@ Main.prototype.init = async function (params) {
       }, options.autoUpdateInterval);
     } else if (message.command === 'main:process-deep-link') {
       parent.deeplinkingUrl = message.payload.url;
-      parent._handlers._onDeepLink()
+      parent._handlers._onDeepLink();
     } else if (message.command === 'main:rebuild-menus') {
       if (parent.libraries.appMenu.initialized) {
         parent.libraries.appMenu.init();
