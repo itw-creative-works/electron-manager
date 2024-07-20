@@ -12,7 +12,6 @@ const _ = require('lodash');
 const path = require('path');
 const argv = require('yargs').argv;
 const powertools = require('node-powertools');
-const cp = require('child_process');
 
 function Main() {}
 
@@ -85,14 +84,18 @@ Main.prototype.process = async function (args) {
   // self.options.upload = powertools.force(typeof self.options.upload === 'undefined' ? true : self.options.upload, 'boolean');
   // self.options.release = powertools.force(typeof self.options.release === 'undefined' ? true : self.options.release, 'boolean');
 
+  // Set environment variables
   process.env.ELECTRON_MANAGER_OPTIONS = JSON.stringify(self.options);
 
+  // Log options
   console.log('Processing', self.options);
 
+  // Handle version
   if (self.options.v || self.options.version || self.options['-v'] || self.options['-version']) {
     return console.log(chalk.blue(`Electron Manager is v${chalk.bold(self.this_packageJSON.version)}`));
   }
 
+  // Determine build process
   let build;
   if (self.options['build']) {
     build = new (require('./building/build-main.js'))();
@@ -102,8 +105,9 @@ Main.prototype.process = async function (args) {
     build = new (require('./building/build-post.js'))();
   }
 
+  // Handle build process
   if (build) {
-    await build.process({
+    return await build.process({
       arguments: self.options,
       // platform: self.options.platform,
       // publish: self.options.publish,
@@ -114,20 +118,38 @@ Main.prototype.process = async function (args) {
       buildFile: self.proj_buildFile,
     })
   }
-};
 
-async function asyncCommand(command) {
-  return new Promise(function(resolve, reject) {
-    let cmd = cp.exec(command, function (error, stdout, stderr) {
-      if (error) {
-        console.error(error);
-        return reject(error);
-      } else {
-        return resolve(stdout);
-      }
+  // Handle installing dev EM
+  if (
+    (self.options['i'] || self.options['install'])
+    && (self.options['dev'] || self.options['development'] || self.options['local'])
+  ) {
+    return await powertools.execute(`npm uninstall electron-manager && npm i '/Users/ian/Developer/Repositories/ITW-Creative-Works/electron-manager'`, {log: true}).catch(e => e);
+  }
+
+  // Handle installing prod EM
+  if (
+    (self.options['i'] || self.options['install'])
+    && (self.options['prod'] || self.options['production'] || self.options['live'])
+  ) {
+    return await powertools.execute(`npm uninstall electron-manager && npm i electron-manager@latest`, {log: true}).catch(e => e);
+  }
+
+  // Handle prod:test
+  if (
+    self.options['run']
+    && (self.options['prod'] || self.options['prod:test'])
+  ) {
+    const test = new (require('./testing/production.js'))();
+
+    return await test.process({
+      package: self.proj_packageJSON,
     });
-  });
-}
+  }
+
+  // Handle unknown command
+  console.error(chalk.red('Unknown command'));
+};
 
 function loadJSON5(path) {
   return JSON5.parse(jetpack.read(path));

@@ -1144,10 +1144,14 @@ function _instanceLock(parent) {
   const isSingleInstance = app.requestSingleInstanceLock();
 
   // Log
-  parent.log('isSingleInstance()', isSingleInstance);
+  parent.log('isSingleInstance():', isSingleInstance);
 
   if (!isSingleInstance && !process.mas) {
     if (options.singleInstance) {
+      // Log
+      parent.log('isSingleInstance():', 'Second instance detected, quitting');
+
+      // Set allowQuit to true so the app can quit
       parent.allowQuit = true;
       parent.isQuitting = true;
       app.exit();

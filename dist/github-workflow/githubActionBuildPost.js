@@ -59,13 +59,13 @@ function process_sendRequestToCI() {
     const docPath = `ci-builds/${runId}`;
     const now = new Date();
 
+    // Send request to CI server
+    console.log(chalk.blue(scriptName, `Sending request to CI server (${chalk.bold(docPath)})...`));
+
     // Check if runId is valid
     if (!runId) {
       return reject(new Error('Missing GITHUB_RUN_ID'))
     }
-
-    // Send request to CI server
-    console.log(chalk.blue(scriptName, `Sending request to CI server (${chalk.bold(docPath)})...`));
 
     // Send request to CI server
     await fetch('https://us-central1-itw-creative-works.cloudfunctions.net/bm_api', {
@@ -112,6 +112,9 @@ function process_buildHashes() {
   return new Promise(async function(resolve, reject) {
     const Hash = Manager.require(path.join(process.cwd(), 'node_modules/electron-manager/dist/libraries/hash.js'));
     const emHashConfig = get(electronManagerConfig, 'build.hash', {});
+
+    // Send request to CI server
+    console.log(chalk.blue(scriptName, `Building hashes...`, emHashConfig));
 
     // Check if hashes are enabled
     if (!emHashConfig.repository) {

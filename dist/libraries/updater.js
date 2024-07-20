@@ -87,7 +87,7 @@ Updater.prototype.init = async function () {
       }
       self.sendStatus();
     })
-    
+
     self.library.on('update-downloaded', function (info) {
       self.status = {
         code: 'downloaded',
@@ -166,6 +166,7 @@ Updater.prototype.sendStatus = async function () {
   const self = this;
   const Manager = self.Manager;
 
+  // Try to set menu
   try {
     if (Manager.libraries.appMenu.initialized) {
       Manager.libraries.appMenu.init();
@@ -174,7 +175,10 @@ Updater.prototype.sendStatus = async function () {
     console.error('Failed to set new tray status', e);
   }
 
+  // Send to renderers
   Manager.sendToRegisteredRenderers('updater:status', self.status);
+
+  // Log
   Manager.log(`[Updater] status`, self.status)
 
   // self.status = {
@@ -182,16 +186,32 @@ Updater.prototype.sendStatus = async function () {
   //   error: new Error('Help error nlow lol'),
   // }
 
+  // If update was initiated by user, show dialog
   if (self.lastUpdateWasUserAction) {
     const { dialog, BrowserWindow } = Manager.libraries.electron;
     let bw;
 
+    // Get browser window
     try {
       bw = Manager.window().get('main').browserWindow || BrowserWindow.getFocusedWindow();
     } catch (e) {
       console.error('Could not get browser window');
     }
 
+    function _handleProgressBar() {
+      // Set progress
+      try {
+        const double = self.status.percent / 100;
+
+        // Set progress bar
+        // -1 disables the progress bar
+        bw.setProgressBar(double <= 0 || double >= 1 ? -1 : double);
+      } catch (e) {
+        console.error(`Failed to set progress bar`, e);
+      }
+    }
+
+    // Handle status
     if (self.status.code === 'downloading') {
       if (!self.sentInitialProgressUpdate) {
         self.sentInitialProgressUpdate = true;
@@ -201,7 +221,7 @@ Updater.prototype.sendStatus = async function () {
         })
         .then((result) => {
 
-        })        
+        })
       }
     } else if (self.status.code === 'downloaded') {
       self.lastUpdateWasUserAction = false;
@@ -249,22 +269,20 @@ Updater.prototype.sendStatus = async function () {
       self.lastUpdateWasUserAction = false;
     }
 
-    // Set progress
-    try {
-      bw.setProgressBar(self.status.percent / 100);
-    } catch (e) {
-      console.error(`Failed to set progress bar`, e);
-    }
+    // Handle progress bar
+    _handleProgressBar();
 
+  // If update was not initiated by user, relaunch automatically
   } else {
     if (self.status.code === 'downloaded') {
       clearTimeout(self.relaunchTimeout);
       self.relaunchTimeout = setTimeout(function () {
         Manager.relaunch({force: true})
-      }, 5000);       
-    }   
+      }, 5000);
+    }
   }
 
+  // Return
   return self;
 };
 
@@ -318,7 +336,7 @@ Updater.prototype._simulateDevDownload = async function () {
 
     self.library.emit('download-progress', {
       percent: Math.min(100, self.status.percent + (Math.random() * 20)),
-    })    
+    })
   }, 1000);
 
 }

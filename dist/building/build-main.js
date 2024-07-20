@@ -5,8 +5,6 @@ const { Octokit } = require('@octokit/rest');
 const moment = require('moment');
 const fetch = require('wonderful-fetch');
 
-const { exec } = require('child_process');
-
 const octokit = new Octokit({
   auth: process.env.GH_TOKEN,
 });
@@ -27,26 +25,34 @@ BuildScriptPost.prototype.process = async function (options) {
 
   console.log(chalk.green(`*-*-*- Main-build Starting for ${options.package.productName} v${options.package.version} -*-*-*`));
 
+  // Check for required environment variables
   if (!process.env.GH_TOKEN) {
     return error(new Error(`You need to set the GH_TOKEN environment variable`));
   } else if (!process.env.BACKEND_MANAGER_KEY) {
     return error(new Error(`You need to set the BACKEND_MANAGER_KEY environment variable`));
   }
 
+  // Get owner and repo
   const repoSplit = options.package.repository.split('/');
   owner = repoSplit[repoSplit.length - 2];
   repo = repoSplit[repoSplit.length - 1];
 
-  // Check to make sure everything is sync'd
-  caughtError = await process_checkUncomitted().catch(e => e)
-  if (caughtError instanceof Error) {return error(caughtError)}
-
+  // Handle options
   if (options.arguments.retrigger) {
     // Retrigger CI server if it failed
     caughtError = await process_retriggerCIServer(options.arguments.retrigger).catch(e => e)
     if (caughtError instanceof Error) {return error(caughtError)}
+  } else if (options.arguments.local) {
+    // Run local build
+    caughtError = await process_runLocalBuild().catch(e => e)
+    if (caughtError instanceof Error) {return error(caughtError)}
 
+    return await beep();
   } else {
+    // Check to make sure everything is sync'd
+    caughtError = await process_checkUncomitted().catch(e => e)
+    if (caughtError instanceof Error) {return error(caughtError)}
+
     // Start workflow
     caughtError = await process_startWorkflow().catch(e => e)
     if (caughtError instanceof Error) {return error(caughtError)}
@@ -61,7 +67,6 @@ BuildScriptPost.prototype.process = async function (options) {
     // Actually wait for workflow to finish queueing
     caughtError = await process_waitForWorkflowStart().catch(e => e)
     if (caughtError instanceof Error) {return error(caughtError)}
-
 
     // Wait for workflow to finish
     caughtError = await process_waitForWorkflowComplete().catch(e => e)
@@ -79,7 +84,8 @@ BuildScriptPost.prototype.process = async function (options) {
   caughtError = await process_waitForCIServerComplete().catch(e => e)
   if (caughtError instanceof Error) {return error(caughtError)}
 
-  await asyncCommand('echo "\\a\\a\\a"').catch(e => e)
+  // Beep
+  await beep();
 
   console.log(chalk.green(`*-*-*- Main-build Complete for ${options.package.productName} v${options.package.version} -*-*-*`));
 
@@ -97,19 +103,38 @@ function error(e) {
   throw new Error(e)
 }
 
+async function beep() {
+  await powertools.execute('echo "\\a\\a\\a"').catch(e => e)
+}
+
 
 function process_checkUncomitted() {
   return new Promise(function(resolve, reject) {
 
     console.log(chalk.blue(scriptName, `Checking for uncommitted changes...`));
 
-    asyncCommand('git status --porcelain')
-    .then(async uncommitted => {
+    powertools.execute('git status --porcelain')
+    .then(async (uncommitted) => {
       if (uncommitted) {
         console.log(chalk.yellow(scriptName, `There are uncommitted changes that will not be included in your build... \n ${uncommitted}`));
         console.log(chalk.yellow(scriptName, `⛔️⛔️⛔️ Quit now if you need to commit your changes...`));
         await powertools.wait(5000);
       }
+
+      return resolve();
+    })
+    .catch(e => reject(e))
+  });
+}
+
+function process_runLocalBuild() {
+  return new Promise(function(resolve, reject) {
+
+    console.log(chalk.blue(scriptName, `Running local build...`));
+
+    powertools.execute('npx electron-builder --mac --arm64', {log: true})
+    .then(async (result) => {
+      console.log(chalk.green(scriptName, `Local build successful`));
       return resolve()
     })
     .catch(e => reject(e))
@@ -341,19 +366,5 @@ function getElapsed() {
   const sec = `${parseInt(duration.asSeconds()) % 60}`.padStart(2, '0');
 
   return `${min}:${sec}`
-}
-
-function asyncCommand(command) {
-  return new Promise(function(resolve, reject) {
-    exec(command, { stdio: 'inherit' },
-      function (error, stdout, stderr) {
-        if (error) {
-          return reject(error);
-        } else {
-          return resolve(stdout);
-        }
-      }
-    );
-  });
 }
 

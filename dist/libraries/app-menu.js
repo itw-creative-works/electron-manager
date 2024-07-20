@@ -430,6 +430,29 @@ Menu.prototype.generateDefault = function () {
             shell.showItemInFolder(app.getPath('logs'))
           },
         },
+        {
+          id: 'development/open-update-cache',
+          label: 'Open auto updater cache',
+          click: async (event) => {
+            self.analytics(event);
+
+            // const  = require("os").homedir();
+            const homedir = app.getPath('appData');
+
+            // Handle cache per platform
+            if (process.platform === 'win32') {
+              result = process.env.LOCALAPPDATA || path.join(homedir, 'Local');
+            } else if (process.platform === 'darwin') {
+              result = path.join(homedir, 'Caches');
+            } else {
+              result = process.env.XDG_CACHE_HOME || path.join(homedir, '.cache');
+            }
+
+            // Open
+            shell.showItemInFolder(result)
+          },
+        },
+
         // Separator
         { type: 'separator' },
         {

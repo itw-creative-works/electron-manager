@@ -1,8 +1,8 @@
 const chalk = require('chalk');
+const powertools = require('node-powertools');
 const jetpack = require('fs-jetpack');
 const plist = require('simple-plist');
 const {get, set} = require('lodash');
-const { exec } = require('child_process');
 const _ = require('lodash');
 const fetch = require('wonderful-fetch');
 const {coerce, major} = require('semver');
@@ -132,8 +132,7 @@ BuildScriptPrepare.prototype.process = async function (options) {
 
   // Run npm rebuild
   console.log(chalk.blue(scriptName, `Rebuilding npm...`));
-  await asyncCommand('npm run rebuild')
-  .then(result => console.log(chalk.blue(scriptName), `\n${result}`))
+  await powertools.execute('npm run rebuild', {log: true})
   .catch(e => warn(e))
 
   // Check dependencies
@@ -143,8 +142,7 @@ BuildScriptPrepare.prototype.process = async function (options) {
   if (options.arguments.sync) {
     console.log(chalk.blue(scriptName, `Syncing GitHub...`));
 
-    await asyncCommand('git add . && git commit -m "Pre-build" && git push')
-    .then(result => console.log(chalk.blue(scriptName), `\n${result}`))
+    await powertools.execute('git add . && git commit -m "Pre-build" && git push', {log: true})
     .catch(e => warn(e))
   }
 
@@ -258,7 +256,7 @@ async function process_generateIcons(options) {
     throw new Error('icon-gen is not installed locally or globally');
   }
 
-  await asyncCommand('icon-gen -i ./build/icon-1024x1024.png -o ./build --ico --ico-name "icon" --ico-sizes "16,24,32,48,64,128,256" --icns --icns-name "icon" --icns-sizes "16,32,64,128,256,512,1024"')
+  await powertools.execute('icon-gen -i ./build/icon-1024x1024.png -o ./build --ico --ico-name "icon" --ico-sizes "16,24,32,48,64,128,256" --icns --icns-name "icon" --icns-sizes "16,32,64,128,256,512,1024"', {log: true})
     .catch(e => {
       // caughtError = e;
       caughtWarnings.push(new Error(`Failed to generate icons ${e}`));
@@ -474,20 +472,6 @@ function process_checkDependencies(options) {
   })
 
   console.log(chalk.green(scriptName, `Checked dependencies`));
-}
-
-function asyncCommand(command) {
-  return new Promise(function(resolve, reject) {
-    exec(command, { stdio: 'inherit' },
-      function (error, stdout, stderr) {
-        if (error) {
-          return reject(error);
-        } else {
-          return resolve(stdout);
-        }
-      }
-    );
-  });
 }
 
 // function asyncCommand(command, args) {
