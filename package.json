@@ -1,6 +1,6 @@
 {
   "name": "electron-manager",
-  "version": "0.0.271",
+  "version": "0.0.273",
   "description": "An NPM module with tools, helper functions, and utilities for building a flawless Electron app 🚀",
   "main": "dist/index.js",
   "bin": {
@@ -89,7 +89,7 @@
     "@electron/notarize": "2.3.2",
     "@electron/remote": "2.1.2",
     "electron-builder": "23.3.3",
-    "electron-updater": "5.3.0",
+    "electron-updater": "5.2.1",
     "firebase": "8.10.1"
   }
 }
