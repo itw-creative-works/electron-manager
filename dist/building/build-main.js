@@ -253,7 +253,9 @@ function process_getWorkflowRunLogs(options) {
       const homeDir = os.homedir();
 
       // Construct the download path
-      const downloadPath = path.join(homeDir, 'Downloads', `${options.package.productName}-${options.package.version}.zip`);
+      const fileName = `${options.package.productName}-${options.package.version}-workflow.zip`
+        .replace(/ /g, '_');
+      const downloadPath = path.join(homeDir, 'Downloads', fileName);
 
       // Save the zip file to user's downloads folder
       jetpack.write(downloadPath, buffer);
