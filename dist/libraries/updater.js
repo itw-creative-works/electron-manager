@@ -20,99 +20,139 @@ Updater.prototype.init = async function () {
   const self = this;
   const Manager = self.Manager;
 
-  if (!self.initialized) {
-    // Setup library
-    Manager.libraries.electronUpdater = Manager.libraries.electronUpdater || require('electron-updater');
-    self.library = Manager.libraries.electronUpdater.autoUpdater;
-
-    // Setup events
-    self.library.on('error', function (e) {
-      if (!(e instanceof Error)) {
-        e = new Error('Unknown update error');
-      }
-      self.status = {
-        code: 'error',
-        percent: 0,
-        error: e,
-        version: Manager.package.version,
-      }
-      self.sendStatus();
-    })
-
-    self.library.on('checking-for-update', function () {
-      self.status = {
-        code: 'checking',
-        percent: 0,
-        error: null,
-        version: Manager.package.version,
-      }
-      self.sendStatus();
-    })
-
-    self.library.on('update-available', function (info) {
-      self.status = {
-        code: 'downloading',
-        percent: 0,
-        error: null,
-        version: info.version,
-      }
-      self.sentInitialProgressUpdate = false;
-      self.sendStatus();
-    })
-
-    self.library.on('update-not-available', function (info) {
-      self.status = {
-        code: 'not-available',
-        percent: 0,
-        error: null,
-        version: info.version,
-      }
-      self.sendStatus();
-    })
-
-    self.library.on('download-progress', function (progress) {
-      // console.log('download-progress', progress);
-      let percent = 0;
-      if (progress && progress.percent && typeof progress.percent === 'number') {
-        percent = parseFloat(progress.percent.toFixed(2)) || 0;
-      }
-
-      percent = Math.min(100, percent);
-
-      self.status = {
-        code: 'downloading',
-        percent: percent,
-        error: null,
-        version: Manager.package.version,
-      }
-      self.sendStatus();
-    })
-
-    self.library.on('update-downloaded', function (info) {
-      self.status = {
-        code: 'downloaded',
-        percent: 100,
-        error: null,
-        version: info.version,
-      }
-      self.sendStatus();
-    })
-
-    if (Manager.isDevelopment) {
-      const status = Manager.storage.electronManager.get('data.current.argv.devUpdateStatus') || 'available'; // available, unavailable, error
-      let newPath = '';
-      if (['available', 'unavailable', 'error'].includes(status)) {
-        newPath = path.join(__dirname, '../electron-updater', `dev-app-update-${status}.yml`);
-      }
-      self.library.updateConfigPath = newPath;
-      self.library._appUpdateConfigPath = newPath;
-      self.library.autoDownload = false;
-      console.log('Setting fake update path', newPath);
-    }
-
-    self.initialized = true;
+  // Check if already initialized
+  if (self.initialized) {
+    return self;
   }
 
+  // Setup library
+  Manager.libraries.electronUpdater = Manager.libraries.electronUpdater || require('electron-updater');
+  self.library = Manager.libraries.electronUpdater.autoUpdater;
+
+  // Shortcuts
+  const version = Manager.package.version;
+
+  /*
+    Setup events
+  */
+  // Event: error
+  self.library.on('error', function (e) {
+    // Ensure error is an instance of Error
+    if (!(e instanceof Error)) {
+      e = new Error('Unknown update error');
+    }
+
+    // Set status
+    self.status = {
+      code: 'error',
+      percent: 0,
+      error: e,
+      version: version,
+    }
+
+    // Send status
+    self.sendStatus();
+  })
+
+  // Event: checking-for-update
+  self.library.on('checking-for-update', function () {
+    // Set status
+    self.status = {
+      code: 'checking',
+      percent: 0,
+      error: null,
+      version: version,
+    }
+
+    // Send status
+    self.sendStatus();
+  })
+
+  // Event: update-available
+  self.library.on('update-available', function (info) {
+    // Set status
+    self.status = {
+      code: 'downloading',
+      percent: 0,
+      error: null,
+      version: info.version,
+    }
+
+    // Set initial progress update
+    self.sentInitialProgressUpdate = false;
+
+    // Send status
+    self.sendStatus();
+  })
+
+  // Event: update-not-available
+  self.library.on('update-not-available', function (info) {
+    // Set status
+    self.status = {
+      code: 'not-available',
+      percent: 0,
+      error: null,
+      version: info.version,
+    }
+
+    // Send status
+    self.sendStatus();
+  })
+
+  // Event: download-progress
+  self.library.on('download-progress', function (progress) {
+    // Format percent
+    let percent = 0;
+    if (progress && progress.percent && typeof progress.percent === 'number') {
+      percent = parseFloat(progress.percent.toFixed(2)) || 0;
+    }
+
+    // Ensure percent is capped at 100
+    percent = Math.min(100, percent);
+
+    // Set status
+    self.status = {
+      code: 'downloading',
+      percent: percent,
+      error: null,
+      version: version,
+    }
+
+    // Send status
+    self.sendStatus();
+  })
+
+  // Event: update-downloaded
+  self.library.on('update-downloaded', function (info) {
+    // Set status
+    self.status = {
+      code: 'downloaded',
+      percent: 100,
+      error: null,
+      version: info.version,
+    }
+
+    // Send status
+    self.sendStatus();
+  })
+
+  // Handle dev mode custom flow
+  if (Manager.isDevelopment) {
+    const status = Manager.storage.electronManager.get('data.current.argv.devUpdateStatus') || 'available'; // available, unavailable, error
+    let newPath = '';
+    if (['available', 'unavailable', 'error'].includes(status)) {
+      newPath = path.join(__dirname, '../electron-updater', `dev-app-update-${status}.yml`);
+    }
+    self.library.updateConfigPath = newPath;
+    self.library._appUpdateConfigPath = newPath;
+    self.library.autoDownload = false;
+    console.log('Setting fake update path', newPath);
+  }
+
+  // Set initialized
+  self.initialized = true;
+
+  // Return
   return self;
 }
 
@@ -125,44 +165,57 @@ Updater.prototype.update = async function (options) {
   const self = this;
   const Manager = self.Manager;
 
+  // Set options
   options = options || {};
   options.userAction = typeof options.userAction === 'undefined' ? false : options.userAction;
 
+  // Log
   Manager.log(`Update check: ${self.status.code}`);
 
+  // Initialize if not already
   if (!self.initialized) {
     self.init();
   }
 
+  // Set last update action
   self.lastUpdateWasUserAction = options.userAction;
 
+  // Send status
   self.sendStatus();
 
-  if (self.isReadyToCheck()) {
-    await self.library.checkForUpdates()
-    .then(r => {
-      if (Manager.isDevelopment) {
-        self._simulateDevDownload();
-      }
-    })
-    .catch(e => {
-      self.status = {
-        code: 'error',
-        percent: 0,
-        error: e,
-        version: Manager.package.version,
-      }
-      self.sendStatus();
-      Manager.log('checkForUpdates()', e);
-    })
-  } else {
+  // If not ready to check, return
+  if (!self.isReadyToCheck()) {
     Manager.log(`Skipping new update check because status is: ${self.status.code}`);
+
+    return self;
   }
 
-  return self;
+  // Check for updates
+  await self.library.checkForUpdates()
+  .then((r) => {
+    if (Manager.isDevelopment) {
+      self._simulateDevDownload();
+    }
+  })
+  .catch((e) => {
+    // Set status
+    self.status = {
+      code: 'error',
+      percent: 0,
+      error: e,
+      version: Manager.package.version,
+    }
+
+    // Send status
+    self.sendStatus();
+
+    // Log
+    Manager.log('checkForUpdates()', e);
+  })
 };
 
 Updater.prototype.sendStatus = async function () {
+  // Shortcuts
   const self = this;
   const Manager = self.Manager;
 
@@ -181,49 +234,22 @@ Updater.prototype.sendStatus = async function () {
   // Log
   Manager.log(`[Updater] status`, self.status)
 
-  // self.status = {
-  //   code: 'error',
-  //   error: new Error('Help error nlow lol'),
-  // }
-
   // If update was initiated by user, show dialog
   if (self.lastUpdateWasUserAction) {
-    const { dialog, BrowserWindow } = Manager.libraries.electron;
-    let bw;
-
-    // Get browser window
-    try {
-      bw = Manager.window().get('main').browserWindow || BrowserWindow.getFocusedWindow();
-    } catch (e) {
-      console.error('Could not get browser window');
-    }
-
-    function _handleProgressBar() {
-      // Set progress
-      try {
-        const double = self.status.percent / 100;
-
-        // Set progress bar
-        // -1 disables the progress bar
-        bw.setProgressBar(double <= 0 || double >= 1 ? -1 : double);
-      } catch (e) {
-        console.error(`Failed to set progress bar`, e);
-      }
-    }
-
     // Handle status
     if (self.status.code === 'downloading') {
       if (!self.sentInitialProgressUpdate) {
+        // Set initial progress update
         self.sentInitialProgressUpdate = true;
-        dialog.showMessageBox(bw, {
+
+        // Show dialog
+        self._showDialog({
           message: `Downloading v${self.status.version} now!`,
           type: 'info'
         })
-        .then((result) => {
-
-        })
       }
     } else if (self.status.code === 'downloaded') {
+      // Set last update action
       self.lastUpdateWasUserAction = false;
 
       // Relaunch in 60 seconds
@@ -232,7 +258,7 @@ Updater.prototype.sendStatus = async function () {
       }, 60000);
 
       // Show dialog
-      dialog.showMessageBox(bw, {
+      self._showDialog({
         message: `Update v${self.status.version} has been downloaded. Would you like to use it now?`,
         buttons: ['Cancel', 'Install'],
         type: 'question'
@@ -240,23 +266,28 @@ Updater.prototype.sendStatus = async function () {
       .then((result) => {
         clearTimeout(self.relaunchTimeout);
 
+        // Relaunch
         if (result.response === 1) {
           Manager.relaunch({force: true})
         }
       })
     } else if (self.status.code === 'not-available') {
-      dialog.showMessageBox(bw, {
+      // Set last update action
+      self.lastUpdateWasUserAction = false;
+
+      // Show dialog
+      self._showDialog({
         title: `No update necessary`,
         message: `You are already using v${Manager.package.version}, which is the latest version!`,
         // buttons: ['Cancel', 'Install'],
         type: 'info'
       })
-      .then((result) => {
-        // console.log('---result 2', result);
-      })
-      self.lastUpdateWasUserAction = false;
     } else if (self.status.code === 'error') {
-      dialog.showMessageBox(bw, {
+      // Set last update action
+      self.lastUpdateWasUserAction = false;
+
+      // Show dialog
+      self._showDialog({
         title: `Update check failed`,
         message: `Failed to check for update. Please re-install the app. \n\nError: ${self.status.error.message}`,
         // buttons: ['Cancel', 'Install'],
@@ -264,18 +295,21 @@ Updater.prototype.sendStatus = async function () {
       })
       .then((result) => {
         // Open in browser
-        Manager.libraries.electron.shell.openExternal(Manager.package.homepage + '/download');
+        Manager.libraries.electron.shell.openExternal(`${Manager.package.homepage}/download?error=${encodeURIComponent(self.status.error.message)}`);
       })
-      self.lastUpdateWasUserAction = false;
     }
 
     // Handle progress bar
-    _handleProgressBar();
+    self._handleProgressBar();
 
   // If update was not initiated by user, relaunch automatically
   } else {
+    // Handle download completion
     if (self.status.code === 'downloaded') {
+      // Clear timeout
       clearTimeout(self.relaunchTimeout);
+
+      // Relaunch in 5 seconds
       self.relaunchTimeout = setTimeout(function () {
         Manager.relaunch({force: true})
       }, 5000);
@@ -287,12 +321,18 @@ Updater.prototype.sendStatus = async function () {
 };
 
 Updater.prototype._simulateDevDownload = async function () {
+  // Shortcuts
   const self = this;
   const Manager = self.Manager;
+
+  // Libraries
   const powertools = require('node-powertools');
+
+  // Get status
   const status = Manager.storage.electronManager.get('data.current.argv.devUpdateStatus') || 'available'; // available, unavailable, error
   const NEW_VERSION = '999.0.0';
 
+  // If different than not-started, return
   if (self.status.code !== 'not-started') {
     return;
   }
@@ -341,5 +381,56 @@ Updater.prototype._simulateDevDownload = async function () {
 
 }
 
+Updater.prototype._getUsableBrowserWindow = function (options) {
+  // Shortcuts
+  const self = this;
+  const Manager = self.Manager;
+
+  // Libraries
+  const { BrowserWindow } = require('electron');
+
+  // Get browser window
+  try {
+    return Manager.window().get('main').browserWindow || BrowserWindow.getFocusedWindow();
+  } catch (e) {
+    console.error('Could not get browser window', e);
+
+    // Return null
+    return null;
+  }
+};
+
+Updater.prototype._showDialog = function (options) {
+  // Shortcuts
+  const self = this;
+  const Manager = self.Manager;
+
+  // Libraries
+  const { dialog } = require('electron');
+  const bw = self._getUsableBrowserWindow();
+
+  // Show dialog
+  return dialog.showMessageBox(bw, options);
+};
+
+Updater.prototype._handleProgressBar = function () {
+  // Shortcuts
+  const self = this;
+  const Manager = self.Manager;
+
+  // Libraries
+  const bw = self._getUsableBrowserWindow();
+
+  // Set progress
+  try {
+    const double = self.status.percent / 100;
+
+    // Set progress bar
+    // -1 disables the progress bar
+    bw.setProgressBar(double <= 0 || double >= 1 ? -1 : double);
+  } catch (e) {
+    console.error(`Failed to set progress bar`, e);
+  }
+};
 
 module.exports = Updater;

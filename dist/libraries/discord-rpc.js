@@ -1,3 +1,7 @@
+// Libraries
+const moment = require('moment');
+
+// RPC
 function RPC(Manager) {
   const self = this;
 
@@ -122,7 +126,7 @@ RPC.prototype.setActivity = function (activity) {
     const final = {
       details: self.activity.details || (isDevelopment ? `Developing ${Manager.package.productName}` : Manager.options.config.discord.details || 'Browsing'),
       state: self.activity.state || (isDevelopment ? `v${data.meta.version}` : Manager.options.config.discord.state || `v${data.meta.version}`),
-      startTimestamp: new Date(self.activity.timestamp || data.meta.startTime),
+      startTimestamp: moment(self.activity.timestamp || data.meta.startTime).unix(),
       largeImageKey: Manager.options.config.discord.largeImageKey || 'logo',
       largeImageText: Manager.options.config.discord.largeImageText || `${Manager.package.productName} v${data.meta.version}`,
       smallImageKey: self.activity.smallImageKey || `status-${data.user.plan.id}`,
@@ -142,6 +146,7 @@ RPC.prototype.setActivity = function (activity) {
     // Set the activity
     self.connection.setActivity(final);
 
+    // Return
     return resolve(final);
   });
 };

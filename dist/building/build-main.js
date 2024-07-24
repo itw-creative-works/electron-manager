@@ -4,6 +4,9 @@ const {get} = require('lodash');
 const { Octokit } = require('@octokit/rest');
 const moment = require('moment');
 const fetch = require('wonderful-fetch');
+const jetpack = require('fs-jetpack');
+const os = require('os');
+const path = require('path');
 
 const octokit = new Octokit({
   auth: process.env.GH_TOKEN,
@@ -65,15 +68,17 @@ BuildScriptPost.prototype.process = async function (options) {
     .catch(e => e)
 
     // Actually wait for workflow to finish queueing
-    caughtError = await process_waitForWorkflowStart().catch(e => e)
+    caughtError = await process_waitForWorkflowStart().catch(e => e);
     if (caughtError instanceof Error) {return error(caughtError)}
 
     // Wait for workflow to finish
-    caughtError = await process_waitForWorkflowComplete().catch(e => e)
+    caughtError = await process_waitForWorkflowComplete().catch(e => e);
     if (caughtError instanceof Error) {return error(caughtError)}
 
     // Report status
     if (activeRun.conclusion === 'failure') {
+      await process_getWorkflowRunLogs(options).catch(e => e);
+
       return error(new Error(`Workflow failed`));
     } else {
       console.log(chalk.green(scriptName, `Workflow ${activeRun.id} finished: created=${activeRun.created_at}, status=${activeRun.status}, conclusion=${activeRun.conclusion}`));
@@ -172,12 +177,14 @@ function process_waitForWorkflowStart() {
         repo: repo,
         workflow_id: 'build.yml',
       })
-      .then(response => {
-        const runs = get(response, 'data.workflow_runs', []);
+      .then((response) => {
+        const runs = response?.data?.workflow_runs || [];
 
+        // Loop through runs to find the active run
         runs.forEach(run => {
+          // Wait until a run is started and not finished (which is the current run)
           if (!activeRun && !runs.conclusion) {
-            activeRun = run
+            activeRun = run;
           }
         });
       })
@@ -199,28 +206,65 @@ function process_waitForWorkflowComplete() {
     powertools.poll(async (i) => {
       let done = false;
       console.log(chalk.yellow(scriptName, `Waiting for workflow to finish - ${getElapsed()}`));
-      await octokit.rest.actions.listWorkflowRuns({
+      await octokit.rest.actions.getWorkflowRun({
         owner: owner,
         repo: repo,
-        workflow_id: 'build.yml',
+        run_id: activeRun.id,
       })
-      .then(response => {
-        const runs = get(response, 'data.workflow_runs', []);
+      .then((response) => {
+        const run = response?.data || {};
 
-        runs.forEach(run => {
-          if (run.id !== activeRun.id) { return }
-          if (run.conclusion) {
-            done = true
-            activeRun = run;
-          }
-        });
+        // Check if run is done
+        if (!run.conclusion) {
+          return
+        }
+
+        // Set done flag
+        done = true;
+        activeRun = run;
       })
+
+      // Return done flag
       return done;
     }, {interval: 30000, timeout: 0})
     .then(r => {
       return resolve(activeRun)
     })
     .catch(e => reject(new Error(`Workflow did mot finish successfully in time: ${e}`)) )
+  });
+}
+
+function process_getWorkflowRunLogs(options) {
+  return new Promise(async function(resolve, reject) {
+    // Log
+    console.log(chalk.blue(scriptName, `Getting workflow run details...`));
+
+    // Get logs
+    await octokit.rest.actions.downloadWorkflowRunLogs({
+      owner: owner,
+      repo: repo,
+      run_id: activeRun.id,
+    })
+    .then((response) => {
+      // Convert ArrayBuffer to Buffer
+      const buffer = Buffer.from(new Uint8Array(response.data));
+
+      // Get the user's home directory
+      const homeDir = os.homedir();
+
+      // Construct the download path
+      const downloadPath = path.join(homeDir, 'Downloads', `${options.package.productName}-${options.package.version}.zip`);
+
+      // Save the zip file to user's downloads folder
+      jetpack.write(downloadPath, buffer);
+
+      // Log
+      console.log(chalk.yellow(scriptName, `Workflow run details saved to ${downloadPath}`));
+
+      // Resolve
+      return resolve(details);
+    })
+    .catch(e => reject(e))
   });
 }
 

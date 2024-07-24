@@ -174,9 +174,12 @@ Main.prototype.init = async function (params) {
     onSecondInstance: function () {},
     _onSecondInstance: function () {
       if (parent.secondInstanceParameters) {
-        parent.log('onSecondInstance()', parent.secondInstanceParameters)
+        const { event, commandLine, workingDirectory } = parent.secondInstanceParameters;
+        // Log (don't log event though because it will break when serialized)
+        parent.log('onSecondInstance():', commandLine, workingDirectory);
 
-        parent._handlers.onSecondInstance(parent.secondInstanceParameters)
+        // Send to handler
+        parent._handlers.onSecondInstance(event, commandLine, workingDirectory)
       }
     },
     onLog: function () {},
@@ -184,31 +187,42 @@ Main.prototype.init = async function (params) {
     _loggerQueue: [],
   };
 
+  // Mark performance
   parent.performance.mark('manager_initialize_main_openStorage');
 
+  // Open storage
   parent._openStorage();
-  const unverifiedConfig = parent.storage.electronManager.get('data.config.data', {})
-  let newData = parent.storage.electronManager.get('data.current', {})
-  parent.storage.electronManager.set('data.previous', newData);
 
-  // console.log('----unverifiedConfig', unverifiedConfig);
-  // Init new sentry if desired
+  // Set unverified config that we will verify later
+  const unverifiedConfig = parent.storage.electronManager.get('data.config.data', {})
+
+  // Get current data to set as previous
+  const currentData = parent.storage.electronManager.get('data.current', {});
+  parent.storage.electronManager.set('data.previous', currentData);
+
+  // Mark performance
   parent.performance.mark('manager_initialize_main_setupSentry');
+
+  // Init new sentry if desired
   if (unverifiedConfig.sentry && unverifiedConfig.sentry.dsn) {
     parent._sentryConfig.dsn = unverifiedConfig.sentry.dsn;
     parent.libraries.sentry.init(parent._sentryConfig);
   }
 
+  // Mark performance
   parent.performance.mark('manager_initialize_main_setVisibility');
 
+  // Set visibility
   await _setVisibility(parent)
 
+  // Mark performance
   parent.performance.mark('manager_initialize_main_setupUA');
   app.userAgentFallback = app.userAgentFallback
     .replace(`Electron/${process.versions.electron}`, '')
     .replace(`${app.name}/${app.getVersion()}`, '')
     .replace(/\s\s+/g, ' ');
 
+  // Handle shutdown
   function _shutdownHandler(code) {
     if (shutdownHandled) { return }
     if (code === 0) {
@@ -226,11 +240,15 @@ Main.prototype.init = async function (params) {
     shutdownHandled = true;
   }
 
+  // Mark performance
   parent.performance.mark('manager_initialize_main_setListeners1');
+
+  // Event: quit
   app.on('quit', (event, code) => {
     _shutdownHandler(code)
   })
 
+  // Event: exit
   if (process.platform === 'darwin') {
     process.on('exit', () => {
       _shutdownHandler(0)
@@ -240,25 +258,31 @@ Main.prototype.init = async function (params) {
   function getDeviceId() {
     return new Promise(function(resolve, reject) {
       const macaddress = require('macaddress');
-      macaddress.one(async function (err, mac) {
-        if (err) {
-          console.error('Failed to get mac address', err);
+      macaddress.one(async function (e, mac) {
+        // If we failed to get the mac address, just return a random UUID
+        if (e) {
+          console.error('Failed to get mac address', e);
           return resolve(uuid.v4());
         }
+
+        // Return the mac address
         return resolve(mac);
       })
     });
   }
 
+  // Get device IP
   function getDeviceIp() {
     return new Promise(function(resolve, reject) {
       return resolve(parent.storage.electronManager.get('data.previous.meta.ip', '127.0.0.1'))
     });
   }
 
-  // Initialize Global
+  // Mark performance
   parent.performance.mark('manager_initialize_main_initializeGlobal');
-  newData = {
+
+  // Initialize global
+  const newData = {
     meta: {
       startTime: new Date().toISOString(),
       // systemColorPreference: nativeTheme.shouldUseDarkColors ? 'dark' : 'light',
@@ -284,9 +308,9 @@ Main.prototype.init = async function (params) {
       },
     },
     usage: {
-      // opens: get(newData, 'usage.opens', 0) + 1,
-      opens: get(newData, 'usage.opens', 1),
-      hours: get(newData, 'usage.hours', 0),
+      // opens: get(currentData, 'usage.opens', 0) + 1,
+      opens: get(currentData, 'usage.opens', 1),
+      hours: get(currentData, 'usage.hours', 0),
       shutDownSafely: false,
       wasRelaunched: false,
     },
@@ -302,14 +326,14 @@ Main.prototype.init = async function (params) {
       // dependencies: 'SET BELOW',
       // resources: 'SET BELOW'
     },
-    uuid: get(newData, 'uuid', null) || uuid.v4(),
+    uuid: get(currentData, 'uuid', null) || uuid.v4(),
     sessionId: uuid.v4(),
     user: AccountResolver._resolveAccount(),
     argv: require('yargs').argv,
     deeplink: {},
   };
 
-  // Set dev config
+  // Set user options
   if (parent.isDevelopment) {
     newData.user.roles.developer = true;
   }
@@ -330,20 +354,24 @@ Main.prototype.init = async function (params) {
   //   console.log('====uuid', parent.storage.electronManager.get('data.current.uuid', null));
   // }, 1000);
 
+  // Mark performance
   parent.performance.mark('manager_initialize_main_setProperties');
+
+  // Set properties
   parent.windows = [];
   parent.allowQuit = false;
   parent.isQuitting = false;
   parent.deeplinkingUrl = null;
   parent.secondInstanceParameters = null;
 
+  // Set internal properties
   parent._globalListenersWCs = parent._globalListenersWCs || [];
   parent._registeredRenderers = parent._registeredRenderers || [];
   parent._registeredRenderersIds = parent._registeredRenderersIds || {}; // To make sure duplicate IDs are not registered
   parent._updateTimeout;
-
   parent._alertedConfig = false;
 
+  // Set onLog handler
   parent.onLog = (fn) => {
     parent._handlers.onLog = fn;
     parent._handlers._onLogIsSet = true;
@@ -542,23 +570,54 @@ Main.prototype.init = async function (params) {
     return {
       create: function (options) {
         const win = {};
-        options = options || {};
-        options.preferences = options.preferences || {};
-        options.preferences.show = typeof options.preferences.show === 'undefined' ? false : options.preferences.show;
-        options.preferences.width = typeof options.preferences.width === 'undefined' ? 1440 : options.preferences.width;
-        options.preferences.height = typeof options.preferences.height === 'undefined' ? 810 : options.preferences.height;
-        options.preferences.minWidth = typeof options.preferences.minWidth === 'undefined' ? 608 : options.preferences.minWidth;
-        options.preferences.minHeight = typeof options.preferences.minHeight === 'undefined' ? 342 : options.preferences.minHeight;
-        // options.preferences.backgroundThrottling = typeof options.preferences.backgroundThrottling === 'undefined' ? false : options.preferences.backgroundThrottling;
 
-        win.main = typeof options.main === 'undefined' ? false : options.main;
-        win.ready = typeof options.ready === 'undefined' ? false : options.ready;
-        win.allowWindowOpens = typeof options.allowWindowOpens === 'undefined' ? !!win.main : options.allowWindowOpens;
-        win.handleCloseEvents = typeof options.handleCloseEvents === 'undefined' ? !!win.main : options.handleCloseEvents;
-        win.handleNeedsToBeShown = typeof options.handleNeedsToBeShown === 'undefined' ? !!win.main : options.handleNeedsToBeShown;
-        win.enableRemoteModule = typeof options.enableRemoteModule === 'undefined' ? !!win.main : options.enableRemoteModule;
-        win.preventDevTools = typeof options.preventDevTools === 'undefined' ? !!win.main : options.preventDevTools;
-        win.showMiniPreloader = typeof options.showMiniPreloader === 'undefined' ? !!win.main : options.showMiniPreloader;
+        // Set options
+        options = options || {};
+
+        // Set properties
+        win.main = typeof options.main === 'undefined'
+          ? false : !!options.main;
+        win.ready = typeof options.ready === 'undefined'
+          ? false : !!options.ready;
+        win.allowWindowOpens = typeof options.allowWindowOpens === 'undefined'
+          ? win.main : options.allowWindowOpens;
+        win.handleCloseEvents = typeof options.handleCloseEvents === 'undefined'
+          ? win.main : options.handleCloseEvents;
+        win.handleNeedsToBeShown = typeof options.handleNeedsToBeShown === 'undefined'
+          ? win.main : options.handleNeedsToBeShown;
+        win.enableRemoteModule = typeof options.enableRemoteModule === 'undefined'
+          ? win.main : options.enableRemoteModule;
+        win.preventDevTools = typeof options.preventDevTools === 'undefined'
+          ? win.main : options.preventDevTools;
+        win.showMiniPreloader = typeof options.showMiniPreloader === 'undefined'
+          ? win.main : options.showMiniPreloader;
+
+        // Set preferences
+        options.preferences = options.preferences || {};
+        options.preferences.show = typeof options.preferences.show === 'undefined'
+          ? false : options.preferences.show;
+        options.preferences.width = typeof options.preferences.width === 'undefined'
+          ? 1440 : options.preferences.width;
+        options.preferences.height = typeof options.preferences.height === 'undefined'
+          ? 810 : options.preferences.height;
+        options.preferences.minWidth = typeof options.preferences.minWidth === 'undefined'
+          ? 608 : options.preferences.minWidth;
+        options.preferences.minHeight = typeof options.preferences.minHeight === 'undefined'
+          ? 342 : options.preferences.minHeight;
+
+        // Set webPreferences
+        options.preferences.webPreferences = options.preferences.webPreferences || {};
+        options.preferences.webPreferences.nodeIntegration = typeof options.preferences.webPreferences.nodeIntegration === 'undefined'
+          ? win.main : options.preferences.webPreferences.nodeIntegration;
+        options.preferences.webPreferences.contextIsolation = typeof options.preferences.webPreferences.contextIsolation === 'undefined'
+          ? !win.main : options.preferences.webPreferences.contextIsolation;
+        options.preferences.webPreferences.webviewTag = typeof options.preferences.webPreferences.webviewTag === 'undefined'
+          ? win.main : options.preferences.webPreferences.webviewTag;
+        // options.preferences.webPreferences.backgroundThrottling = typeof options.preferences.webPreferences.backgroundThrottling === 'undefined'
+          // ? false : options.preferences.webPreferences.backgroundThrottling;
+
+
+        // Attach preferences
         win.preferences = options.preferences;
 
         let failedWindowTimeout;
@@ -604,7 +663,7 @@ Main.prototype.init = async function (params) {
           win.showDuringPreload = options.showDuringPreload;
         }
 
-        win.createLoggerFunction = typeof options.createLoggerFunction === 'undefined' ? !!win.main : options.createLoggerFunction;
+        win.createLoggerFunction = typeof options.createLoggerFunction === 'undefined' ? win.main : options.createLoggerFunction;
 
         win._internal = {
           lockedUrl: '',
@@ -622,15 +681,11 @@ Main.prototype.init = async function (params) {
           };
         }
 
+        // Create browser window
         win.browserWindow = new parent.libraries.electron.BrowserWindow(options.preferences)
         win.id = win.browserWindow.webContents.id || -1;
 
-        // Set size
-        // if (win.showDuringPreload) {
-        //   win.browserWindow.setMinimumSize(300, 300);
-        //   win.browserWindow.setSize(300, 300);
-        // }
-
+        // Setup preloader window
         if (win.main && !preloaderWindow && win.showDuringPreload && win.showMiniPreloader) {
           preloaderWindow = new parent.libraries.electron.BrowserWindow({
             width: 300,
@@ -645,28 +700,37 @@ Main.prototype.init = async function (params) {
             }
           })
 
-          preloaderWindow.loadURL('file://' + path.join(__dirname, '../pages/preloader/index.html'));
+          // Load preloader
+          preloaderWindow.loadURL(`file://${path.join(__dirname, '../pages/preloader/index.html')}`);
 
+          // Open devtools
           if (parent.isDevelopment) {
             // preloaderWindow.openDevTools({ mode: 'undocked', activate: true });
           }
 
+          // Show preloader if the app was NOT opened at login
           parent.app().wasOpenedAtLogin()
           .then(wasOpenedAtLogin => {
-            // If its an auto-show from preloader, only do it if we want to
-            if (!wasOpenedAtLogin) {
-              preloaderWindow.once('ready-to-show', () => {
-                preloaderWindow.show();
-              })
+            // If it was opened at login, keep it hidden
+            if (wasOpenedAtLogin) {
+              return
             }
+
+            // Attach listeners so we can show the window
+            preloaderWindow.once('ready-to-show', () => {
+              preloaderWindow.show();
+            })
           })
         }
 
+        // Attach windowOpenHandler
         if (!win.allowWindowOpens) {
           win.browserWindow.webContents.setWindowOpenHandler(() => {
             return {action: 'deny'}
           })
         }
+
+        // Attach close event
         if (win.handleCloseEvents) {
           win.browserWindow.on('close', async (event) => {
             parent.log('win.close event', win.id);
@@ -684,6 +748,8 @@ Main.prototype.init = async function (params) {
             parent.quit();
           })
         }
+
+        // Attach show event
         if (win.handleNeedsToBeShown && parent.needsToBeShown) {
           win.browserWindow.once('show', async (event) => {
             parent.log('win.show event', win.id);
@@ -694,6 +760,7 @@ Main.prototype.init = async function (params) {
           });
         }
 
+        // Attach window change event handlers
         if (win.main) {
           _windowChangeEventHandler(parent, null, win);
           MAIN_WINDOW_CHANGE_EVENTS
@@ -704,39 +771,59 @@ Main.prototype.init = async function (params) {
           });
         }
 
+        // Attach devtools event
         if (win.preventDevTools) {
           win.browserWindow.webContents.on('devtools-opened', (event) => {
-            if (!parent.storage.electronManager.get('data.current.user.roles.developer', false)) {
-              win.browserWindow.webContents.closeDevTools()
-              setTimeout(() => {
-                if (!_isValidWindow(win)) { return }
-
-                win.browserWindow.webContents.closeDevTools()
-              }, 10);
-              return event.preventDefault();
+            // If user is a developer OR we are in development mode, allow devtools
+            if (
+              parent.storage.electronManager.get('data.current.user.roles.developer', false)
+              || parent.isDevelopment
+            ) {
+              return;
             }
+
+            // Close helper
+            function _close() {
+              // Check if the window is valid
+              if (!_isValidWindow(win)) { return }
+
+              // Close devtools
+              win.browserWindow.webContents.closeDevTools();
+            }
+
+            // Close devtools
+            setTimeout(() => _close, 10);
+
+            // Prevent default
+            return event.preventDefault();
           });
         }
 
+        // Show window
         if (win.main) {
           parent.libraries.electron.app.on('activate', function () {
+            // Log event
             parent.log('win.activate event', win.id);
-            // On macOS it's common to re-create a window in the app when the
-            // dock icon is clicked and there are no other windows open.
+
+            // Check if the window is valid
             if (!_isValidWindow(win)) { return }
 
+            // Show the window
             win.browserWindow.show();
           })
         }
 
+        // Enable remote module
         if (win.enableRemoteModule) {
           parent.libraries.remote.enable(win.browserWindow.webContents);
         }
 
+        // Open devtools
         if (parent.isDevelopment) {
           win.browserWindow.webContents.openDevTools({ mode: 'undocked', activate: false });
         }
 
+        // Create logger function
         if (win.createLoggerFunction) {
           win.browserWindow.webContents.once('dom-ready', async function (event) {
             await powertools.poll(function () {
@@ -745,17 +832,24 @@ Main.prototype.init = async function (params) {
             .catch(e => {
               console.error('Failed to create logger functions because win.ready never happened');
             })
+
+            // Set logger function
             parent.onLog(function () {
               // console.log('Logger', ...arguments);
               if (!_isValidWindow(win)) { return }
 
               win.browserWindow.webContents.send('electron-manager-message', {command: 'console:log', payload: [...arguments]})
             })
+
+            // Log
             parent.log('Setup automatic logger')
           });
         }
 
+        // Add to parent
         parent.windows.push(win);
+
+        // Return window
         return win;
       },
       get: function (id) {
@@ -771,11 +865,14 @@ Main.prototype.init = async function (params) {
       },
       send: function (id, name, message, options) {
         return new Promise(async function(resolve, reject) {
+          // Set options
           options = options || {};
           options.wait = typeof options.wait === 'undefined' ? true : options.wait;
 
+          // Get window
           let win = parent.window().get(id);
 
+          // If we need to wait for the window to be ready
           if (options.wait) {
             try {
               await powertools.poll(function () {
@@ -788,33 +885,46 @@ Main.prototype.init = async function (params) {
             }
           }
 
+          // Check if the window is valid
           if (!_isValidWindow(win)) {
-            return reject(new Error(`Window with id ${id} does not exist`));
+            console.error('Message contents:', name, message);
+            return reject(new Error(`Window with id ${id} does not exist for message ${name}`));
           }
 
-          win.browserWindow.webContents.send(name, message)
+          // Send the message
+          win.browserWindow.webContents.send(name, message);
+
+          // Resolve
           return resolve();
         });
       },
       navigate: function (id, url, options) {
+        // Set options
+        options = options || {};
+        options.lock = typeof options.lock === 'undefined' ? win.main : options.lock;
+
+        // Get window
         const win = parent.window().get(id);
 
+        // Check if the window is valid
         if (!_isValidWindow(win)) {
           return new Promise(function(resolve, reject) {
             reject(new Error(`Window ${id} does not exist`))
           });
         }
 
-        options.lock = typeof options.lock === 'undefined' ? !!win.main : options.lock;
-
+        // Mark performance
         if (win.main) {
           parent.performance.mark('manager_initialize_main_browserWindowNavigate');
         }
 
+        // Lock the window
         if (options.lock && !win._internal.lockedUrl) {
+          // Set the locked URL
           win._internal.lockedUrl = url;
+
+          // Add navigation listener
           win.browserWindow.webContents.on('will-navigate', function (event, url) {
-            // console.log('NAV', url, win._internal.lockedUrl);
             if (url !== win._internal.lockedUrl) {
               console.error('Prevented navigation because this window is locked:', url, win._internal.lockedUrl);
               event.preventDefault();
@@ -822,46 +932,59 @@ Main.prototype.init = async function (params) {
           });
         }
 
-        let isFile = false;
+        // Check if the URL is a file
+        let isRemoteURL = null;
         try {
-          isFile = new URL(url).protocol === 'file:';
+          const newUrl = new URL(url);
+          isRemoteURL = newUrl.protocol === 'http:' || newUrl.protocol === 'https:';
         } catch (e) {
-          isFile = true;
+          isRemoteURL = false;
         }
 
-        if (isFile) {
-          return win.browserWindow.loadFile(url, options)
+        // Load the URL
+        if (isRemoteURL) {
+          return win.browserWindow.loadURL(url, options);
         } else {
-          return win.browserWindow.loadURL(url, options)
+          return win.browserWindow.loadFile(url, options);
         }
-
       },
       show: function (id) {
+        // Get window
         const win = parent.window().get(id);
 
+        // Check if the window is valid
         if (!_isValidWindow(win)) { return }
 
+        // If it's minimized, restore it
         if (win.browserWindow.isMinimized()) {
           win.browserWindow.restore();
         }
+
+        // If it's not visible or not focused, show it
         if (!win.browserWindow.isVisible() || !win.browserWindow.isFocused()) {
           win.browserWindow.show();
         }
       },
       hide: function (id) {
+        // Get window
         const win = parent.window().get(id);
 
+        // Check if the window is valid
         if (!_isValidWindow(win)) { return }
 
+        // Hide the window
         if (!win.browserWindow.isMinimized()) {
           win.browserWindow.minimize();
         }
       },
       toggle: function (id) {
+        // Get window
         const win = parent.window().get(id);
 
+        // Check if the window is valid
         if (!_isValidWindow(win)) { return }
 
+        // Toggle the window
         if (win.browserWindow.isMinimized() || !win.browserWindow.isVisible() || !win.browserWindow.isFocused()) {
           parent.window().show(id);
         } else {
@@ -871,6 +994,7 @@ Main.prototype.init = async function (params) {
     }
   };
 
+  // Instance lock
   _instanceLock(parent);
 
   // parent.analytics(app.getAppPath());
@@ -1275,7 +1399,8 @@ async function _setupNonCriticalServices(parent) {
   setInterval(() => {
     // Check if app has been open for more than X days and restart if so
     if (options.autoRestartDays > 0) {
-      const days = moment().diff(moment(newData.meta.startTime), 'days', true)
+      const startTime = parent.storage.electronManager.get('data.current.usage.startTime');
+      const days = moment().diff(moment(startTime), 'days', true)
 
       // Log
       parent.log(`cron(24hr): Open ${days} days`);

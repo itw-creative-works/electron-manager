@@ -1,6 +1,7 @@
 const _ = require('lodash')
 const fetch = require('wonderful-fetch');
 const powertools = require('node-powertools');
+const path = require('path');
 
 function WM(m) {
   const self = this;
@@ -43,6 +44,9 @@ WM.prototype.init = function (options) {
       const firebase_firestore = options?.libraries?.firebase_firestore;
       const cacheBreaker = new Date().getTime();
 
+      // Set the base path
+      const basePath = path.join(Manager.appPath, 'node_modules', 'firebase');
+
       // Setup configuration
       const Configuration = {
         refreshNewVersion: {
@@ -53,20 +57,20 @@ WM.prototype.init = function (options) {
             enabled: firebase_app?.enabled || true,
             config: firebase_app?.config || {},
             load: async () => {
-              await dom.loadScript({src: '../node_modules/firebase/firebase-app.js'});
-              await dom.loadScript({src: '../node_modules/firebase/firebase-database.js'});
+              await dom.loadScript({src: path.join(basePath, 'firebase-app.js')});
+              await dom.loadScript({src: path.join(basePath, 'firebase-database.js')});
             },
           },
           firebase_auth: {
             enabled: firebase_auth?.enabled || true,
             load: async () => {
-              await dom.loadScript({src: '../node_modules/firebase/firebase-auth.js'});
+              await dom.loadScript({src: path.join(basePath, 'firebase-auth.js')});
             },
           },
           firebase_firestore: {
             enabled: firebase_firestore?.enabled || true,
             load: async () => {
-              await dom.loadScript({src: '../node_modules/firebase/firebase-firestore.js'});
+              await dom.loadScript({src: path.join(basePath, 'firebase-firestore.js')});
             },
           },
           firebase_messaging: {
@@ -78,7 +82,7 @@ WM.prototype.init = function (options) {
           cookieconsent: {
             enabled: false,
           },
-          tawk: {
+          chatsy: {
             enabled: false,
           },
           lazysizes: {
@@ -87,7 +91,13 @@ WM.prototype.init = function (options) {
           sentry: {
             enabled: false,
           }
-        }
+        },
+        exitPopup: {
+          enabled: false,
+        },
+        refreshNewVersion: {
+          enabled: false,
+        },
       }
       const electronManagerConfig = Manager.storage.electronManager.get('data.config', {})
 

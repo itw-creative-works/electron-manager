@@ -519,6 +519,7 @@ ElectronManager.prototype.init = function (options) {
           self._internal.authChangeHandler();
         }
 
+        // Setup activity listeners
         try {
           _sendActivity()
           document.addEventListener('click', function (event) {
@@ -529,23 +530,36 @@ ElectronManager.prototype.init = function (options) {
           console.error('Error setting up listeners', e);
         }
 
+        // Setup fetch function
         self.fetchMainResource = function (url, options) {
           return new Promise(function(resolve, reject) {
             options = options || {};
             const gte = require('semver/functions/gte');
 
+            // Set flags
             self.fetchedMainResource = false;
             self.isUsingValidVersion = null;
 
             wonderfulFetch(url, {timeout: 30000, response: 'json', tries: 3, log: false})
               .then(r => {
+                // Set fetched flag
                 self.fetchedMainResource = true;
+
+                // Import into storage
                 self.storage.electronManager.set('data.current.resources.main', r);
+
+                // Set version required
                 const versionRequired = self.storage.electronManager.get('data.current.resources.main.settings.versionRequired', '0.0.0');
+
+                // Check if using valid version
                 self.isUsingValidVersion = gte(self.package.version, versionRequired);
-                if (!self.isDevelopment && !self.isUsingValidVersion) {
+
+                // Check if using valid version
+                if (!self.isUsingValidVersion && !self.isDevelopment) {
                   self.libraries.electron.ipcRenderer.invoke('electron-manager-message', {command: 'updater:update'})
                 }
+
+                // Return
                 return resolve(r);
               })
               .catch(e => {
@@ -654,10 +668,16 @@ ElectronManager.prototype.init = function (options) {
 
           // Get URLs
           const packageHomepageUrl = self.package?.homepage || null;
-          const optionsUrl = powertools.template(
-            get(self.options, optionsPath) || '',
+          const optionsUrl = get(self.options, optionsPath);
+          const optionsUrlResolved = powertools.template(
+            optionsUrl || '',
             replace,
           )
+
+          // Skip if options explicitly set to false
+          if (optionsUrl === false) {
+            return false;
+          }
 
           // Resolve path
           path = powertools.template(path, replace);
@@ -665,14 +685,9 @@ ElectronManager.prototype.init = function (options) {
           // Set resolvedUrl
           let resolvedUrl;
 
-          // Skip if options explicitly set to false
-          if (optionsUrl === false) {
-            return false;
-          }
-
           // Resolve url
-          if (optionsUrl) {
-            resolvedUrl = new URL(optionsUrl);
+          if (optionsUrlResolved) {
+            resolvedUrl = new URL(optionsUrlResolved);
           } else if (packageHomepageUrl) {
             resolvedUrl = new URL(packageHomepageUrl);
             resolvedUrl.pathname = path;
