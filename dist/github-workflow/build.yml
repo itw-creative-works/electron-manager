@@ -72,6 +72,18 @@ jobs:
       - name: Check out Git repository
         if: ${{ matrix.run }}
         uses: actions/checkout@v4
+      - name: Set env variables
+        shell: bash
+        run: |
+          if [[ '${{ matrix.name }}' == 'Windows' ]]; then
+            YEAR=$(date +%Y)
+            echo "ELECTRON_MANAGER_YEAR=$YEAR" >> $GITHUB_ENV
+          else
+            echo "ELECTRON_MANAGER_YEAR=$(date +'%Y')" >> $GITHUB_ENV
+          fi
+      - name: Log env variables
+        run: |
+          echo "ELECTRON_MANAGER_YEAR=${{ env.ELECTRON_MANAGER_YEAR }}"
       - name: Setup Node.js
         if: ${{ matrix.run }}
         uses: actions/setup-node@v4
@@ -83,9 +95,6 @@ jobs:
       - name: Run generation script
         if: ${{ matrix.run }}
         run: node ./node_modules/electron-manager/dist/github-workflow/githubActionBuildGen.js
-      - name: Log env variables
-        run: |
-          echo "ELECTRON_MANAGER_YEAR=$ELECTRON_MANAGER_YEAR"
       - name: Install Snapcraft (Linux)
         if: ${{ matrix.run && matrix.name == 'Linux' }}
         uses: samuelmeuli/action-snapcraft@v2
