@@ -69,6 +69,9 @@ jobs:
     steps:
       - name: Log operating system
         run: echo "os=${{ matrix.os }}, choice=$INPUT_PLATFORM, run=${{ matrix.run }}"
+      - name: Set env variables
+        run: |
+          echo "ELECTRON_MANAGER_YEAR=$(date +'%Y')" >> $GITHUB_ENV
       - name: Check out Git repository
         if: ${{ matrix.run }}
         uses: actions/checkout@v4
