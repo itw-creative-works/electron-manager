@@ -68,10 +68,15 @@ jobs:
             run: ${{ inputs.platform == 'all' || inputs.platform == 'linux' }}
     steps:
       - name: Log operating system
-        run: echo "os=${{ matrix.os }}, choice=$INPUT_PLATFORM, run=${{ matrix.run }}"
-      - name: Set env variables
-        run: |
-          echo "ELECTRON_MANAGER_YEAR=$(date +'%Y')" >> $GITHUB_ENV
+        run: echo "os=${{ matrix.os }}, name=${{ matrix.name }}, choice=$INPUT_PLATFORM, run=${{ matrix.run }}"
+      # - name: Log env variables
+      #   run: |
+      #     echo "TEST_1_ZERO=$TEST_1_ZERO"
+      #     echo "TEST_1_ONE=$TEST_1_ONE"
+      #     echo "TEST_1_TWO=$TEST_1_TWO"
+      #     echo "TEST_1_THREE=$TEST_1_THREE"
+      #     echo "TEST_1_FOUR=$TEST_1_FOUR"
+      #     echo "ELECTRON_MANAGER_YEAR=$ELECTRON_MANAGER_YEAR"
       - name: Check out Git repository
         if: ${{ matrix.run }}
         uses: actions/checkout@v4
@@ -86,6 +91,14 @@ jobs:
       - name: Run generation script
         if: ${{ matrix.run }}
         run: node ./node_modules/electron-manager/dist/github-workflow/githubActionBuildGen.js
+      - name: Log env variables
+        run: |
+          echo "TEST_1_ZERO=$TEST_1_ZERO"
+          echo "TEST_1_ONE=$TEST_1_ONE"
+          echo "TEST_1_TWO=$TEST_1_TWO"
+          echo "TEST_1_THREE=$TEST_1_THREE"
+          echo "TEST_1_FOUR=$TEST_1_FOUR"
+          echo "ELECTRON_MANAGER_YEAR=$ELECTRON_MANAGER_YEAR"
       - name: Install Snapcraft (Linux)
         if: ${{ matrix.run && matrix.name == 'Linux' }}
         uses: samuelmeuli/action-snapcraft@v2
