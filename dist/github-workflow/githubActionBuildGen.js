@@ -11,12 +11,17 @@ const scriptName = '[githubActionBuildGen.js]';
 exports.default = async function () {
   let caughtError;
 
+  // Log
   console.log(chalk.green(`\n*-*-*- Build generation: Starting for ${packageJSON.productName} v${packageJSON.version} -*-*-*`));
+
+  // Set environment variables
+  process.env.ELECTRON_MANAGER_YEAR = process.env.ELECTRON_MANAGER_YEAR || new Date().getFullYear();
 
   // Generate build.json
   caughtError = await require('../build-libraries/generateBuildFiles.js')().catch(e => e)
   if (caughtError) { return error(caughtError) }
 
+  // Log
   console.log(chalk.green(`*-*-*- Build generation: Success for ${packageJSON.productName} v${packageJSON.version} -*-*-*`));
 
 };
