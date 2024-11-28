@@ -86,15 +86,11 @@ module.exports = function (Manager, options) {
 
     // const logger = setInterval(function () {
     //   console.log('document.readyState', document.readyState, new Date().toISOString());
-    // }, 100);   
+    // }, 100);
 
-    function _send(message) {
-      Manager.libraries.electron.ipcRenderer.invoke('electron-manager-message', message)
-    }
-        
     function _ready() {
       const brandColor = get(Manager.options, 'brand.color', '#1E2022');
-      const appName = get(Manager.options, 'app.name');   
+      const appName = get(Manager.options, 'app.name');
 
       // console.log(`[Preloader] state=${document.readyState}`, new Date().toISOString());
       // performance.mark('manager_initialize_renderer_preloader_ready');
@@ -114,24 +110,26 @@ module.exports = function (Manager, options) {
 
       setTimeout(function () {
         const previousVisibilityState = Manager.storage.electronManager.get('data.previous.usage.visibilityState');
-        
+
         Manager.log(`[Preloader] Ready to show (visibilityState=${previousVisibilityState})`)
 
         if (previousVisibilityState === 'hidden') {
           return resolve()
         }
 
-        _send({command: 'renderer:show', payload: {source: 'preloader'}});
+        // Send show event
+        Manager.sendEM('renderer:show', {source: 'preloader'});
 
         return resolve();
       }, 300);
-      
+
       // console.log(`[Performance] preloadEnd ${new Date().toISOString()}`);
       Manager.performance.mark('manager_initialize_renderer_preloader_end');
       // clearInterval(logger);
     }
 
-    _send({command: 'console:log', payload: [`[Preloader] Initializing...`]});
+    // Send log
+    Manager.sendEM('console:log', [`[Preloader] Initializing...`]);
 
     // Wait for loaded
     if (

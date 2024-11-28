@@ -165,44 +165,52 @@ async function process_testFunction() {
 
 function process_checkNodeVersion(options) {
   return new Promise(function(resolve, reject) {
-    const packageNodeVersion = `${get(options.package, 'engines.node', null)}`
-    const packageElectronVersion = `${major(coerce(get(options.package, 'devDependencies.electron', null)))}`
+    // Get package versions
+    const packageNodeVersionMajor = `${get(options.package, 'engines.node', null)}`
+    const packageElectronVersionMajor = `${major(coerce(get(options.package, 'devDependencies.electron', null)))}`
 
+    // Log
     console.log(chalk.blue(scriptName, `Checking Node.js version...`));
 
-    if (!packageElectronVersion) {
+    // Check if Electron is installed
+    if (!packageElectronVersionMajor) {
       return reject(new Error('No Electron installed'))
     }
 
-    fetch(`https://cdn.jsdelivr.net/npm/electron-releases@latest/lite.json`, {
+    // Fetch Electron versions
+    fetch(`https://releases.electronjs.org/releases.json`, {
       response: 'json',
       tries: 3,
     })
-    .then(result => {
-      const matchedPack = result.find(p => p.version === `${packageElectronVersion}.0.0`);
+    .then((result) => {
+      const matchedPack = result.find((p) => p.version === `${packageElectronVersionMajor}.0.0`);
 
+      // Quit if no match
       if (!matchedPack) {
         return reject(new Error('Could not find match version'))
       }
 
-      const requiredNodeVersion = `${major(matchedPack.deps.node)}`;
+      // Get Node versions
+      const requiredNodeVersion = `${major(matchedPack.node)}`;
       const usingNodeVersion = `${major(process.versions.node)}`;
 
-      if (packageNodeVersion === requiredNodeVersion && usingNodeVersion === requiredNodeVersion) {
-        console.log(chalk.green(scriptName, `You are using Electron v${packageElectronVersion} which requires Node.js v${requiredNodeVersion} and you're using Node.js v${usingNodeVersion}`));
+      // Check if Node versions match
+      if (packageNodeVersionMajor === requiredNodeVersion && usingNodeVersion === requiredNodeVersion) {
+        console.log(chalk.green(scriptName, `You are using Electron v${packageElectronVersionMajor} which requires Node.js v${requiredNodeVersion} and you're using Node.js v${usingNodeVersion}`));
         return resolve();
       }
 
-      console.log(chalk.red(scriptName, `You are using Electron v${packageElectronVersion} which requires Node.js v${requiredNodeVersion} and you're using Node.js v${usingNodeVersion}`));
-
+      // Log
+      console.log(chalk.red(scriptName, `You are using Electron v${packageElectronVersionMajor} which requires Node.js v${requiredNodeVersion} and you're using Node.js v${usingNodeVersion}`));
       console.log(chalk.blue(scriptName, `Fixing Node.js version...`));
 
+      // Set Node versions
       set(options.package, 'engines.node', `${requiredNodeVersion}`)
       jetpack.write(path.join(process.cwd(), 'package.json'), options.package)
       jetpack.write(path.join(process.cwd(), '.nvmrc'), `v${requiredNodeVersion}/*`)
 
+      // Reject
       return reject(new Error('Please re-start Terminal and run this command again.'))
-
     })
     .catch(e => reject(e))
 

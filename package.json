@@ -1,6 +1,6 @@
 {
   "name": "electron-manager",
-  "version": "0.0.280",
+  "version": "0.0.283",
   "description": "An NPM module with tools, helper functions, and utilities for building a flawless Electron app 🚀",
   "main": "dist/index.js",
   "bin": {
@@ -50,7 +50,7 @@
   },
   "dependencies": {
     "@octokit/rest": "18.12.0",
-    "@sentry/electron": "^5.2.0",
+    "@sentry/electron": "5.3.0",
     "auto-launch": "5.0.6",
     "chalk": "4.1.2",
     "discord-rpc-electron": "4.0.2",
@@ -71,22 +71,23 @@
     "macaddress": "0.5.3",
     "mime-types": "2.1.35",
     "moment": "2.30.1",
-    "node-powertools": "1.5.6",
+    "nanoid": "3.3.7",
+    "node-powertools": "1.7.0",
     "original-fs": "1.2.0",
     "promo-server": "1.0.6",
     "semver": "7.6.3",
     "simple-plist": "1.3.1",
     "uuid": "8.3.2",
-    "web-manager": "^3.2.59",
+    "web-manager": "3.2.66",
     "winreg": "1.2.5",
-    "wonderful-fetch": "1.1.12",
+    "wonderful-fetch": "^1.2.2",
     "yargs": "17.7.2"
   },
   "devDependencies": {
     "prepare-package": "^1.1.13"
   },
   "peerDependencies": {
-    "@electron/notarize": "2.3.2",
+    "@electron/notarize": "2.5.0",
     "@electron/remote": "2.1.2",
     "electron-builder": "23.3.3",
     "electron-updater": "5.2.1",

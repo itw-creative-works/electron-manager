@@ -5,14 +5,15 @@ function Menu(Manager) {
   const self = this;
   self.Manager = Manager;
 
+  // Properties
   self.initialized = false;
   self.instance = null;
   self.generate = null;
   self.menuTemplate = [];
   self.contextMenu = null;
-
   self.analyticsCategory = 'app-menu';
 
+  // Initialize
   MenuHelper.init(self);
   // self.item = MenuHelper.item;
   // self.insert = MenuHelper.insert;
@@ -292,7 +293,7 @@ Menu.prototype.generateDefault = function () {
         [
           {
             id: 'view/reload',
-            label: 'Reload',
+            label: 'Reload This Page',
             accelerator: 'CommandOrControl+R',
             click: async (event) => {
               const mainWindow = Manager.window().get(1);
@@ -309,7 +310,7 @@ Menu.prototype.generateDefault = function () {
         {
           id: 'view/toggle-fullscreen',
           label: 'Toggle Full Screen',
-          accelerator: isMac ? 'Ctrl+Command+F' : 'F11',
+          accelerator: isMac ? 'F11' : 'F11',
           click: async (event) => {
             const mainWindow = Manager.window().get(1);
             if (mainWindow) {
@@ -323,19 +324,60 @@ Menu.prototype.generateDefault = function () {
         // Dev tools
         !resolvedDeveloper ? null :
         [
+          { type: 'separator' },
           {
-            id: 'view/toggle-developer-tools',
-            label: 'Toggle Developer Tools',
-            accelerator: isMac ? 'Command+Option+I' : 'Ctrl+Shift+I',
-            click: async (event) => {
-              const mainWindow = Manager.window().get(1);
-              if (mainWindow) {
-                self.analytics(event);
+            id: 'view/developer',
+            label: 'Developer',
+            submenu: [
+              {
+                id: 'view/developer/toggle-developer-tools',
+                label: 'Toggle Developer Tools',
+                accelerator: isMac ? 'Command+Option+I' : 'Ctrl+Shift+I',
+                click: async (event) => {
+                  const mainWindow = Manager.window().get(1);
+                  if (mainWindow) {
+                    self.analytics(event);
 
-                Manager.window().show(mainWindow.id);
-                mainWindow.browserWindow.webContents.toggleDevTools();
+                    Manager.window().show(mainWindow.id);
+
+                    // Check devtools
+                    if (mainWindow.browserWindow.webContents.isDevToolsOpened()) {
+                      mainWindow.browserWindow.webContents.closeDevTools();
+                    } else {
+                      mainWindow.browserWindow.webContents.openDevTools({ mode: 'docked', activate: true });
+                    }
+                  }
+                }
+              },
+              // {
+              //   id: 'view/developer/view-source',
+              //   label: 'View Source',
+              //   accelerator: isMac ? 'Command+Option+U' : 'Ctrl+Shift+U',
+              //   click: async (event) => {
+              //     const mainWindow = Manager.window().get(1);
+              //     if (mainWindow) {
+              //       self.analytics(event);
+
+              //       Manager.window().show(mainWindow.id);
+              //       mainWindow.browserWindow.webContents.executeJavaScript('window.location.href');
+              //     }
+              //   }
+              // },
+              {
+                id: 'view/developer/inspect-elements',
+                label: 'Inspect Element',
+                accelerator: isMac ? 'Command+Shift+C' : 'Ctrl+Shift+C',
+                click: async (event) => {
+                  const mainWindow = Manager.window().get(1);
+                  if (mainWindow) {
+                    self.analytics(event);
+
+                    Manager.window().show(mainWindow.id);
+                    mainWindow.browserWindow.webContents.inspectElement(0, 0); // You can modify the coordinates as needed
+                  }
+                }
               }
-            }
+            ]
           }
         ],
       ]

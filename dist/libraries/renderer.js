@@ -126,7 +126,7 @@ Renderer.prototype.webview = function () {
           if (options.hidePricingFromStoreUsers && newUrl.pathname.includes('/pricing')) {
             const store = Manager.properties().isStore();
             const { dialog } = Manager.libraries.remote;
-            
+
             // TODO: Implement IAP (in-app purchases)
             if (['mac'].includes(store)) {
               event.preventDefault();
@@ -139,8 +139,8 @@ Renderer.prototype.webview = function () {
                 })
               }, 1000);
             }
-          }          
-          
+          }
+
           if (options.setupAuthenticationHandler && isAuthEntryPage) {
             homepageUrl.pathname = 'authentication-required'
             homepageUrl.searchParams.set('signout', true)
@@ -163,7 +163,7 @@ Renderer.prototype.webview = function () {
         if (options.fullscreen) {
           webview.addEventListener('page-title-updated', function (event) {
             document.title = event.title;
-          })          
+          })
         }
 
         await powertools.poll(function() {
@@ -253,9 +253,9 @@ Renderer.prototype.processDeepLink = function (url) {
   const Manager = self.Manager;
 
   return new Promise(function(resolve, reject) {
-    Manager.libraries.electron.ipcRenderer.invoke('electron-manager-message', {command: 'main:process-deep-link', payload: {
-      url: url
-    }})
+    Manager.sendEM('main:process-deep-link', {
+      url: url,
+    })
     .then(r => {
       return resolve(r);
     })

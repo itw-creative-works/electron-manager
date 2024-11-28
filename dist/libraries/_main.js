@@ -75,11 +75,17 @@ Main.prototype.init = async function (params) {
   // properties
   parent.needsToBeShown = true;
 
+  // Set env variables
+  process.env.NODE_ENV = parent.isDevelopment ? 'development' : undefined;
+
+  // Mark performance
   parent.performance.mark('manager_initialize_main_initializeRemote');
 
+  // Initialize remote
   parent.libraries.remote = parent.libraries.remote || require(path.join(app.getAppPath(), 'node_modules', '@electron/remote/main'));
   parent.libraries.remote.initialize();
 
+  // Mark performance
   parent._handlers = {
     onDeepLink: function () {},
     onDeepLinkFilter: function () {return false},
@@ -110,11 +116,6 @@ Main.prototype.init = async function (params) {
         // If it's not internally handled, return since it's an electron-manager command
         return true;
       }
-
-      // @@@: REMOVE
-      parent.storage.electronManager.set('data.current._test1', {
-        deeplinkingUrl: parent.deeplinkingUrl,
-      });
 
       // Convert to array if not already
       parent.deeplinkingUrl = Array.isArray(parent.deeplinkingUrl) ? parent.deeplinkingUrl : [parent.deeplinkingUrl];
@@ -162,7 +163,7 @@ Main.prototype.init = async function (params) {
         });
 
         // Check if its internally handled
-        if (_internallyHandled(url, parsed)) {
+        if (_internallyHandled(parsed)) {
           return
         }
 
@@ -410,7 +411,11 @@ Main.prototype.init = async function (params) {
   parent.libraries.electronStore.initRenderer();
 
   ipcMain.handle('electron-manager-message', async (event, message) => {
+    // Set message
     message = message || {};
+    message.command = message.command || '';
+    message.sender = message.sender || {};
+    message.sender.id = message.sender.id || -1;
     message.payload = message.payload || {};
 
     // console.log('=====HERE', message);
@@ -422,22 +427,30 @@ Main.prototype.init = async function (params) {
     // } else if (message.command === 'global:set') {
     //   return parent.global().set(message.payload.path, message.payload.value)
     // } else if (message.command === 'global:register') {
-    //   const senderWc = parent.libraries.electron.webContents.fromId(get(event, 'sender.id', -1))
+    //   const senderWc = parent.libraries.electron.webContents.fromId(message.sender.id)
     //   if (senderWc) {
     //     parent._globalListenersWCs = parent._globalListenersWCs.concat(senderWc)
     //   }
     //   return parent._global;
     // } else
     if (message.command === 'renderer:register') {
-      const senderId = get(event, 'sender.id', -1);
-      const senderWc = parent.libraries.electron.webContents.fromId(senderId)
-      if (senderWc && !parent._registeredRenderersIds[senderId]) {
-        parent._registeredRenderers = parent._registeredRenderers.concat(senderWc)
-        parent._registeredRenderersIds[senderId] = true;
+      const senderWc = parent.libraries.electron.webContents.fromId(message.sender.id);
+
+      // Check if the sender is valid OR if the sender is already registered
+      if (!senderWc || parent._registeredRenderersIds[message.sender.id]) {
+        return
       }
+
+      // Register the sender
+      parent._registeredRenderers = parent._registeredRenderers.concat(senderWc)
+      parent._registeredRenderersIds[message.sender.id] = true;
     } else if (message.command === 'renderer:show') {
-      const win = parent.window().get(event.sender.id);
+      const win = parent.window().get(message.sender.id);
+
+      // Check if the window is valid
       if (!win) {return}
+
+      // Show the window
       if (win.main) {
         // parent.log(`[Performance] showMainWindow ${new Date().toISOString()}`);
         parent.performance.mark('manager_initialize_main_showMainWindow');
@@ -457,12 +470,16 @@ Main.prototype.init = async function (params) {
         win.browserWindow.show();
       }
     } else if (message.command === 'renderer:is-ready') {
-      const win = parent.window().get(event.sender.id);
+      // Get the window
+      const win = parent.window().get(message.sender.id);
+
+      // Check if the window is valid
       if (!win) {return}
       // win.browserWindow.setMinimumSize(win.preferences.minWidth, win.preferences.minHeight);
       // win.browserWindow.setSize(win.preferences.width, win.preferences.height);
       // win.browserWindow.show();
 
+      // Remove preloader
       if (preloaderWindow) {
         preloaderWindow.destroy();
         preloaderWindow = null;
@@ -472,9 +489,13 @@ Main.prototype.init = async function (params) {
         }
       }
 
+      _setupDeeplinking(parent);
+
+      // Set ready
       win.ready = true;
       win._internal.handlers.onReady();
 
+      // Check if we need to run non-critical services
       if (win.main) {
         _setupNonCriticalServices(parent);
       }
@@ -616,7 +637,6 @@ Main.prototype.init = async function (params) {
         // options.preferences.webPreferences.backgroundThrottling = typeof options.preferences.webPreferences.backgroundThrottling === 'undefined'
           // ? false : options.preferences.webPreferences.backgroundThrottling;
 
-
         // Attach preferences
         win.preferences = options.preferences;
 
@@ -648,23 +668,17 @@ Main.prototype.init = async function (params) {
           }, parent.isDevelopment ? 1000 * 5 : 1000 * 30);
         }
 
-        // if (parent.isDevelopment) {
-        //   setTimeout(function () {
-        //     if (!win.browserWindow.isVisible()) {
-        //       parent.log('EMERGENCY DEVMODE MAIN WINDOW SHOW', win.id);
-        //       win.browserWindow.show();
-        //     }
-        //   }, 10000);
-        // }
-
+        // Set showDuringPreload
         if (typeof options.showDuringPreload === 'undefined') {
           win.showDuringPreload = win.main ? !parent.initOptions.hideInitially : true;
         } else {
           win.showDuringPreload = options.showDuringPreload;
         }
 
+        // Set createLoggerFunction
         win.createLoggerFunction = typeof options.createLoggerFunction === 'undefined' ? win.main : options.createLoggerFunction;
 
+        // Set id
         win._internal = {
           lockedUrl: '',
           handlers: {
@@ -853,14 +867,16 @@ Main.prototype.init = async function (params) {
         return win;
       },
       get: function (id) {
-        if (id) {
-          if (typeof id === 'number') {
-            return parent.windows.filter(w => w.id === id)[0];
-          } else {
-            return parent.windows.filter(w => w[id])[0];
-          }
-        } else {
+        // Get all windows
+        if (!id) {
           return parent.windows;
+        }
+
+        // Get window
+        if (typeof id === 'number') {
+          return parent.windows.find(w => w.id === id);
+        } else {
+          return parent.windows.find(w => w[id]);
         }
       },
       send: function (id, name, message, options) {
@@ -1305,18 +1321,9 @@ function _instanceLock(parent) {
   }
 }
 
-async function _setupNonCriticalServices(parent) {
+function _setupDeeplinking(parent) {
   const app = parent.libraries.electron.app;
   const options = parent.initOptions;
-
-  if (parent._setupNonCriticalServicesRan) {
-    return;
-  }
-
-  parent._setupNonCriticalServicesRan = true;
-
-  // Mark performance
-  parent.performance.mark('manager_initialize_main_setListeners2');
 
   // Event: open-url
   app.on('open-url', (event, url) => {
@@ -1349,6 +1356,23 @@ async function _setupNonCriticalServices(parent) {
     parent.deeplinkingUrl = process.argv;
     parent._handlers._onDeepLink()
   }
+
+  // Return
+  return;
+}
+
+async function _setupNonCriticalServices(parent) {
+  const app = parent.libraries.electron.app;
+  const options = parent.initOptions;
+
+  if (parent._setupNonCriticalServicesRan) {
+    return;
+  }
+
+  parent._setupNonCriticalServicesRan = true;
+
+  // Mark performance
+  parent.performance.mark('manager_initialize_main_setListeners2');
 
   // In case the visibility state is stuck on hidden, we set it here so the next time it launches it is visible
   parent.app().wasOpenedAtLogin()
@@ -1418,23 +1442,26 @@ async function _setupNonCriticalServices(parent) {
     }
   }, 1000 * 60 * 60 * 24);
 
-  // Setup Discord RPC
-  parent.libraries.discordRPC = new (require('./discord-rpc.js'))(parent);
-  if (options.setupDiscordRPC) {
-    parent.libraries.discordRPC.init().catch(e => console.error(e));
-  }
+  // Delay some non-critical services
+  setTimeout(function () {
+    // Setup Discord RPC
+    parent.libraries.discordRPC = new (require('./discord-rpc.js'))(parent);
+    if (options.setupDiscordRPC) {
+      parent.libraries.discordRPC.init().catch(e => console.error(e));
+    }
 
-  // Mark performance
-  parent.performance.mark('manager_initialize_main_setupDiscordRPC');
+    // Mark performance
+    parent.performance.mark('manager_initialize_main_setupDiscordRPC');
 
-  // Install browser extensions
-  parent.libraries.installBrowserExtensions = new (require('./install-browser-extensions.js'))(parent);
-  if (options.installBrowserExtensions) {
-    parent.libraries.installBrowserExtensions.init().catch(e => console.error(e));
-  }
+    // Install browser extensions
+    parent.libraries.installBrowserExtensions = new (require('./install-browser-extensions.js'))(parent);
+    if (options.installBrowserExtensions) {
+      parent.libraries.installBrowserExtensions.init().catch(e => console.error(e));
+    }
 
-  // Mark performance
-  parent.performance.mark('manager_initialize_main_setupBrowserExtensions');
+    // Mark performance
+    parent.performance.mark('manager_initialize_main_setupBrowserExtensions');
+  }, parent.isDevelopment ? 3000 : 15000);
 
   // const mainLibrary = new (require('./libraries/analytics.js'))(parent, appPath);
   // parent.libraries.analytics = await parent.libraries.analytics.init(get(parent.options, 'config.analytics', {}));

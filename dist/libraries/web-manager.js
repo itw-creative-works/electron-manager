@@ -166,11 +166,13 @@ WM.prototype.init = function (options) {
           _finalAccountDetermined()
         }, 10000);
 
+        // Set up the auth handler
         WebManager.onAuthUpdate = function (handler) {
           self._onAuthUpdateHandler = handler;
           self._onAuthUpdateHandler(self._authUser, self._authUserAdditionalInfo)
         }
 
+        // Set up the auth function
         WebManager.authenticate = function (options) {
           return new Promise(async function(resolve, reject) {
             options = options || {};
@@ -206,15 +208,18 @@ WM.prototype.init = function (options) {
           });
         }
 
+        // Set up the getAuth function
         WebManager.getAuth = function () {
           return {user: self._authUser, info: self._authUserAdditionalInfo}
         }
 
+        // Set up the auth trigger function
         WebManager.triggerAuthUpdate = function () {
           log('triggerAuthUpdate()');
           _triggerAuthStateChangeHandlers()
         }
 
+        // Set up the refreshWebviewAuths function
         WebManager.refreshWebviewAuths = function () {
           const user = self._authUser;
           const info = self._authUserAdditionalInfo;
@@ -324,7 +329,7 @@ WM.prototype.init = function (options) {
               // Overwrite user with config
               if (Object.keys(bemResponse.config.data || {}).length > 0) {
                 _.merge(self._authUser, bemResponse?.config?.data?.user || {})
-                Manager.libraries.electron.ipcRenderer.invoke('electron-manager-message', {command: 'special:alert-config', payload: bemResponse.config.data})
+                Manager.sendEM('special:alert-config', bemResponse.config.data);
               }
 
               log('Request for special:setup-electron-manager-client', bemResponse);
@@ -477,9 +482,9 @@ WM.prototype.init = function (options) {
                   } else if (command === 'signout' || command === 'user:signout') {
                     firebase.auth().signOut();
                   } else if (command === 'relaunch' || command === 'app:relaunch') {
-                    Manager.libraries.electron.ipcRenderer.invoke('electron-manager-message', {command: 'app:relaunch', payload: {force: true}})
+                    Manager.sendEM('app:relaunch', {force: true})
                   } else if (command === 'quit' || command === 'app:quit') {
-                    Manager.libraries.electron.ipcRenderer.invoke('electron-manager-message', {command: 'app:quit', payload: {force: true}})
+                    Manager.sendEM('app:quit', {force: true})
                   }
                 })
 

@@ -26,6 +26,7 @@ BuildScriptPost.prototype.process = async function (options) {
   const self = this;
   let caughtError;
 
+  // Log
   console.log(chalk.green(`*-*-*- Main-build Starting for ${options.package.productName} v${options.package.version} -*-*-*`));
 
   // Check for required environment variables
@@ -34,6 +35,9 @@ BuildScriptPost.prototype.process = async function (options) {
   } else if (!process.env.BACKEND_MANAGER_KEY) {
     return error(new Error(`You need to set the BACKEND_MANAGER_KEY environment variable`));
   }
+
+  // Set environment variables
+  process.env.ELECTRON_MANAGER_YEAR = process.env.ELECTRON_MANAGER_YEAR || new Date().getFullYear();
 
   // Get owner and repo
   const repoSplit = options.package.repository.split('/');

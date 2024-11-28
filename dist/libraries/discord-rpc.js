@@ -117,8 +117,9 @@ RPC.prototype.setActivity = function (activity) {
 
     // self.activity = activity && (activity.details || activity.state) ? activity : self.activity;
 
+    // Check if initialized and connected
+    // If not, return and it will auto retry on the next self.setActivityInterval
     if (!self.initialized || !self.connection || !self.isConnected) {
-      // self.init();
       return resolve(false);
     }
 

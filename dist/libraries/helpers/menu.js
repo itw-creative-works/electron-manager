@@ -11,51 +11,34 @@ Menu.init = function (library) {
 
   // Item lib
   library.item = function (id, type, insert) {
-    const self = this;
-    const searchable = self.menuTemplate;
-    type = type || 'item';
+    const searchable = this.menuTemplate;
 
-    const indexes = [];
+    // Set default type
+    type = type || 'item'
 
     function _find(array) {
-      let found;
-
-      // Dont understand my own code so dont know how to add this
-      // if (id === 'beginning' && insert) {
-      //   for (let j = 0; j < insert.item.length; j++) {
-      //     array.unshift(insert.item[j]);
-      //   }
-      //   return;
-      // } else if (id === 'end' && insert) {
-      //   for (let j = 0; j < insert.item.length; j++) {
-      //     array.push(insert.item[j]);
-      //   }
-      //   return;
-      // }
-
-      for (var i = 0; i < array.length; i++) {
+      for (let i = 0; i < array.length; i++) {
         const item = array[i];
-        if (found) {
-          return found;
-        }
+
         if (item.id === id) {
-          indexes.push(i);
           if (insert) {
             const index = insert.position === 'after' ? i + 1 : i;
-            for (var j = 0; j < insert.item.length; j++) {
-              array.splice(index + j, 0, insert.item[j]);
-            }
+            array.splice(index, 0, ...insert.item);
           }
-          return type === 'item' ? item : indexes;
-        } else if (item.submenu) {
-          indexes.push(i);
-          found = _find(item.submenu);
+          return type === 'item' ? item : [i];
+        }
+
+        if (item.submenu) {
+          const result = _find(item.submenu);
+          if (result) {
+            return type === 'item' ? result : [i, ...result];
+          }
         }
       }
     }
 
-    return _find(searchable)
-  }
+    return _find(searchable);
+  };
 
 
   // Insert lib
@@ -172,7 +155,7 @@ Menu.init = function (library) {
   // library.add = function (condition, items) {
   //   if (!condition) {
   //     return null;
-  //   } else {
+  //   } else {``
   //     return ...items;
   //   }
   // };
@@ -183,6 +166,22 @@ Menu.init = function (library) {
   //     return ...items;
   //   }
   // };
+
+  // Set method
+  library.set = function (id, item) {
+    const self = this;
+    const result = self.item(id);
+
+    // If the item is not found
+    if (!result) {
+      return self;
+    }
+
+    // Set the item
+    Object.assign(result, item);
+
+    return self;
+  };
 
   // Analytics lib
   library.analytics = function (event) {

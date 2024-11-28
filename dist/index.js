@@ -27,8 +27,6 @@ function ElectronManager(options) {
   self.started = new Date();
   self._performanceLog = [];
 
-  self.require = require;
-
   self.options = options || {};
 
   self.interface = {};
@@ -367,16 +365,16 @@ ElectronManager.prototype.init = function (options) {
       self.performance.mark('manager_initialize_renderer_start');
 
       // options.registerGlobalListener = typeof options.registerGlobalListener === 'undefined' ? true : options.registerGlobalListener;
-      options.mainRenderer = typeof options.mainRenderer === 'undefined' ? true : options.mainRenderer;
+      options.mainRenderer = typeof options.mainRenderer === 'undefined' ? true : !!options.mainRenderer;
 
       options.promoServer = options.promoServer || {}
       options.promoServer.log = typeof options.promoServer.log === 'undefined' ? self.isDevelopment : options.promoServer.log;
 
-      options.fetchMainResource = typeof options.fetchMainResource === 'undefined' ? true : options.fetchMainResource;
-      options.fetchMainScript = typeof options.fetchMainScript === 'undefined' ? true : options.fetchMainScript;
-      options.checkHashes = typeof options.checkHashes === 'undefined' ? true : options.checkHashes;
+      options.fetchMainResource = typeof options.fetchMainResource === 'undefined' ? options.mainRenderer : options.fetchMainResource;
+      options.fetchMainScript = typeof options.fetchMainScript === 'undefined' ? options.mainRenderer : options.fetchMainScript;
+      options.checkHashes = typeof options.checkHashes === 'undefined' ? options.mainRenderer : options.checkHashes;
 
-      options.setupContextMenu = typeof options.setupContextMenu === 'undefined' ? true : options.setupContextMenu;
+      options.setupContextMenu = typeof options.setupContextMenu === 'undefined' ? options.mainRenderer : options.setupContextMenu;
 
       // Properties
       self.isReady = false;
@@ -389,12 +387,15 @@ ElectronManager.prototype.init = function (options) {
       self.fetchedEmergencyScript = null;
       self.fetchedBEMClientData = null;
 
+      // Load libraries
       if (self.libraries.remote !== false) {
         self.libraries.remote = self.libraries.remote || require(path.join(self.appPath, 'node_modules', '@electron/remote'));
       }
 
+      // Get webContents
       self.webContents = self.libraries.remote ? self.libraries.remote.getCurrentWebContents() : null;
 
+      // Set log function
       if (self.options.log) {
         self.log = function () {
           // console.log(...arguments);
@@ -413,15 +414,47 @@ ElectronManager.prototype.init = function (options) {
 
       self.performance.mark('manager_initialize_renderer_injectPreloader');
 
-      require('./libraries/preloader.js')(self, options)
-
+      // Setup helper functions
       self.renderer = function () {
         const self = this;
 
         self.libraries.renderer = self.libraries.renderer || new (require('./libraries/renderer.js'))(self);
         return self.libraries.renderer;
       };
+      self.send = function (command, payload, sender) {
+        // Build message
+        const message = {
+          command: command,
+          sender: {
+            id: self.webContents.id || sender?.id || -1,
+          },
+          payload: payload,
+        }
 
+        // Log
+        self.log('Send message', message);
+
+        // Send message
+        return self.libraries.electron.ipcRenderer.invoke('message', message)
+      }
+      self.sendEM = function (command, payload, sender) {
+        // Build message
+        const message = {
+          command: command,
+          sender: {
+            id: self.webContents.id || sender?.id || -1,
+          },
+          payload: payload,
+        }
+
+        // Log
+        self.log('Send electron-manager-message', message);
+
+        // Send message
+        return self.libraries.electron.ipcRenderer.invoke('electron-manager-message', message)
+      }
+
+      // Setup
       self.libraries.electron.ipcRenderer.on('electron-manager-message', function (event, message) {
         message = message || {};
         message.command = message.command || '';
@@ -449,6 +482,11 @@ ElectronManager.prototype.init = function (options) {
         // }
       })
 
+      // Inject preloader (after message listener is set up and helper functions)
+      if (self.mainRenderer) {
+        require('./libraries/preloader.js')(self, options)
+      }
+
       // if (options.registerGlobalListener !== false) {
       //   await self.libraries.electron.ipcRenderer.invoke('electron-manager-message', {command: 'global:register'})
       //   .then(r => {
@@ -458,37 +496,53 @@ ElectronManager.prototype.init = function (options) {
 
       // console.log('---self._global', self._global);
 
+      // Handle main renderer
       if (self.mainRenderer === true) {
         self.performance.mark('manager_initialize_renderer_main_start');
 
+        // Load libraries
         wonderfulFetch = require('wonderful-fetch');
 
-        await self.libraries.electron.ipcRenderer.invoke('electron-manager-message', {command: 'renderer:register'})
+        // Register renderer
+        await self.sendEM('renderer:register');
 
+        // Setup activity throttler
         const _sendActivity = throttle(function () {
           self.log('Send activity');
-          self.libraries.electron.ipcRenderer.invoke('electron-manager-message', {command: 'activity:last-action'})
+          self.sendEM('activity:last-action')
         }, self.isDevelopment ? 5000 : 69696, {leading: true, trailing: true})
 
+        // Setup click event handler
         function _handleClickEvent(event) {
-          if (self.options.log) {
-            self.log('Click', event.target);
+          const $target = event.target;
+
+          // Match function
+          let $match;
+          function match(selector) {
+            return $match = $target.closest(selector);
           }
 
+          // Log event
+          if (self.options.log || self.isDevelopment) {
+            self.log('Click', $target);
+          }
+
+          // Process event
           if (self.libraries.analytics) {
             self.libraries.analytics.process(event);
           }
-          // if (window.t3) {
-            _sendActivity()
-          // }
 
-          const href = event.target.getAttribute('href') || '';
+          // Send activity
+          _sendActivity()
+
+          // Handle links
+          const href = $target.getAttribute('href') || '';
           if (href.startsWith('http')) {
             self.libraries.electron.shell.openExternal(href)
             event.preventDefault();
-          } else if (event.target.matches('.auth-signin-external-btn')) {
+          } else if (match('.auth-signin-external-btn')) {
             self.renderer().openExternalAuthPage('signin');
-          } else if (event.target.matches('.auth-signup-external-btn')) {
+          } else if (match('.auth-signup-external-btn')) {
             self.renderer().openExternalAuthPage('signup');
           }
         }
@@ -500,7 +554,9 @@ ElectronManager.prototype.init = function (options) {
           } else {
             window.Manager = null;
           }
-          self.libraries.electron.ipcRenderer.invoke('electron-manager-message', {command: 'main:rebuild-menus'})
+
+          // Rebuild menus
+          self.sendEM('main:rebuild-menus')
         }
 
         // Setup webManager or base analytics
@@ -556,7 +612,7 @@ ElectronManager.prototype.init = function (options) {
 
                 // Check if using valid version
                 if (!self.isUsingValidVersion && !self.isDevelopment) {
-                  self.libraries.electron.ipcRenderer.invoke('electron-manager-message', {command: 'updater:update'})
+                  self.sendEM('updater:update');
                 }
 
                 // Return
@@ -711,9 +767,7 @@ ElectronManager.prototype.init = function (options) {
         const mainResourceUrl = _resolveFetchUrl('app.resources.main', 'data/resources/main.json');
         if (options.fetchMainResource && mainResourceUrl) {
           await self.fetchMainResource(mainResourceUrl)
-          .catch(e => {
-
-          })
+          .catch(e => e)
         }
 
         // load emergency script
@@ -722,9 +776,7 @@ ElectronManager.prototype.init = function (options) {
         if (options.fetchMainScript && mainScriptUrl) {
           // no need to await because it's not crucial
           self.fetchMainScript(mainScriptUrl, {refetch: true})
-          .catch(e => {
-
-          })
+          .catch(e => e)
         }
 
         // check hashes
@@ -733,15 +785,7 @@ ElectronManager.prototype.init = function (options) {
         if (options.checkHashes && hashUrl) {
           // no need to await this but call a function when done if the hashses mismatch
           self.checkHashes(hashUrl)
-          .catch(e => {
-
-          })
-        }
-
-        self.performance.mark('manager_initialize_renderer_main_setupContextMenu');
-        self.libraries.contextMenu = new (require('./libraries/context-menu.js'))(self);
-        if (options.setupContextMenu) {
-          self.libraries.contextMenu.init();
+          .catch(e => e)
         }
 
         // debug
@@ -757,6 +801,15 @@ ElectronManager.prototype.init = function (options) {
         }
 
         self.performance.mark('manager_initialize_renderer_main_end');
+      }
+
+      // Mark performance
+      self.performance.mark('manager_initialize_renderer_main_setupContextMenu');
+
+      // Setup context menu
+      self.libraries.contextMenu = new (require('./libraries/context-menu.js'))(self);
+      if (options.setupContextMenu) {
+        self.libraries.contextMenu.init();
       }
 
       // TODO: finish this
@@ -793,29 +846,60 @@ ElectronManager.prototype.init = function (options) {
 
       // if (self._global.meta.environment === 'development') {
 
+      // Mark performance
       self.performance.mark('manager_initialize_renderer_setWebManagerElements');
-      if (self.libraries.webManager) {
-        const dom = self.libraries.webManager.dom();
+
+      // Set webManager elements
+      const dom = require('web-manager/lib/dom.js');
+      const select = dom.select;
+      const platformName = self.storage.electronManager.get('data.current.meta.os.name');
+
+      // Set webManager elements
+      self.setDefaultElements = function () {
         // Set dom defaults
-        dom.select('.brand-name-element').setInnerHTML(self.options.app.name)
-        dom.select('.app-id-element').setInnerHTML(self.options.app.id)
-        dom.select('.current-version-element').setInnerHTML(self.package.version)
-        dom.select('.current-year-element').setInnerHTML(new Date().getFullYear())
-        dom.select('.manager-initialized-element').each(function (el) {
+        select('.brand-name-element').setInnerHTML(self.options.app.name)
+        select('.app-id-element').setInnerHTML(self.options.app.id)
+        select('.current-version-element').setInnerHTML(self.package.version)
+        select('.current-year-element').setInnerHTML(new Date().getFullYear())
+        select('.manager-initialized-element').each(($el) => {
           el.remove();
+        })
+
+        // Set keyboard shortcuts
+        select('.keyboard-shortcut-element').each(($el) => {
+          // Hide by default
+          $el.hidden = true;
+
+          // Get platform
+          const elPlatform = $el.dataset.platform;
+
+          // Show if platform matches
+          if (elPlatform.includes(platformName)) {
+            $el.hidden = false;
+          }
         })
       }
 
+      // Wait for document to be ready
+      dom.onDocumentReady(() => {
+        self.setDefaultElements();
+      })
+
+      // Set ready handler
       self.setReady = function () {
+        // Set ready flag
         self.isReady = true;
 
+        // Add preload fade out class
         const preloaderEl = document.getElementById('manager-preloader');
         if (preloaderEl) {
           preloaderEl.classList.add('manager-preloader-remove');
         }
 
-        self.libraries.electron.ipcRenderer.invoke('electron-manager-message', {command: 'renderer:is-ready'})
+        // Send ready message
+        self.sendEM('renderer:is-ready')
 
+        // Remove preloader
         setTimeout(function () {
           if (preloaderEl) {
             preloaderEl.remove();
@@ -823,8 +907,10 @@ ElectronManager.prototype.init = function (options) {
         }, 300);
       }
 
-      // self.log(`[Performance] init (renderer): ${self.started.toISOString()}`);
+      // Mark performance
       self.performance.mark('manager_initialize_renderer_end');
+
+      // Return
       return resolve(self);
     }
   });
@@ -1151,8 +1237,7 @@ ElectronManager.prototype.properties = function () {
       } else {
         return false;
       }
-    },
-
+    }
   }
 };
 
@@ -1164,12 +1249,12 @@ ElectronManager.prototype.usage = function () {
   return self.libraries.usage;
 };
 
-ElectronManager.prototype.library = function (name) {
-  const self = this;
-
-  self.libraries[name] = self.libraries[name] || require(`./libraries/${name}.js`);
-
-  return self.libraries[name];
+// Require
+ElectronManager.prototype.require = function (name) {
+  return require(name);
+};
+ElectronManager.require = function (name) {
+  return require(name);
 };
 
 /*
