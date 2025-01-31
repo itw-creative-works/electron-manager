@@ -64,7 +64,7 @@ ContextMenu.prototype.generateDefault = function (payload) {
 
   const canSelectAll = payload.params.editFlags.canSelectAll || payload.isInputElement;
   const isLink = !!payload.params.linkURL && !payload.params.linkURL.startsWith('file:');
-  const resolvedDeveloper = Manager.resolveDeveloper();
+  const resolvedDeveloper = Manager.isDeveloper();
 
   // Auto-hide bootstrap tooltips
   try {

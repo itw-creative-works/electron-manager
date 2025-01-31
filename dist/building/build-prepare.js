@@ -5,7 +5,7 @@ const plist = require('simple-plist');
 const {get, set} = require('lodash');
 const _ = require('lodash');
 const fetch = require('wonderful-fetch');
-const {coerce, major} = require('semver');
+const wonderfulVersion = require('wonderful-version');
 const { Octokit } = require('@octokit/rest');
 
 const path = require('path');
@@ -166,8 +166,8 @@ async function process_testFunction() {
 function process_checkNodeVersion(options) {
   return new Promise(function(resolve, reject) {
     // Get package versions
-    const packageNodeVersionMajor = `${get(options.package, 'engines.node', null)}`
-    const packageElectronVersionMajor = `${major(coerce(get(options.package, 'devDependencies.electron', null)))}`
+    const packageNodeVersionMajor = wonderfulVersion.major(options.package?.engines?.node);
+    const packageElectronVersionMajor = wonderfulVersion.major(options.package?.devDependencies?.electron);
 
     // Log
     console.log(chalk.blue(scriptName, `Checking Node.js version...`));
@@ -183,6 +183,7 @@ function process_checkNodeVersion(options) {
       tries: 3,
     })
     .then((result) => {
+      // Get matched pack
       const matchedPack = result.find((p) => p.version === `${packageElectronVersionMajor}.0.0`);
 
       // Quit if no match
@@ -191,23 +192,23 @@ function process_checkNodeVersion(options) {
       }
 
       // Get Node versions
-      const requiredNodeVersion = `${major(matchedPack.node)}`;
-      const usingNodeVersion = `${major(process.versions.node)}`;
+      const requiredNodeVersionMajor = wonderfulVersion.major(matchedPack.node);
+      const usingNodeVersionMajor = wonderfulVersion.major(process.versions.node);
 
       // Check if Node versions match
-      if (packageNodeVersionMajor === requiredNodeVersion && usingNodeVersion === requiredNodeVersion) {
-        console.log(chalk.green(scriptName, `You are using Electron v${packageElectronVersionMajor} which requires Node.js v${requiredNodeVersion} and you're using Node.js v${usingNodeVersion}`));
+      if (packageNodeVersionMajor === requiredNodeVersionMajor && usingNodeVersionMajor === requiredNodeVersionMajor) {
+        console.log(chalk.green(scriptName, `You are using Electron v${packageElectronVersionMajor} which requires Node.js v${requiredNodeVersionMajor} and you're using Node.js v${usingNodeVersionMajor}`));
         return resolve();
       }
 
       // Log
-      console.log(chalk.red(scriptName, `You are using Electron v${packageElectronVersionMajor} which requires Node.js v${requiredNodeVersion} and you're using Node.js v${usingNodeVersion}`));
+      console.log(chalk.red(scriptName, `You are using Electron v${packageElectronVersionMajor} which requires Node.js v${requiredNodeVersionMajor} and you're using Node.js v${usingNodeVersionMajor}`));
       console.log(chalk.blue(scriptName, `Fixing Node.js version...`));
 
       // Set Node versions
-      set(options.package, 'engines.node', `${requiredNodeVersion}`)
+      set(options.package, 'engines.node', `${requiredNodeVersionMajor}`)
       jetpack.write(path.join(process.cwd(), 'package.json'), options.package)
-      jetpack.write(path.join(process.cwd(), '.nvmrc'), `v${requiredNodeVersion}/*`)
+      jetpack.write(path.join(process.cwd(), '.nvmrc'), `v${requiredNodeVersionMajor}/*`)
 
       // Reject
       return reject(new Error('Please re-start Terminal and run this command again.'))

@@ -48,7 +48,7 @@ Dock.prototype.init = function (options) {
         app.dock.setMenu(self.contextMenu);
 
         self.instance = app.dock.getMenu();
-      }      
+      }
 
       self.initialized = true;
       return resolve(self);
@@ -61,7 +61,7 @@ Dock.prototype.generateDefault = function () {
   const Manager = self.Manager;
   const { app, Menu, shell } = Manager.libraries.electron;
 
-  const resolvedDeveloper = Manager.resolveDeveloper();
+  const resolvedDeveloper = Manager.isDeveloper();
   const isMac = process.platform === 'darwin';
   const isWin = process.platform === 'win32';
   // let resolvedDeveloper = false;

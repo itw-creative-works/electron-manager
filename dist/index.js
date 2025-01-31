@@ -79,7 +79,7 @@ ElectronManager.prototype.init = function (options) {
     // Set base properties
     self.isDevelopment = false;
     self.appPath = '';
-    self.resolveDeveloper = function () {
+    self.isDeveloper = function () {
       return self.isDevelopment;
     }
 
@@ -333,7 +333,7 @@ ElectronManager.prototype.init = function (options) {
         cwd: 'electron-manager/main',
         clearInvalidConfig: true,
       });
-      self.resolveDeveloper = function () {
+      self.isDeveloper = function () {
         return self.isDevelopment || self.storage.electronManager.get('data.current.user.roles.developer', false)
       }
     }
@@ -435,7 +435,7 @@ ElectronManager.prototype.init = function (options) {
         self.log('Send message', message);
 
         // Send message
-        return self.libraries.electron.ipcRenderer.invoke('message', message)
+        return self.libraries.electron.ipcRenderer.invoke('message', message);
       }
       self.sendEM = function (command, payload, sender) {
         // Build message
@@ -549,7 +549,7 @@ ElectronManager.prototype.init = function (options) {
 
         // Setup auth change handler
         self._internal.authChangeHandler = function (account, info) {
-          if (self.resolveDeveloper()) {
+          if (self.isDeveloper()) {
             window.Manager = self;
           } else {
             window.Manager = null;
@@ -590,7 +590,7 @@ ElectronManager.prototype.init = function (options) {
         self.fetchMainResource = function (url, options) {
           return new Promise(function(resolve, reject) {
             options = options || {};
-            const gte = require('semver/functions/gte');
+            const wonderfulVersion = require('wonderful-version');
 
             // Set flags
             self.fetchedMainResource = false;
@@ -608,7 +608,7 @@ ElectronManager.prototype.init = function (options) {
                 const versionRequired = self.storage.electronManager.get('data.current.resources.main.settings.versionRequired', '0.0.0');
 
                 // Check if using valid version
-                self.isUsingValidVersion = gte(self.package.version, versionRequired);
+                self.isUsingValidVersion = wonderfulVersion.is(self.package.version, '>=', versionRequired);
 
                 // Check if using valid version
                 if (!self.isUsingValidVersion && !self.isDevelopment) {
@@ -763,6 +763,7 @@ ElectronManager.prototype.init = function (options) {
 
 
         // load main.json
+        // FLAG
         self.performance.mark('manager_initialize_renderer_main_loadMainJSON');
         const mainResourceUrl = _resolveFetchUrl('app.resources.main', 'data/resources/main.json');
         if (options.fetchMainResource && mainResourceUrl) {
@@ -793,7 +794,7 @@ ElectronManager.prototype.init = function (options) {
           const self = this;
 
           self.libraries.debug = self.libraries.debug || new (require('./libraries/debug.js'))(self);
-          if (self.resolveDeveloper()) {
+          if (self.isDeveloper()) {
             return self.libraries.debug;
           } else {
             throw new Error('You are not a developer')

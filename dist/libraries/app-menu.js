@@ -76,7 +76,7 @@ Menu.prototype.generateDefault = function () {
   const Manager = self.Manager;
   const { app, Menu, shell } = Manager.libraries.electron;
 
-  const resolvedDeveloper = Manager.resolveDeveloper();
+  const resolvedDeveloper = Manager.isDeveloper();
   const isMac = process.platform === 'darwin';
   const isWin = process.platform === 'win32';
   // let resolvedDeveloper = false;
@@ -103,6 +103,7 @@ Menu.prototype.generateDefault = function () {
         {
           id: 'main/update-check',
           label: `Check for &Updates`,
+          accelerator: 'CommandOrControl+Shift+U',
           visible: !['downloading', 'downloaded'].includes(updaterStatus.code),
           enabled: !['downloading', 'downloaded'].includes(updaterStatus.code),
           click: async (event) => {
