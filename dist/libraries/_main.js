@@ -3,7 +3,7 @@ const moment = require('moment');
 const powertools = require('node-powertools');
 const path = require('path')
 const os = require('os');
-const { get, set, lowerFirst } = require('lodash');
+const { get, set, lowerFirst, debounce } = require('lodash');
 const uuid = require('uuid');
 const Manager = require('web-manager');
 const AccountResolver = new (require('web-manager/lib/account.js'))({
@@ -314,6 +314,14 @@ Main.prototype.init = async function (params) {
       hours: get(currentData, 'usage.hours', 0),
       shutDownSafely: false,
       wasRelaunched: false,
+      window: {
+        bounds: {
+          x: 0,
+          y: 0,
+          width: 0,
+          height: 0,
+        }
+      }
     },
     paths: {
       mainDir: __dirname,
@@ -612,6 +620,11 @@ Main.prototype.init = async function (params) {
           ? win.main : options.preventDevTools;
         win.showMiniPreloader = typeof options.showMiniPreloader === 'undefined'
           ? win.main : options.showMiniPreloader;
+        win.saveSize = typeof options.saveSize === 'undefined'
+          ? win.main : options.saveSize;
+
+        // Get previous bounds
+        const previousBounds = parent.storage.electronManager.get('data.previous.usage.window.bounds', {});
 
         // Set preferences
         options.preferences = options.preferences || {};
@@ -625,6 +638,19 @@ Main.prototype.init = async function (params) {
           ? 608 : options.preferences.minWidth;
         options.preferences.minHeight = typeof options.preferences.minHeight === 'undefined'
           ? 342 : options.preferences.minHeight;
+
+        // Set bounds
+        // FLAG
+        console.log('🚩🚩🚩🚩🚩', 1, ); // FLAG
+        console.log('previousBounds', previousBounds);
+
+        if (win.saveSize && win.main) {
+        console.log('🚩🚩🚩🚩🚩', 2, ); // FLAG
+          options.preferences.width = previousBounds.width || options.preferences.width;
+          options.preferences.height = previousBounds.height || options.preferences.height;
+          options.preferences.x = previousBounds.x || options.preferences.x;
+          options.preferences.y = previousBounds.y || options.preferences.y;
+        }
 
         // Set webPreferences
         options.preferences.webPreferences = options.preferences.webPreferences || {};
@@ -772,6 +798,24 @@ Main.prototype.init = async function (params) {
               app.dock.show();
             }
           });
+        }
+
+        // Attach resize event
+        if (win.saveSize && win.main) {
+          const handleWindowEvent = async (event) => {
+            // Get bounds
+            const bounds = win.browserWindow.getBounds();
+
+            // Log event
+            parent.log(event.type, bounds);
+
+            // Save bounds
+            parent.storage.electronManager.set('data.current.usage.window.bounds', bounds);
+          };
+
+          // Attach events
+          win.browserWindow.on('resize', debounce(handleWindowEvent, 250));
+          win.browserWindow.on('move', debounce(handleWindowEvent, 250));
         }
 
         // Attach window change event handlers

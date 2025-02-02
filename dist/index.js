@@ -351,7 +351,6 @@ ElectronManager.prototype.init = function (options) {
     // ALL: 'all'
     // require('./libraries/_all.js')({self: self})
 
-
     // MAIN: 'main'
     if (self.process === 'main') {
       const main = new (require('./libraries/_main.js'))
@@ -586,43 +585,68 @@ ElectronManager.prototype.init = function (options) {
           console.error('Error setting up listeners', e);
         }
 
+        // Get user data path
+        function getCahcePath(name) {
+          const userDataPath = self.storage.electronManager.get('data.current.paths.userData', '');
+          const cachePath = path.join(userDataPath, 'electron-manager', 'cache', name);
+
+          return cachePath;
+        }
+
         // Setup fetch function
         self.fetchMainResource = function (url, options) {
           return new Promise(function(resolve, reject) {
-            options = options || {};
+            // Libraries
             const wonderfulVersion = require('wonderful-version');
+            const cachePath = getCahcePath('main.json');
+
+            // Set options
+            options = options || {};
 
             // Set flags
             self.fetchedMainResource = false;
             self.isUsingValidVersion = null;
 
+            // Helper function for success
+            function handleSuccess(r) {
+              // Set fetched flag
+              self.fetchedMainResource = true;
+
+              // Import into storage
+              self.storage.electronManager.set('data.current.resources.main', r);
+
+              // Save to cache
+              jetpack.write(cachePath, r);
+
+              // Set version required
+              const versionRequired = self.storage.electronManager.get('data.current.resources.main.settings.versionRequired', '0.0.0');
+
+              // Check if using valid version
+              self.isUsingValidVersion = wonderfulVersion.is(self.package.version, '>=', versionRequired);
+
+              // Check if using valid version
+              if (!self.isUsingValidVersion && !self.isDevelopment) {
+                self.sendEM('updater:update');
+              }
+
+              // Return
+              return resolve(r);
+            }
+
+            // Fetch
             wonderfulFetch(url, {timeout: 30000, response: 'json', tries: 3, log: false})
-              .then(r => {
-                // Set fetched flag
-                self.fetchedMainResource = true;
-
-                // Import into storage
-                self.storage.electronManager.set('data.current.resources.main', r);
-
-                // Set version required
-                const versionRequired = self.storage.electronManager.get('data.current.resources.main.settings.versionRequired', '0.0.0');
-
-                // Check if using valid version
-                self.isUsingValidVersion = wonderfulVersion.is(self.package.version, '>=', versionRequired);
-
-                // Check if using valid version
-                if (!self.isUsingValidVersion && !self.isDevelopment) {
-                  self.sendEM('updater:update');
-                }
-
-                // Return
-                return resolve(r);
-              })
+              .then(handleSuccess)
               .catch(e => {
-                self.isUsingValidVersion = false;
-                return reject(e);
-              })
-
+                // Try to load from cache on failure
+                const cacheExists = jetpack.exists(cachePath);
+                // FLAG
+                if (cacheExists) {
+                  handleSuccess(jetpack.read(cachePath, 'json'));
+                } else {
+                  self.isUsingValidVersion = false;
+                  return reject(e);
+                }
+              });
           });
         }
 
