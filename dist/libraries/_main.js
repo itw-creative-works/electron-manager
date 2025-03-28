@@ -21,6 +21,20 @@ const MAIN_WINDOW_CHANGE_EVENTS = [
   'show', 'hide',
   // 'minimize', 'maximize', 'unmaximize', 'restore',
 ]
+const ARGV_OPTIONS = {
+  useDevelopmentURLs: {
+    type: 'boolean',
+    default: true,
+  },
+  enableLiveSentry: {
+    type: 'boolean',
+    default: false,
+  },
+  devUpdateStatus: {
+    type: 'string',
+    default: '',
+  }
+}
 
 let shutdownHandled = false;
 let devlopmentRMDownload = false;
@@ -33,12 +47,18 @@ function Main() {
 
 Main.prototype.init = async function (params) {
   const self = this;
+
+  // Shortcuts
   const parent = params.parent;
   const options = params.options;
+
+  // Attach parent
   self.parent = parent;
 
+  // Mark performance
   parent.performance.mark('manager_initialize_main_start');
 
+  // Load libraries
   const { ipcMain, app } = parent.libraries.electron;
   const environment = parent.isDevelopment ? 'development' : 'production'
 
@@ -338,7 +358,7 @@ Main.prototype.init = async function (params) {
     uuid: get(currentData, 'uuid', null) || uuid.v4(),
     sessionId: uuid.v4(),
     user: AccountResolver._resolveAccount(),
-    argv: require('yargs').argv,
+    argv: resolveArgv(self),
     deeplink: {},
   };
 
@@ -640,12 +660,7 @@ Main.prototype.init = async function (params) {
           ? 342 : options.preferences.minHeight;
 
         // Set bounds
-        // FLAG
-        console.log('🚩🚩🚩🚩🚩', 1, ); // FLAG
-        console.log('previousBounds', previousBounds);
-
         if (win.saveSize && win.main) {
-        console.log('🚩🚩🚩🚩🚩', 2, ); // FLAG
           options.preferences.width = previousBounds.width || options.preferences.width;
           options.preferences.height = previousBounds.height || options.preferences.height;
           options.preferences.x = previousBounds.x || options.preferences.x;
@@ -1617,6 +1632,43 @@ function _windowChangeEventHandler(parent, event, win) {
 
 function _isValidWindow(win) {
   return win && win.browserWindow && !win.browserWindow.isDestroyed();
+}
+
+function resolveArgv(self) {
+  const argv = require('yargs').argv;
+
+  // Merge options
+  const merged = {
+    ...ARGV_OPTIONS,
+    ...self.parent.options.argv,
+  };
+
+  // Loop through and set the value
+  Object.keys(merged)
+  .forEach(name => {
+    const node = merged[name];
+    const type = node.type || 'string';
+    let value = argv[name];
+
+    // Resolve
+    if (typeof value === 'undefined') {
+      value = node.default;
+    }
+
+    // Force
+    if (type) {
+      value = powertools.force(value, type);
+    }
+
+    // Set
+    argv[name] = value;
+  });
+
+  // Log
+  // console.log('resolveArgv()', argv);
+
+  // Return
+  return argv;
 }
 
 module.exports = Main;

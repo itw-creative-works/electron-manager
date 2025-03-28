@@ -229,7 +229,7 @@ Renderer.prototype.openExternalAuthPage = function (pathname, options) {
   const newUrl = new URL(Manager.package.homepage)
   if (
     Manager.isDevelopment
-    && Manager.storage.electronManager.get('data.current.argv', {}).useDevelopmentURLs !== 'false'
+    && Manager.storage.electronManager.get('data.current.argv', {}).useDevelopmentURLs
   ) {
     newUrl.protocol = 'http:'
     newUrl.host = 'localhost:4000'

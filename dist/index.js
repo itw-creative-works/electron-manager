@@ -256,7 +256,7 @@ ElectronManager.prototype.init = function (options) {
               console.error('Sentry caught an error:', processedError, event.tags);
 
               // Block event if not enabled
-              if (storage?.argv?.enableLiveSentry !== 'true') {
+              if (!storage?.argv?.enableLiveSentry) {
                 return null;
               }
             }
@@ -776,9 +776,9 @@ ElectronManager.prototype.init = function (options) {
           }
 
           // Use development urls IF development mode is enabled
-          if (self.isDevelopment && self.storage.electronManager.get('data.current.argv', {}).useDevelopmentURLs !== 'false') {
-            resolvedUrl.protocol = 'http:'
-            resolvedUrl.host = 'localhost:4000'
+          if (self.isDevelopment && self.storage.electronManager.get('data.current.argv', {}).useDevelopmentURLs) {
+            resolvedUrl.protocol = 'http:';
+            resolvedUrl.host = 'localhost:4000';
           }
 
           // Resolve as string
