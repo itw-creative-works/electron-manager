@@ -83,6 +83,10 @@ BuildScriptPost.prototype.process = async function (options) {
     if (activeRun.conclusion === 'failure') {
       await process_getWorkflowRunLogs(options).catch(e => e);
 
+      // Log URL to the github website where the workflow is
+      const workflowUrl = `https://github.com/${owner}/${repo}/actions/runs/${activeRun.id}`;
+      console.log(chalk.yellow(scriptName, `View Online: ${workflowUrl}`));
+
       return error(new Error(`Workflow failed`));
     } else {
       console.log(chalk.green(scriptName, `Workflow ${activeRun.id} finished: created=${activeRun.created_at}, status=${activeRun.status}, conclusion=${activeRun.conclusion}`));
