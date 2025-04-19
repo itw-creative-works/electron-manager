@@ -61,7 +61,7 @@ BuildScriptPost.prototype.process = async function (options) {
     if (caughtError instanceof Error) {return error(caughtError)}
 
     // Check for invalid defaults
-    caughtError = await process_checkInvalidDefaults().catch(e => e)
+    caughtError = await process_checkInvalidDefaults(options).catch(e => e)
     if (caughtError instanceof Error) {return error(caughtError)}
 
     // Start workflow
