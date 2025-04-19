@@ -144,7 +144,7 @@ function process_checkUncomitted() {
   });
 }
 
-function process_checkInvalidDefaults() {
+function process_checkInvalidDefaults(options) {
   return new Promise(function(resolve, reject) {
 
     console.log(chalk.blue(scriptName, `Checking for improper defaults...`));
