@@ -85,7 +85,7 @@ BuildScriptPost.prototype.process = async function (options) {
 
       // Log URL to the github website where the workflow is
       const workflowUrl = `https://github.com/${owner}/${repo}/actions/runs/${activeRun.id}`;
-      console.log(chalk.yellow(scriptName, `View Online: ${workflowUrl}`));
+      console.log(chalk.yellow(scriptName, `View: ${workflowUrl}`));
 
       return error(new Error(`Workflow failed`));
     } else {
