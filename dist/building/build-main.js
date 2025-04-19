@@ -60,6 +60,10 @@ BuildScriptPost.prototype.process = async function (options) {
     caughtError = await process_checkUncomitted().catch(e => e)
     if (caughtError instanceof Error) {return error(caughtError)}
 
+    // Check for invalid defaults
+    caughtError = await process_checkInvalidDefaults().catch(e => e)
+    if (caughtError instanceof Error) {return error(caughtError)}
+
     // Start workflow
     caughtError = await process_startWorkflow().catch(e => e)
     if (caughtError instanceof Error) {return error(caughtError)}
@@ -137,6 +141,23 @@ function process_checkUncomitted() {
       return resolve();
     })
     .catch(e => reject(e))
+  });
+}
+
+function process_checkInvalidDefaults() {
+  return new Promise(function(resolve, reject) {
+
+    console.log(chalk.blue(scriptName, `Checking for improper defaults...`));
+
+    // https://github.com/itw-creative-works/electron-boilerplate
+
+    // Reject if the package.json repository contains "electron-boilerplate"
+    if (options.package.repository && options.package.repository.includes('electron-boilerplate')) {
+      return reject(new Error(`The package.json repository contains "electron-boilerplate". Please update it to your own repository.`));
+    }
+
+    // Resolve otherwise
+    return resolve();
   });
 }
 
