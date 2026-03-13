@@ -190,8 +190,8 @@ Analytics.prototype.init = function (options) {
   };
 
   // Set id and secret
-  self.analyticsId = Manager?.options?.config?.analytics?.id;
-  self.analyticsSecret = Manager?.options?.config?.analytics?.secret;
+  self.analyticsId = Manager?.options?.config?.analytics?.providers?.google?.id;
+  self.analyticsSecret = Manager?.options?.config?.analytics?.providers?.google?.secret;
 
   // Check if we have the required properties
   if (!self.analyticsId || !self.analyticsSecret) {

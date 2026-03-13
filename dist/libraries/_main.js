@@ -90,6 +90,9 @@ Main.prototype.init = async function (params) {
   options._downloadRestartManager = typeof options._downloadRestartManager === 'undefined' ? false : options._downloadRestartManager;
   options._openDevelopmentRestartManager = typeof options._openDevelopmentRestartManager === 'undefined' ? false : options._openDevelopmentRestartManager;
 
+  // Switches
+  options.switches = options.switches || [];
+
   parent.initOptions = options;
 
   // properties
@@ -98,12 +101,25 @@ Main.prototype.init = async function (params) {
   // Set env variables
   process.env.NODE_ENV = parent.isDevelopment ? 'development' : undefined;
 
+  // Attach swtiches
+  options.switches.forEach((s) => {
+    const [key, value] = s.replace(/^--/, '').split('=');
+    console.log(`Appending switch: key=${key}, value=${value || ''}`);
+    app.commandLine.appendSwitch(key, value || '');
+  });
+
   // Mark performance
   parent.performance.mark('manager_initialize_main_initializeRemote');
 
   // Initialize remote
   parent.libraries.remote = parent.libraries.remote || require(path.join(app.getAppPath(), 'node_modules', '@electron/remote/main'));
   parent.libraries.remote.initialize();
+
+  // Log ready event
+  app.whenReady().then(async () => {
+    console.log('App is ready');
+    parent.performance.mark('manager_initialize_main_appReady');
+  });
 
   // Mark performance
   parent._handlers = {

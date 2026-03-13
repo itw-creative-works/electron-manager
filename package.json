@@ -1,12 +1,13 @@
 {
   "name": "electron-manager",
-  "version": "0.0.294",
+  "version": "0.0.295",
   "description": "An NPM module with tools, helper functions, and utilities for building a flawless Electron app 🚀",
   "main": "dist/index.js",
   "bin": {
     "electron-manager": "./bin/electron-manager",
     "electronmanager": "./bin/electron-manager",
-    "eman": "./bin/electron-manager"
+    "eman": "./bin/electron-manager",
+    "em": "./bin/electron-manager"
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
