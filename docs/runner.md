@@ -55,7 +55,7 @@ This kicks the GH Actions matrix. The Windows job builds unsigned, uploads `wind
 **Step 5 — If the windows-sign job fails, debug on the Windows box:**
 ```powershell
 # Watcher heartbeats + errors
-type $env:USERPROFILE\.em-runner\watcher.log
+type .gh-runners\watcher\watcher.log
 
 # Service event log
 eventvwr.msc   # Windows Logs → Application → filter source: actions-runner-svc
@@ -83,7 +83,7 @@ npx mgr runner install
 ```
 
 `install`:
-1. Downloads `actions/runner` (pinned version) into `%USERPROFILE%\.em-runner\actions-runner\`.
+1. Downloads `actions/runner` (pinned version) into `<EM-clone>\.gh-runners\actions-runner-<org>\`.
 2. Discovers every GitHub org you have admin on (via `GH_TOKEN`).
 3. Registers a runner with labels `[self-hosted, windows, ev-token]` against each org.
 4. Installs the `em-runner-watcher` Windows service that:
@@ -213,7 +213,7 @@ Open this repo's `docs/runner.md` in your new chat and ask the assistant to "con
 
 ```powershell
 npx mgr runner status                   # service health
-type %USERPROFILE%\.em-runner\watcher.log  # last 50 lines of watcher log
+type <EM-clone>\.gh-runners\watcher\watcher.log  # last 50 lines of watcher log
 $env:GH_TOKEN = "ghp_..."               # confirm scope: settings/tokens shows admin:org checked
 npx mgr sign-windows --smoke            # smoke test
 ```
@@ -247,10 +247,10 @@ Your `GH_TOKEN` lacks `admin:org` scope for that org. Re-issue the token at <htt
 
 ### `actions.runner` service won't start
 1. Open `eventvwr.msc` → Windows Logs → Application. Look for entries from `actions-runner-svc`.
-2. Common cause: working directory `%USERPROFILE%\.em-runner\actions-runner` isn't writable by the service account. Either fix permissions or change the service's "Log On" user.
+2. Common cause: working directory `<EM-clone>\.gh-runners\actions-runner-<org>` isn't writable by the service account. Either fix permissions or change the service's "Log On" user.
 
 ### Watcher service appears installed but isn't ticking
-Check `%USERPROFILE%\.em-runner\watcher.log`. If it stops after a `tick: error GH API …`, your `GH_TOKEN` rotated or got revoked. Update `.env` with the new token, then run `npx mgr runner install` — it's idempotent and re-bakes the new token into the watcher service.
+Check `<EM-clone>\.gh-runners\watcher\watcher.log`. If it stops after a `tick: error GH API …`, your `GH_TOKEN` rotated or got revoked. Update `.env` with the new token, then run `npx mgr runner install` — it's idempotent and re-bakes the new token into the watcher service.
 
 ### After Windows update, signtool can't find the token
 The SafeNet driver sometimes detaches after major OS updates. Open SafeNet Authentication Client tray app → check token shows up → run `npx mgr runner status` to confirm services are healthy. Then `npx mgr sign-windows --smoke` to validate end-to-end.
@@ -259,11 +259,11 @@ The SafeNet driver sometimes detaches after major OS updates. Open SafeNet Authe
 
 | Path | What's there |
 |---|---|
-| `%USERPROFILE%\.em-runner\` | EM-managed runner state |
-| `%USERPROFILE%\.em-runner\actions-runner\` | GitHub's actions/runner binary |
-| `%USERPROFILE%\.em-runner\watcher\watcher.js` | The auto-registration daemon |
-| `%USERPROFILE%\.em-runner\watcher.log` | Watcher heartbeats + errors |
-| `%USERPROFILE%\.em-runner\config.json` | Bootstrap timestamp, registered orgs, labels |
+| `<EM-clone>\.gh-runners\` | EM-managed runner state |
+| `<EM-clone>\.gh-runners\actions-runner-<org>\` | GitHub's actions/runner binary |
+| `<EM-clone>\.gh-runners\watcher\watcher.js` | The auto-registration daemon |
+| `<EM-clone>\.gh-runners\watcher\watcher.log` | Watcher heartbeats + errors |
+| `<EM-clone>\.gh-runners\config.json` | Bootstrap timestamp, registered orgs, labels |
 | `eventvwr.msc` → Application | Service start/stop events for both services |
 
 ## Pinning + upgrades

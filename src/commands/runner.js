@@ -26,7 +26,11 @@ const Manager  = new (require('../build.js'));
 const logger   = Manager.logger('runner');
 
 const RUNNER_LABELS = ['self-hosted', 'windows', 'ev-token'];
-const RUNNER_HOME   = path.join(os.homedir(), '.em-runner');
+// Runner files live inside the cwd (typically the EM clone on the runner box) under .gh-runners/.
+// Override via EM_RUNNER_HOME if you want them somewhere else (e.g. a separate disk for size).
+// Falls back to <cwd>/.gh-runners so everything's self-contained next to the EM project.
+// Add /.gh-runners/ to your .gitignore — EM's own .gitignore already has it.
+const RUNNER_HOME = process.env.EM_RUNNER_HOME || path.join(process.cwd(), '.gh-runners');
 const ACTIONS_RUNNER_VERSION = '2.319.1';   // pinned; bump intentionally
 
 module.exports = async function (options) {
@@ -54,8 +58,6 @@ async function install(options) {
   ensureWindowsAdmin();
 
   // Idempotent by replacement: always tear down any prior install before starting.
-  // Cheaper to think about than smart skip-logic per-org/per-service. Re-running
-  // install on a working setup briefly drops the runner (~5s) then re-creates it.
   if (jetpack.exists(RUNNER_HOME)) {
     logger.log(`Existing em-runner installation detected — uninstalling first for a clean re-install...`);
     try {
@@ -68,25 +70,38 @@ async function install(options) {
   logger.log(`Installing em-runner under ${RUNNER_HOME}`);
   jetpack.dir(RUNNER_HOME);
 
-  // 1. Download actions/runner.
-  const runnerDir = path.join(RUNNER_HOME, 'actions-runner');
-  await downloadActionsRunner(runnerDir);
+  // 1. Download actions/runner ONCE into a template dir. Per-org dirs are cloned from this.
+  // Each actions-runner directory can only register against one org (it stores config files
+  // at the top of the dir), so multi-org = multi-directory + multi-service.
+  const templateDir = path.join(RUNNER_HOME, '_template');
+  await downloadActionsRunner(templateDir);
 
-  // 2. Discover orgs the GH_TOKEN has admin on.
-  const orgs = await discoverAdminOrgs();
-  if (orgs.length === 0) {
-    logger.warn('Your GH_TOKEN has no orgs you can admin. The watcher will register orgs as you gain access.');
-  } else {
-    logger.log(`Detected ${orgs.length} admin org(s): ${orgs.join(', ')}`);
+  // 2. Resolve target orgs: filter list from EM_RUNNER_ORGS if set, otherwise all admin orgs.
+  const allAdminOrgs = await discoverAdminOrgs();
+  if (allAdminOrgs.length === 0) {
+    logger.warn('Your GH_TOKEN has no orgs you can admin.');
   }
 
-  // 3. Register against each org (idempotent — skips if already registered with our labels).
-  // Track outcomes so we can summarize cleanly + dedupe identical errors.
+  const filterRaw = process.env.EM_RUNNER_ORGS || '';
+  const filter = filterRaw.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
+  let orgs;
+  if (filter.length > 0) {
+    const filterSet = new Set(filter.map((o) => o.toLowerCase()));
+    orgs = allAdminOrgs.filter((o) => filterSet.has(o.toLowerCase()));
+    const unmatched = filter.filter((f) => !allAdminOrgs.find((a) => a.toLowerCase() === f.toLowerCase()));
+    logger.log(`EM_RUNNER_ORGS filter applied: ${orgs.length} matched (out of ${allAdminOrgs.length} admin orgs)`);
+    if (unmatched.length > 0) logger.warn(`EM_RUNNER_ORGS lists ${unmatched.length} org(s) you don't admin: ${unmatched.join(', ')}`);
+  } else {
+    orgs = allAdminOrgs;
+    logger.log(`Detected ${orgs.length} admin org(s) (set EM_RUNNER_ORGS in .env to install against a subset): ${orgs.join(', ')}`);
+  }
+
+  // 3. For each org: copy the template dir, run config.cmd inside it, register as service.
   const succeeded = [];
-  const failedByReason = new Map();   // reason -> [orgs that failed for that reason]
+  const failedByReason = new Map();
   for (const org of orgs) {
     try {
-      await registerOrg({ ...options, _: ['runner', 'register-org', org] });
+      await registerOrg({ ...options, _: ['runner', 'register-org', org], _templateDir: templateDir });
       succeeded.push(org);
     } catch (e) {
       const reason = e.message || String(e);
@@ -98,17 +113,16 @@ async function install(options) {
   // 4. Install the em-runner-watcher service.
   await installWatcherService();
 
-  // 5. Save install metadata so other commands know we've been set up.
+  // 5. Save install metadata.
   saveConfig({
     installedAt: new Date().toISOString(),
     actionsRunnerVersion: ACTIONS_RUNNER_VERSION,
     labels: RUNNER_LABELS,
     registeredOrgs: succeeded,
+    filterUsed: filter.length > 0 ? filter : null,
   });
 
-  // 6. Summarize. If at least one org succeeded, install is "partial success" — watcher
-  // can pick up the rest later when permissions are fixed. If zero succeeded, surface that
-  // loudly: the runner isn't actually serving anything.
+  // 6. Summarize.
   logger.log('');
   logger.log(`────── Install summary ──────`);
   logger.log(`Successfully registered: ${succeeded.length} / ${orgs.length} org(s)`);
@@ -123,7 +137,7 @@ async function install(options) {
   logger.log('');
 
   if (succeeded.length === 0 && orgs.length > 0) {
-    logger.error(`Install partially failed: 0 of ${orgs.length} orgs registered. The watcher service is installed but has nothing to serve. Fix the GH_TOKEN scopes, then run 'npx mgr runner install' again.`);
+    logger.error(`Install failed: 0 of ${orgs.length} orgs registered. Fix the errors above, then run 'npx mgr runner install' again.`);
     process.exitCode = 1;
     return;
   }
@@ -150,31 +164,57 @@ async function registerOrg(options) {
     regToken = data.token;
   } catch (e) {
     if (e.status === 403) {
-      throw new Error(`GH_TOKEN lacks admin:org scope for ${org}. Classic PATs need 'admin:org' (full) for runner registration — manage_runners:org alone is insufficient. Re-issue at https://github.com/settings/tokens.`);
+      throw new Error(`GH_TOKEN lacks admin:org scope for ${org}. Classic PATs need 'admin:org' (full) for runner registration. Re-issue at https://github.com/settings/tokens.`);
     }
     throw e;
   }
 
-  // Run actions/runner config.cmd to register against this org.
-  const runnerDir = path.join(RUNNER_HOME, 'actions-runner');
-  const configCmd = path.join(runnerDir, 'config.cmd');
-  if (!jetpack.exists(configCmd)) {
-    throw new Error(`actions/runner not installed yet. Run 'npx mgr runner install' first.`);
+  // Per-org actions-runner directory. Each registration writes config files at the top of
+  // its dir; sharing one dir across orgs would race + clobber. Cost: ~120 MB per org on disk.
+  const orgRunnerDir = path.join(RUNNER_HOME, `actions-runner-${org.toLowerCase()}`);
+  if (!jetpack.exists(path.join(orgRunnerDir, 'config.cmd'))) {
+    const templateDir = options._templateDir || path.join(RUNNER_HOME, '_template');
+    if (!jetpack.exists(path.join(templateDir, 'config.cmd'))) {
+      throw new Error(`actions/runner template not found at ${templateDir}. Run 'npx mgr runner install' first.`);
+    }
+    logger.log(`  Cloning actions-runner template → actions-runner-${org.toLowerCase()}/`);
+    jetpack.copy(templateDir, orgRunnerDir, { overwrite: true });
   }
 
-  const { spawnSync } = require('child_process');
+  const configCmd = path.join(orgRunnerDir, 'config.cmd');
+  const runnerName = `em-runner-${os.hostname().toLowerCase()}-${org.toLowerCase()}`.slice(0, 64);   // GH max 64 chars
   const args = [
     '--unattended',
     '--url',    `https://github.com/${org}`,
     '--token',  regToken,
-    '--name',   `em-runner-${os.hostname().toLowerCase()}-${org}`,
+    '--name',   runnerName,
     '--labels', RUNNER_LABELS.join(','),
     '--runasservice',
     '--replace',
   ];
-  logger.log(`Registering against ${org}…`);
-  const r = spawnSync(configCmd, args, { cwd: runnerDir, stdio: 'inherit' });
-  if (r.status !== 0) throw new Error(`config.cmd exited ${r.status} while registering ${org}`);
+
+  const { spawnSync } = require('child_process');
+  logger.log(`Registering against ${org} (cwd: ${orgRunnerDir})…`);
+  const r = spawnSync(configCmd, args, {
+    cwd:      orgRunnerDir,
+    stdio:    ['ignore', 'pipe', 'pipe'],   // capture so we can surface real errors
+    encoding: 'utf8',
+    shell:    true,                          // .cmd files need shell:true on Windows
+    timeout:  120000,                        // 2 min hard cap
+  });
+
+  if (r.error) {
+    throw new Error(`Could not spawn config.cmd: ${r.error.message}`);
+  }
+  if (r.status !== 0) {
+    const stdoutTail = (r.stdout || '').trim().split('\n').slice(-10).join('\n');
+    const stderrTail = (r.stderr || '').trim().split('\n').slice(-10).join('\n');
+    const detail = [
+      stdoutTail && `stdout: ${stdoutTail}`,
+      stderrTail && `stderr: ${stderrTail}`,
+    ].filter(Boolean).join('\n');
+    throw new Error(`config.cmd exited ${r.status === null ? 'null (killed)' : r.status} for ${org}.\n${detail || '(no output captured)'}`);
+  }
 
   // Track in our config.
   const cfg = readConfig();
@@ -451,13 +491,19 @@ async function installWatcherService() {
     throw new Error('node-windows missing. Run `npm i -g node-windows` on the Windows box, then re-run `npx mgr runner install`.');
   }
 
+  // Bake RUNNER_HOME into the service env so the watcher resolves the same paths the
+  // install used, regardless of what its cwd ends up being once Windows starts the service.
   const svc = new Service({
     name:        WATCHER_SERVICE_NAME,
     description: 'electron-manager runner watcher (auto-registers new GitHub orgs to the EV-token runner)',
     script:      path.join(watcherDir, 'watcher.js'),
     nodeOptions: [],
     workingDirectory: watcherDir,
-    env: [{ name: 'GH_TOKEN', value: process.env.GH_TOKEN }],
+    env: [
+      { name: 'GH_TOKEN',       value: process.env.GH_TOKEN },
+      { name: 'EM_RUNNER_HOME', value: RUNNER_HOME },
+      ...(process.env.EM_RUNNER_ORGS ? [{ name: 'EM_RUNNER_ORGS', value: process.env.EM_RUNNER_ORGS }] : []),
+    ],
   });
 
   return new Promise((resolve, reject) => {

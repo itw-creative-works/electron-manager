@@ -17,7 +17,10 @@ const { spawn, spawnSync } = require('child_process');
 const https       = require('https');
 
 const POLL_INTERVAL_MS = parseInt(process.env.EM_RUNNER_POLL_INTERVAL || '60000', 10);
-const RUNNER_HOME      = path.join(os.homedir(), '.em-runner');
+// Watcher runs as a Windows service installed by `runner install`. The service hardcodes
+// its working directory to the runner home set at install time; here we resolve the same way:
+// EM_RUNNER_HOME if set, else <cwd>/.gh-runners (cwd is the workingdirectory baked into the service).
+const RUNNER_HOME      = process.env.EM_RUNNER_HOME || path.join(process.cwd(), '.gh-runners');
 const LOG_FILE         = path.join(RUNNER_HOME, 'watcher.log');
 const CONFIG_FILE      = path.join(RUNNER_HOME, 'config.json');
 

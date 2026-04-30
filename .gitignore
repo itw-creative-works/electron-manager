@@ -43,6 +43,9 @@ node_modules/
 /release/
 /.em-cache/
 
+# Runner state (Windows EV-token runner workspace; per-org actions/runner installs)
+/.gh-runners/
+
 # Personal scratch (not committed)
 /my-messages/
 /TODO.md

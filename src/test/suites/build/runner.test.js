@@ -226,5 +226,42 @@ module.exports = {
         ctx.expect(src).toContain('SERVICE_NAME:\\s*(actions\\.runner');   // pattern for service discovery
       },
     },
+    {
+      name: 'RUNNER_HOME defaults to <cwd>/.gh-runners (not ~/.em-runner)',
+      run: (ctx) => {
+        const fs = require('fs');
+        const src = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'commands', 'runner.js'), 'utf8');
+        ctx.expect(src).toContain(".gh-runners");
+        ctx.expect(src).toContain('EM_RUNNER_HOME');
+        ctx.expect(src).not.toMatch(/path\.join\(os\.homedir\(\),\s*['"]\.em-runner['"]/);
+      },
+    },
+    {
+      name: 'install honors EM_RUNNER_ORGS filter from env',
+      run: (ctx) => {
+        const fs = require('fs');
+        const src = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'commands', 'runner.js'), 'utf8');
+        ctx.expect(src).toContain('EM_RUNNER_ORGS');
+        ctx.expect(src).toContain('filter');
+      },
+    },
+    {
+      name: 'each org gets its own actions-runner-<org>/ directory (multi-org architecture)',
+      run: (ctx) => {
+        const fs = require('fs');
+        const src = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'commands', 'runner.js'), 'utf8');
+        ctx.expect(src).toContain('actions-runner-${org.toLowerCase()}');
+        ctx.expect(src).toContain('templateDir');
+      },
+    },
+    {
+      name: 'config.cmd spawn captures stdout/stderr (no more silent status:null)',
+      run: (ctx) => {
+        const fs = require('fs');
+        const src = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'commands', 'runner.js'), 'utf8');
+        ctx.expect(src).toContain("stdio:    ['ignore', 'pipe', 'pipe']");
+        ctx.expect(src).toContain('null (killed)');                       // surfaces kill status meaningfully
+      },
+    },
   ],
 };
