@@ -13,6 +13,7 @@ So: one self-hosted runner, owned by you, on a Windows box that lives somewhere 
 Hand this section to a fresh Claude session on the Windows box. It's the linear path from a clean machine to a working signed binary.
 
 **Prereqs on the Windows box:**
+- **Run cmd.exe as Administrator.** Right-click → "Run as administrator". Service install/uninstall (`sc.exe`) requires admin. Without it, `runner install` exits with a clear error.
 - Node 24+ installed (`winget install OpenJS.NodeJS.LTS` or download from nodejs.org)
 - Git for Windows (`winget install Git.Git`)
 - EV USB token plugged in, SafeNet (or vendor) drivers installed, token unlocked once after boot

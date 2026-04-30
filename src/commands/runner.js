@@ -51,6 +51,7 @@ module.exports = async function (options) {
 async function install(options) {
   ensureWindows();
   ensureGhToken();
+  ensureWindowsAdmin();
 
   // Idempotent by replacement: always tear down any prior install before starting.
   // Cheaper to think about than smart skip-logic per-org/per-service. Re-running
@@ -212,9 +213,18 @@ async function statusServices() {
 // ─── uninstall ──────────────────────────────────────────────────────────────────
 async function uninstall() {
   ensureWindows();
-  await runScCommand('stop',   WATCHER_SERVICE_NAME);
-  await runScCommand('delete', WATCHER_SERVICE_NAME);
+  ensureWindowsAdmin();
 
+  // Stop + delete em-runner-watcher service. node-windows knows its own service
+  // metadata (script, name, etc.) — let it do the removal cleanly. This handles
+  // the lock-on-files issue better than raw `sc delete`.
+  await uninstallWatcherService();
+
+  // Stop + delete each actions.runner.* service. We discover them via `sc query`
+  // since each service is named per-org.
+  await uninstallActionsRunnerServices();
+
+  // Deregister each org-side runner if we have a token and a working config.cmd.
   const runnerDir = path.join(RUNNER_HOME, 'actions-runner');
   const configCmd = path.join(runnerDir, 'config.cmd');
   if (jetpack.exists(configCmd)) {
@@ -235,8 +245,91 @@ async function uninstall() {
     }
   }
 
-  jetpack.remove(RUNNER_HOME);
+  // Now safe to remove disk state. Retry a few times if files are still locked
+  // (services release file handles asynchronously after stop).
+  await removeRunnerHomeWithRetry();
   logger.log('Uninstalled em-runner.');
+}
+
+async function uninstallWatcherService() {
+  // Quick check: does the service exist? Avoid noisy 1060 errors on a clean uninstall.
+  const exists = await scQueryExists(WATCHER_SERVICE_NAME);
+  if (!exists) return;
+
+  // Use node-windows' own uninstall — it handles both "stop" and "delete" plus the
+  // daemon dir cleanup that raw `sc delete` doesn't touch.
+  let Service;
+  try {
+    Service = require('node-windows').Service;
+  } catch (e) {
+    // No node-windows here? Fall back to raw sc.
+    await runScCommand('stop',   WATCHER_SERVICE_NAME);
+    await runScCommand('delete', WATCHER_SERVICE_NAME);
+    return;
+  }
+
+  const watcherDir = path.join(RUNNER_HOME, 'watcher');
+  const svc = new Service({
+    name:        WATCHER_SERVICE_NAME,
+    description: 'electron-manager runner watcher',
+    script:      path.join(watcherDir, 'watcher.js'),
+  });
+
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => { if (!done) { done = true; resolve(); } };
+    svc.on('uninstall', finish);
+    svc.on('alreadyuninstalled', finish);
+    svc.on('error', (e) => {
+      logger.warn(`watcher service uninstall warning: ${e.message}`);
+      finish();
+    });
+    try {
+      svc.uninstall();
+    } catch (e) {
+      logger.warn(`watcher service uninstall threw: ${e.message}`);
+      finish();
+    }
+    // Hard timeout — don't hang forever if events don't fire.
+    setTimeout(finish, 15000);
+  });
+}
+
+async function uninstallActionsRunnerServices() {
+  const { spawnSync } = require('child_process');
+  // sc query state= all returns all services; grep for "actions.runner.".
+  const r = spawnSync('sc', ['query', 'state=', 'all'], { encoding: 'utf8' });
+  if (r.status !== 0) return;
+  const names = (r.stdout || '').match(/SERVICE_NAME:\s*(actions\.runner\.\S+)/g) || [];
+  for (const n of names) {
+    const name = n.replace(/SERVICE_NAME:\s*/, '').trim();
+    logger.log(`Removing leftover service ${name}…`);
+    spawnSync('sc', ['stop',   name], { stdio: 'inherit' });
+    spawnSync('sc', ['delete', name], { stdio: 'inherit' });
+  }
+}
+
+async function scQueryExists(serviceName) {
+  const { spawnSync } = require('child_process');
+  const r = spawnSync('sc', ['query', serviceName], { encoding: 'utf8' });
+  return r.status === 0;
+}
+
+async function removeRunnerHomeWithRetry() {
+  // Services release file handles asynchronously — give them a few seconds.
+  for (let i = 0; i < 5; i++) {
+    try {
+      jetpack.remove(RUNNER_HOME);
+      return;
+    } catch (e) {
+      if (i === 4) {
+        logger.warn(`Could not fully remove ${RUNNER_HOME} after 5 attempts: ${e.message}`);
+        logger.warn('Some files may be locked by other processes. Reboot Windows and re-run install if this persists.');
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 1000 * (i + 1)));
+    }
+  }
 }
 
 // ─── self-update ────────────────────────────────────────────────────────────────
@@ -275,17 +368,44 @@ function ensureGhToken() {
   }
 }
 
+// Service install/start/stop on Windows requires admin. Without it, `sc` commands silently
+// fail with status 1060 ("service not found") which sends us down weird debugging paths.
+// Detect early and exit with a clear message.
+function ensureWindowsAdmin() {
+  if (process.platform !== 'win32') return;
+  const { spawnSync } = require('child_process');
+  // `net session` requires admin and exits 0 if elevated, non-zero otherwise. Faster than spawning powershell.
+  const r = spawnSync('net', ['session'], { stdio: 'ignore' });
+  if (r.status !== 0) {
+    throw new Error('This command needs an elevated cmd.exe (Run as Administrator). Service install/uninstall and `sc` commands fail silently without admin rights.');
+  }
+}
+
 async function downloadActionsRunner(runnerDir) {
-  const wonderfulFetch = require('wonderful-fetch');
   const url = `https://github.com/actions/runner/releases/download/v${ACTIONS_RUNNER_VERSION}/actions-runner-win-x64-${ACTIONS_RUNNER_VERSION}.zip`;
   const zipPath = path.join(RUNNER_HOME, 'actions-runner.zip');
   jetpack.dir(runnerDir);
   logger.log(`Downloading actions/runner v${ACTIONS_RUNNER_VERSION}…`);
-  const res = await wonderfulFetch(url, { response: 'buffer', tries: 3 });
-  fs.writeFileSync(zipPath, Buffer.isBuffer(res) ? res : Buffer.from(res));
 
-  // Extract via tar (BSD tar ships with Windows 10+ and macOS — handles zip natively, no PowerShell).
+  // curl ships on Windows 10+ and macOS. -L follows GitHub's redirect to the S3 download URL,
+  // -f fails on HTTP errors (so we don't write an HTML error page as "the zip"), -o writes
+  // to disk directly (no in-memory buffering, no truncation issues with large files).
   const { spawnSync } = require('child_process');
+  const dl = spawnSync('curl', ['-fL', '-o', zipPath, url], { stdio: 'inherit' });
+  if (dl.status !== 0) {
+    throw new Error(`Failed to download actions-runner.zip (curl exit ${dl.status}). Check network or curl.exe availability.`);
+  }
+
+  // Sanity-check size before extracting — actions/runner zip is ~150 MB. Anything under 1 MB
+  // is almost certainly an error page that slipped through.
+  const stat = fs.statSync(zipPath);
+  if (stat.size < 1024 * 1024) {
+    const head = fs.readFileSync(zipPath, 'utf8').slice(0, 200);
+    throw new Error(`Downloaded actions-runner.zip is only ${stat.size} bytes — likely an error page. First 200 bytes: ${head}`);
+  }
+  logger.log(`Downloaded ${(stat.size / 1024 / 1024).toFixed(1)} MB → extracting…`);
+
+  // Extract via tar (BSD tar ships with Windows 10+ and macOS — handles zip natively).
   const t = spawnSync('tar', ['-xf', zipPath, '-C', runnerDir], { stdio: 'inherit' });
   if (t.status !== 0) {
     throw new Error(`Failed to extract actions-runner.zip (tar exit ${t.status}). On Windows ensure tar.exe is on PATH (it is by default on Windows 10+).`);

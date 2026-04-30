@@ -193,5 +193,38 @@ module.exports = {
         ctx.expect(src).toContain('uninstalling first for a clean re-install');
       },
     },
+    {
+      name: 'downloadActionsRunner uses curl + size validation (not wonderful-fetch buffer)',
+      run: (ctx) => {
+        // Guards against the regression where wonderful-fetch returned an unexpected
+        // ~224MB buffer that tar couldn't extract.
+        const fs = require('fs');
+        const src = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'commands', 'runner.js'), 'utf8');
+        ctx.expect(src).toContain("spawnSync('curl'");
+        ctx.expect(src).toContain('1024 * 1024');                  // size sanity check
+        ctx.expect(src).not.toContain("require('wonderful-fetch')");
+      },
+    },
+    {
+      name: 'install + uninstall require admin (ensureWindowsAdmin)',
+      run: (ctx) => {
+        // Without admin, sc.exe silently fails with 1060 and we end up debugging the wrong thing.
+        const fs = require('fs');
+        const src = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'commands', 'runner.js'), 'utf8');
+        ctx.expect(src).toContain('function ensureWindowsAdmin');
+        ctx.expect(src).toContain("spawnSync('net', ['session']");
+        ctx.expect(src).toContain('Run as Administrator');
+      },
+    },
+    {
+      name: 'uninstall sweeps up leftover actions.runner.* services + retries removal',
+      run: (ctx) => {
+        const fs = require('fs');
+        const src = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'commands', 'runner.js'), 'utf8');
+        ctx.expect(src).toContain('uninstallActionsRunnerServices');
+        ctx.expect(src).toContain('removeRunnerHomeWithRetry');
+        ctx.expect(src).toContain('SERVICE_NAME:\\s*(actions\\.runner');   // pattern for service discovery
+      },
+    },
   ],
 };
