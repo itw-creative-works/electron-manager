@@ -8,6 +8,70 @@ EV (Extended Validation) code signing for Windows requires a physical USB token 
 
 So: one self-hosted runner, owned by you, on a Windows box that lives somewhere with the EV token plugged in. Every consumer's `.github/workflows/build.yml` routes its `windows-sign` job to that runner via labels `[self-hosted, windows, ev-token]`.
 
+## First-time test on Windows (start here)
+
+Hand this section to a fresh Claude session on the Windows box. It's the linear path from a clean machine to a working signed binary.
+
+**Prereqs on the Windows box:**
+- Node 24+ installed (`winget install OpenJS.NodeJS.LTS` or download from nodejs.org)
+- Git for Windows (`winget install Git.Git`)
+- EV USB token plugged in, SafeNet (or vendor) drivers installed, token unlocked once after boot
+- Visual Studio Build Tools 2022 with the "Desktop development with C++" workload (provides `signtool.exe`) — `winget install Microsoft.VisualStudio.2022.BuildTools` then in the Installer enable that workload
+- A GitHub Personal Access Token with `repo`, `admin:org`, `workflow` scopes (https://github.com/settings/tokens)
+
+**Step 1 — Install EM globally:**
+```powershell
+npm install -g electron-manager
+npx mgr version
+```
+Should print `electron-manager@1.0.0` (or newer).
+
+**Step 2 — Smoke-test signtool against your EV token (no GitHub, no runner — just signing):**
+```powershell
+$env:WIN_EV_TOKEN_PATH = "C:\path\to\your-token-or-cert.cer"
+$env:WIN_CSC_KEY_PASSWORD = "<your token password>"
+npx mgr sign-windows --smoke
+```
+Copies `where.exe` to a temp location, signs it, verifies it, prints PASS/FAIL. If this fails, fix it before continuing — the runner just calls the same `signtool` underneath.
+
+If smoke passes you've proven: drivers see the token, signtool finds the cert, your password is right, the timestamp server is reachable.
+
+**Step 3 — Bootstrap the runner:**
+```powershell
+$env:GH_TOKEN = "ghp_xxx_with_admin_org_scope"
+npx mgr runner bootstrap
+npx mgr runner status
+```
+`status` should show the watcher service running and at least one org registered.
+
+**Step 4 — Trigger a real signing job from the consumer side (do this on your Mac, not Windows):**
+```bash
+# On your Mac, in a consumer project (e.g. deployment-playground-desktop)
+npx mgr publish
+```
+This kicks the GH Actions matrix. The Windows job builds unsigned, uploads `windows-unsigned`, and the `windows-sign` job dispatches to your runner box. Watch the run in the GH Actions UI.
+
+**Step 5 — If the windows-sign job fails, debug on the Windows box:**
+```powershell
+# Watcher heartbeats + errors
+type $env:USERPROFILE\.em-runner\watcher.log
+
+# Service event log
+eventvwr.msc   # Windows Logs → Application → filter source: actions-runner-svc
+
+# Force a fresh smoke test
+npx mgr sign-windows --smoke
+```
+
+If you hit any specific signtool error, jump to the "Debugging signtool errors" section below.
+
+**What "done" looks like:**
+- Smoke test prints PASS
+- `runner status` shows healthy services + registered orgs
+- A real `publish` run finishes with signed `.exe` artifacts attached to a GitHub Release
+
+---
+
 ## One-time setup (Windows box, ever)
 
 ```powershell
