@@ -1,6 +1,6 @@
 {
   "name": "electron-manager",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Electron Manager — all-in-one development framework for Electron apps",
   "main": "dist/index.js",
   "exports": {
@@ -127,6 +127,7 @@
     "yargs": "^18.0.0"
   },
   "optionalDependencies": {
+    "automately": "^1.0.5",
     "node-windows": "^1.0.0-beta.8"
   }
 }

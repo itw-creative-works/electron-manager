@@ -23,6 +23,7 @@ const { execute } = require('node-powertools');
 
 const Manager = new (require('../build.js'));
 const logger = Manager.logger('sign-windows');
+const { startAutoUnlock } = require('../lib/sign-helpers/auto-unlock.js');
 
 module.exports = async function (options) {
   options = options || {};
@@ -94,16 +95,30 @@ function getSigntoolPath() {
   return 'signtool'; // assume on PATH; SDK installers add it
 }
 
+// Detect whether WIN_EV_TOKEN_PATH is a SHA1 thumbprint (40 hex chars, optional spaces)
+// vs. a file path. SafeNet/eToken-managed certs live in the user store and are selected
+// by thumbprint via /sha1; .pfx files are passed via /f + /p.
+function isThumbprint(value) {
+  if (!value) return false;
+  const stripped = value.replace(/\s+/g, '');
+  return /^[0-9a-fA-F]{40}$/.test(stripped);
+}
+
 async function signWithSigntool(targets, inDir, outDir) {
   const projectRoot = process.cwd();
-  const tokenPath  = process.env.WIN_EV_TOKEN_PATH || process.env.WIN_CSC_LINK;
+  const tokenRef   = process.env.WIN_EV_TOKEN_PATH || process.env.WIN_CSC_LINK;
   const password   = process.env.WIN_CSC_KEY_PASSWORD;
 
-  if (!tokenPath) {
+  if (!tokenRef) {
     throw new Error('WIN_EV_TOKEN_PATH (or WIN_CSC_LINK) not set — cannot sign.');
   }
-  if (!password) {
-    throw new Error('WIN_CSC_KEY_PASSWORD not set — cannot sign.');
+
+  const useThumbprint = isThumbprint(tokenRef);
+
+  // Thumbprint mode (SafeNet/eToken): signtool finds cert in user store, SafeNet handles auth.
+  // File mode (.pfx): /f + /p, password handed to signtool directly.
+  if (!useThumbprint && !password) {
+    throw new Error('WIN_CSC_KEY_PASSWORD not set — required when WIN_EV_TOKEN_PATH is a .pfx path.');
   }
 
   const signtool = getSigntoolPath();
@@ -117,22 +132,31 @@ async function signWithSigntool(targets, inDir, outDir) {
     // Copy first, sign in place at the output location (signtool modifies in-place).
     jetpack.copy(target, outPath, { overwrite: true });
 
-    // signtool sign /f <tokenPath> /p <password> /tr <timestamp> /td sha256 /fd sha256 <file>
+    const certArgs = useThumbprint
+      ? [`/sha1 ${tokenRef.replace(/\s+/g, '')}`]
+      : [`/f "${tokenRef}"`, `/p "${password}"`];
+
     const cmd = [
       `"${signtool}"`,
       'sign',
-      `/f "${tokenPath}"`,
-      `/p "${password}"`,
+      ...certArgs,
       `/tr "${timestampUrl}"`,
       '/td sha256',
       '/fd sha256',
       `"${outPath}"`,
     ].join(' ');
 
-    logger.log(`Signing ${path.relative(projectRoot, outPath)}...`);
-    await execute(cmd, { log: false });
+    logger.log(`Signing ${path.relative(projectRoot, outPath)}${useThumbprint ? ' (thumbprint mode)' : ''}...`);
 
-    // Verify the signature
+    // In thumbprint mode against a SafeNet/eToken cert, signtool triggers a
+    // "Token Logon" dialog. Start a watcher that types the password into it.
+    const unlock = useThumbprint ? startAutoUnlock({ password, logger }) : { stop: () => {} };
+    try {
+      await execute(cmd, { log: false });
+    } finally {
+      unlock.stop();
+    }
+
     const verifyCmd = `"${signtool}" verify /pa "${outPath}"`;
     await execute(verifyCmd, { log: false });
     logger.log(logger.format.green(`✓ Signed: ${path.relative(projectRoot, outPath)}`));
@@ -184,10 +208,15 @@ async function smokeTest() {
     throw new Error('--smoke is Windows-only (signtool is required).');
   }
 
-  const tokenPath  = process.env.WIN_EV_TOKEN_PATH || process.env.WIN_CSC_LINK;
-  const password   = process.env.WIN_CSC_KEY_PASSWORD;
-  if (!tokenPath)  throw new Error('WIN_EV_TOKEN_PATH (or WIN_CSC_LINK) not set — set it in your .env or current shell before running --smoke.');
-  if (!password)   throw new Error('WIN_CSC_KEY_PASSWORD not set — set it in your .env or current shell before running --smoke.');
+  const tokenRef = process.env.WIN_EV_TOKEN_PATH || process.env.WIN_CSC_LINK;
+  const password = process.env.WIN_CSC_KEY_PASSWORD;
+  if (!tokenRef) {
+    throw new Error('WIN_EV_TOKEN_PATH (or WIN_CSC_LINK) not set — set a SHA1 thumbprint (SafeNet/eToken) or a .pfx path in your .env before running --smoke.');
+  }
+  const useThumbprint = isThumbprint(tokenRef);
+  if (!useThumbprint && !password) {
+    throw new Error('WIN_CSC_KEY_PASSWORD not set — required when WIN_EV_TOKEN_PATH is a .pfx path.');
+  }
 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'em-smoke-'));
   // Build a minimal valid PE/COFF .exe: copy whichever tiny system .exe is around.
@@ -200,7 +229,7 @@ async function smokeTest() {
   jetpack.copy(sourceExe, target, { overwrite: true });
 
   logger.log(`Smoke test: signing a temp copy of where.exe at ${target}`);
-  logger.log(`Token path: ${tokenPath}`);
+  logger.log(`Cert ref: ${tokenRef}${useThumbprint ? ' (thumbprint mode — SafeNet handles auth)' : ' (file mode)'}`);
 
   try {
     await signWithSigntool([target], path.dirname(target), path.dirname(target));
