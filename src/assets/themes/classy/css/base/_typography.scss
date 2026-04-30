@@ -1,0 +1,148 @@
+// Classy Typography
+// Modern font system with responsive headings and utilities
+
+// ============================================
+// CSS Custom Properties
+// ============================================
+:root {
+  --bs-font-sans-serif: #{$font-family-sans-serif};
+  --bs-font-monospace: #{$classy-font-mono};
+
+  // Custom CSS variables for easy access
+  --classy-font-primary: #{$font-family-sans-serif};
+  --classy-font-mono: #{$classy-font-mono};
+}
+
+// ============================================
+// Base Typography
+// ============================================
+body {
+  font-family: $font-family-sans-serif;
+  font-size: $classy-font-size-base;
+  font-weight: 400;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+// ============================================
+// Heading Styles
+// ============================================
+h1, .h1,
+h2, .h2,
+h3, .h3,
+h4, .h4,
+h5, .h5,
+h6, .h6 {
+  font-family: $font-family-sans-serif;
+  font-weight: 700;
+  line-height: 1.2;
+  margin-bottom: 1rem;
+  letter-spacing: -0.02em;
+}
+
+h1, .h1 {
+  font-size: clamp(2.5rem, 5vw, $classy-font-size-6xl);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+
+  @media (max-width: $classy-breakpoint-md) {
+    font-size: $classy-font-size-4xl;
+  }
+}
+
+h2, .h2 {
+  font-size: clamp(2rem, 4vw, $classy-font-size-5xl);
+  font-weight: 700;
+
+  @media (max-width: $classy-breakpoint-md) {
+    font-size: $classy-font-size-3xl;
+  }
+}
+
+h3, .h3 {
+  font-size: clamp(1.5rem, 3vw, $classy-font-size-4xl);
+  font-weight: 600;
+
+  @media (max-width: $classy-breakpoint-md) {
+    font-size: $classy-font-size-2xl;
+  }
+}
+
+h4, .h4 {
+  font-size: $classy-font-size-2xl;
+  font-weight: 600;
+}
+
+h5, .h5 {
+  font-size: $classy-font-size-xl;
+  font-weight: 500;
+}
+
+h6, .h6 {
+  font-size: $classy-font-size-lg;
+  font-weight: 500;
+}
+
+// ============================================
+// Display Typography
+// ============================================
+.display-1 {
+  font-size: clamp(3rem, 7vw, 5rem);
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+.display-2 {
+  font-size: clamp(2.5rem, 6vw, 4rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+}
+
+// ============================================
+// Lead Text
+// ============================================
+.lead {
+  font-size: $classy-font-size-xl;
+  font-weight: 400;
+  line-height: 1.6;
+}
+
+// ============================================
+// Code Blocks
+// ============================================
+code, kbd, pre, samp {
+  font-family: $classy-font-mono;
+}
+
+code {
+  padding: 0.125rem 0.375rem;
+  font-size: 0.875em;
+  border-radius: $classy-radius-sm;
+}
+
+pre {
+  padding: $classy-spacing-lg;
+  border-radius: $classy-radius-lg;
+  overflow-x: auto;
+
+  code {
+    padding: 0;
+    font-size: inherit;
+    border-radius: 0;
+  }
+}
+
+// ============================================
+// Blockquotes
+// ============================================
+blockquote {
+  padding-left: $classy-spacing-lg;
+  border-left-width: 4px;
+  border-left-style: solid;
+  font-size: $classy-font-size-lg;
+  font-style: italic;
+}
+

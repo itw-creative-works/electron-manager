@@ -1,0 +1,30 @@
+// =============================================================================
+// UJ Bootstrap Overrides - Index
+// =============================================================================
+// Universal utilities and components that extend Bootstrap.
+// All themes inheriting from Bootstrap will get these automatically.
+
+// Buttons
+@use 'buttons-adaptive';
+
+// Colors
+@use 'color-shades';
+@use 'soft-colors';
+
+// Components
+@use 'avatars';
+@use 'accordion';
+@use 'spinners';
+
+// Spacing & Layout
+@use 'spacing-extended';
+
+// Typography
+@use 'typography-utilities';
+
+// Utilities
+@use 'cursor-utilities';
+@use 'links';
+
+// Blog
+@use 'blog-images';

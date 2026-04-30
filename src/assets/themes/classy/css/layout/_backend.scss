@@ -1,0 +1,59 @@
+// Classy Backend Layout
+// Styles for the backend dashboard shell (sidebar + topbar + content)
+
+// ============================================
+// Viewport-Locked Layout
+// ============================================
+// Prevents page-level scrolling — content fills remaining viewport height.
+// Used by the minimal-viewport-locked layout.
+// Tab panes scroll vertically but not horizontally.
+#main-content.page-viewport-locked {
+  overflow: hidden !important;
+}
+
+.page-content-viewport-locked {
+  min-height: 0;
+  overflow: hidden;
+
+  // Pass height down through the flex chain
+  > * {
+    display: flex;
+    flex-direction: column;
+    flex-grow: 1;
+    min-height: 0;
+  }
+
+  // Only the top-level .tab-content (not nested ones)
+  > * > .tab-content {
+    display: flex;
+    flex-direction: column;
+    flex-grow: 1;
+    min-height: 0;
+
+    > .tab-pane.active {
+      display: flex;
+      flex-direction: column;
+      flex-grow: 1;
+      min-height: 0;
+      overflow-x: hidden;
+      overflow-y: auto;
+    }
+  }
+}
+
+// ============================================
+// Iframe Detection
+// ============================================
+// Hide backend chrome when the page is embedded in an iframe
+html[data-iframed="true"] {
+  .sidebar,
+  .offcanvas,
+  .topbar,
+  .page-header {
+    display: none !important;
+  }
+
+  #main-content {
+    padding: 0 !important;
+  }
+}

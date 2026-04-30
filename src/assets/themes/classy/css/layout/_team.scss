@@ -1,0 +1,18 @@
+.team-member-image {
+  height: 160px;
+  width: 160px;
+}
+
+@media (max-width: 991.98px) {
+  .team-member-image {
+    height: 140px;
+    width: 140px;
+  }
+}
+
+@media (max-width: 575.98px) {
+  .team-member-image {
+    height: 120px;
+    width: 120px;
+  }
+}

@@ -1,0 +1,38 @@
+// EM core init — desktop-targeted defaults that complement the active theme.
+// Web-specific bits (cookieconsent, exit-popup, social-sharing, lazy-loading, service-worker)
+// are intentionally not ported from UJM — they don't apply to a packaged Electron app.
+
+// Make sure the html / body fill the window with no scrollbars from layout glitches.
+html, body {
+  height: 100%;
+  margin: 0;
+  background: var(--bs-body-bg);
+  color: var(--bs-body-color);
+}
+
+// Prevent text selection in chrome / app frame; let consumers opt in for content areas.
+body {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+// Re-enable selection inside common content containers + form controls.
+main,
+.em-selectable,
+input,
+textarea,
+[contenteditable="true"] {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+// macOS draggable title-bar surface — opt in by adding `.em-drag` (e.g. on a header bar).
+.em-drag {
+  -webkit-app-region: drag;
+}
+.em-no-drag,
+.em-drag button,
+.em-drag input,
+.em-drag a {
+  -webkit-app-region: no-drag;
+}

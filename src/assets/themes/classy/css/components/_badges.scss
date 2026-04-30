@@ -1,0 +1,25 @@
+// Classy Badge Components
+// Badges and labels that can extend outside their containers
+
+// ============================================
+// Badge Soft Colors & Gradient
+// ============================================
+.badge-gradient {
+  background: $classy-gradient-primary;
+}
+
+.badge-soft-primary {
+  background: $classy-primary-soft;
+}
+
+// Global fix - any element containing a badge should not clip
+// * {
+//   &:has(.badge) {
+//     overflow: visible !important;
+//   }
+// }
+
+// Base badge styling improvements
+.badge {
+  z-index: 100; // Ensure badge is always on top
+}

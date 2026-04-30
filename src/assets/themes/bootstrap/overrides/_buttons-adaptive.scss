@@ -1,0 +1,141 @@
+// =============================================================================
+// Adaptive Theme Buttons
+// =============================================================================
+// Buttons that automatically flip between light/dark styles based on theme.
+// These are universal utilities available to all UJ themes.
+// Uses CSS custom properties from _color-shades.scss for hover/active states.
+
+// ============================================
+// Solid Adaptive Buttons
+// ============================================
+// Dark button in light mode, light button in dark mode
+.btn-adaptive {
+  --bs-btn-color: #fff;
+  --bs-btn-bg: var(--bs-dark);
+  --bs-btn-border-color: var(--bs-dark);
+  --bs-btn-hover-color: #fff;
+  --bs-btn-hover-bg: var(--bs-dark-hover);
+  --bs-btn-hover-border-color: var(--bs-dark-active);
+  --bs-btn-active-color: #fff;
+  --bs-btn-active-bg: var(--bs-dark-active);
+  --bs-btn-active-border-color: var(--bs-dark-active);
+}
+
+[data-bs-theme="dark"] .btn-adaptive {
+  --bs-btn-color: #000;
+  --bs-btn-bg: var(--bs-light);
+  --bs-btn-border-color: var(--bs-light);
+  --bs-btn-hover-color: #000;
+  --bs-btn-hover-bg: var(--bs-light-hover);
+  --bs-btn-hover-border-color: var(--bs-light-active);
+  --bs-btn-active-color: #000;
+  --bs-btn-active-bg: var(--bs-light-active);
+  --bs-btn-active-border-color: var(--bs-light-active);
+}
+
+// ============================================
+// Outline Adaptive Buttons
+// ============================================
+.btn-outline-adaptive {
+  --bs-btn-color: var(--bs-dark);
+  --bs-btn-bg: transparent;
+  --bs-btn-border-color: var(--bs-dark);
+  --bs-btn-hover-color: #fff;
+  --bs-btn-hover-bg: var(--bs-dark);
+  --bs-btn-hover-border-color: var(--bs-dark);
+  --bs-btn-active-color: #fff;
+  --bs-btn-active-bg: var(--bs-dark);
+  --bs-btn-active-border-color: var(--bs-dark);
+
+  color: var(--bs-body-color);
+  border-color: var(--bs-dark);
+
+  // btn-check checked state (radio/checkbox toggle buttons)
+  .btn-check:checked + & {
+    color: var(--bs-btn-active-color);
+    border-color: var(--bs-btn-active-border-color);
+  }
+}
+
+[data-bs-theme="dark"] .btn-outline-adaptive {
+  --bs-btn-color: var(--bs-light);
+  --bs-btn-bg: transparent;
+  --bs-btn-border-color: var(--bs-light);
+  --bs-btn-hover-color: #000;
+  --bs-btn-hover-bg: var(--bs-light);
+  --bs-btn-hover-border-color: var(--bs-light);
+  --bs-btn-active-color: #000;
+  --bs-btn-active-bg: var(--bs-light);
+  --bs-btn-active-border-color: var(--bs-light);
+
+  border-color: var(--bs-light);
+}
+
+// ============================================
+// Inverse Adaptive Buttons
+// ============================================
+// The opposite of adaptive - light in light mode, dark in dark mode
+.btn-adaptive-inverse {
+  --bs-btn-color: #000;
+  --bs-btn-bg: var(--bs-light);
+  --bs-btn-border-color: var(--bs-light);
+  --bs-btn-hover-color: #000;
+  --bs-btn-hover-bg: var(--bs-light-hover);
+  --bs-btn-hover-border-color: var(--bs-light-active);
+  --bs-btn-active-color: #000;
+  --bs-btn-active-bg: var(--bs-light-active);
+  --bs-btn-active-border-color: var(--bs-light-active);
+}
+
+[data-bs-theme="dark"] .btn-adaptive-inverse {
+  --bs-btn-color: #fff;
+  --bs-btn-bg: var(--bs-dark);
+  --bs-btn-border-color: var(--bs-dark);
+  --bs-btn-hover-color: #fff;
+  --bs-btn-hover-bg: var(--bs-dark-hover);
+  --bs-btn-hover-border-color: var(--bs-dark-active);
+  --bs-btn-active-color: #fff;
+  --bs-btn-active-bg: var(--bs-dark-active);
+  --bs-btn-active-border-color: var(--bs-dark-active);
+}
+
+// ============================================
+// Outline Inverse Adaptive Buttons
+// ============================================
+.btn-outline-adaptive-inverse {
+  --bs-btn-color: var(--bs-light);
+  --bs-btn-bg: transparent;
+  --bs-btn-border-color: var(--bs-light);
+  --bs-btn-hover-color: #000;
+  --bs-btn-hover-bg: var(--bs-light);
+  --bs-btn-hover-border-color: var(--bs-light);
+  --bs-btn-active-color: #000;
+  --bs-btn-active-bg: var(--bs-light);
+  --bs-btn-active-border-color: var(--bs-light);
+
+  color: var(--bs-body-color);
+  border-color: var(--bs-light);
+}
+
+[data-bs-theme="dark"] .btn-outline-adaptive-inverse {
+  --bs-btn-color: var(--bs-dark);
+  --bs-btn-bg: transparent;
+  --bs-btn-border-color: var(--bs-dark);
+  --bs-btn-hover-color: #fff;
+  --bs-btn-hover-bg: var(--bs-dark);
+  --bs-btn-hover-border-color: var(--bs-dark);
+  --bs-btn-active-color: #fff;
+  --bs-btn-active-bg: var(--bs-dark);
+  --bs-btn-active-border-color: var(--bs-dark);
+
+  border-color: var(--bs-dark);
+}
+
+// ============================================
+// Ghost Button
+// ============================================
+// Transparent background, no shadow - useful for subtle actions
+.btn-ghost {
+  background: transparent;
+  box-shadow: none;
+}

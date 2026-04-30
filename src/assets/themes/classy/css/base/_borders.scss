@@ -1,0 +1,65 @@
+// Classy Border Utilities
+// Border styles, gradients, and decorative dividers
+
+// ============================================
+// Border Radius
+// ============================================
+.rounded-sm { border-radius: $classy-radius-sm !important; }
+.rounded-md { border-radius: $classy-radius-md !important; }
+.rounded-lg { border-radius: $classy-radius-lg !important; }
+.rounded-xl { border-radius: $classy-radius-xl !important; }
+.rounded-2xl { border-radius: $classy-radius-2xl !important; }
+.rounded-full { border-radius: $classy-radius-full !important; }
+
+// ============================================
+// Gradient Borders
+// ============================================
+.border-gradient-rainbow {
+  --bs-border-width: 3px;
+  position: relative;
+  border: none !important;
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset: calc(var(--bs-border-width) * -1);
+    border-radius: inherit;
+    background: $classy-gradient-rainbow;
+    background-size: 300% 300%;
+    z-index: -1;
+  }
+
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: inherit;
+    z-index: -1;
+  }
+
+  // Override Bootstrap border width classes to work with gradient border
+  &.border-0 { --bs-border-width: 0; }
+  &.border-1 { --bs-border-width: 1px; }
+  &.border-2 { --bs-border-width: 2px; }
+  &.border-3 { --bs-border-width: 3px; }
+  &.border-4 { --bs-border-width: 4px; }
+  &.border-5 { --bs-border-width: 5px; }
+}
+
+// ============================================
+// Divider Styles
+// ============================================
+.divider {
+  height: 1px;
+  background: $classy-gray-lighter;
+  margin: $classy-spacing-2xl 0;
+
+  &.divider-gradient {
+    background: $classy-gradient-primary;
+  }
+
+  &.divider-fade {
+    background: linear-gradient(to right, transparent, $classy-gray-lighter 20%, $classy-gray-lighter 80%, transparent);
+  }
+}

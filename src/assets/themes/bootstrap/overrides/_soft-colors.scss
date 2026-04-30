@@ -1,0 +1,99 @@
+// =============================================================================
+// Soft Color Utilities
+// =============================================================================
+// Transparent color variations for all Bootstrap theme colors.
+// These are universal utilities available to all UJ themes.
+
+// ============================================
+// Theme Colors (local definition for loop)
+// ============================================
+$_theme-color-names: "primary", "secondary", "success", "info", "warning", "danger", "light", "dark";
+
+// ============================================
+// Soft Color Generation Loop
+// ============================================
+@each $color-name in $_theme-color-names {
+  // Soft background colors (50% opacity)
+  .bg-#{$color-name}-soft {
+    background-color: rgba(var(--bs-#{$color-name}-rgb), 0.5) !important;
+  }
+
+  // Soft text colors (more vibrant for readability)
+  .text-#{$color-name}-soft {
+    color: rgba(var(--bs-#{$color-name}-rgb), 0.8) !important;
+  }
+
+  // Soft border colors
+  .border-#{$color-name}-soft {
+    border-color: rgba(var(--bs-#{$color-name}-rgb), 0.2) !important;
+  }
+
+  // Soft buttons - background with hover states
+  .btn-#{$color-name}-soft {
+    color: var(--bs-#{$color-name});
+    background-color: rgba(var(--bs-#{$color-name}-rgb), 0.1);
+    border-color: rgba(var(--bs-#{$color-name}-rgb), 0.1);
+
+    &:hover {
+      color: var(--bs-#{$color-name});
+      background-color: rgba(var(--bs-#{$color-name}-rgb), 0.2);
+      border-color: rgba(var(--bs-#{$color-name}-rgb), 0.2);
+    }
+
+    &:focus,
+    &:active,
+    &.active {
+      color: var(--bs-#{$color-name});
+      background-color: rgba(var(--bs-#{$color-name}-rgb), 0.25);
+      border-color: rgba(var(--bs-#{$color-name}-rgb), 0.25);
+      box-shadow: 0 0 0 0.25rem rgba(var(--bs-#{$color-name}-rgb), 0.15);
+    }
+
+    &:disabled,
+    &.disabled {
+      color: rgba(var(--bs-#{$color-name}-rgb), 0.5);
+      background-color: rgba(var(--bs-#{$color-name}-rgb), 0.05);
+      border-color: rgba(var(--bs-#{$color-name}-rgb), 0.05);
+    }
+  }
+
+  // Soft outline buttons
+  .btn-outline-#{$color-name}-soft {
+    color: var(--bs-#{$color-name});
+    background-color: transparent;
+    border-color: rgba(var(--bs-#{$color-name}-rgb), 0.3);
+
+    &:hover {
+      color: var(--bs-#{$color-name});
+      background-color: rgba(var(--bs-#{$color-name}-rgb), 0.1);
+      border-color: rgba(var(--bs-#{$color-name}-rgb), 0.4);
+    }
+
+    &:focus,
+    &:active,
+    &.active {
+      color: var(--bs-#{$color-name});
+      background-color: rgba(var(--bs-#{$color-name}-rgb), 0.15);
+      border-color: rgba(var(--bs-#{$color-name}-rgb), 0.5);
+      box-shadow: 0 0 0 0.25rem rgba(var(--bs-#{$color-name}-rgb), 0.15);
+    }
+  }
+
+  // Soft badges
+  .badge-#{$color-name}-soft {
+    color: var(--bs-#{$color-name});
+    background-color: rgba(var(--bs-#{$color-name}-rgb), 0.1);
+  }
+
+  // Soft alerts
+  .alert-#{$color-name}-soft {
+    color: var(--bs-#{$color-name});
+    background-color: rgba(var(--bs-#{$color-name}-rgb), 0.1);
+    border-color: rgba(var(--bs-#{$color-name}-rgb), 0.2);
+
+    .alert-link {
+      color: var(--bs-#{$color-name});
+      text-decoration: underline;
+    }
+  }
+}

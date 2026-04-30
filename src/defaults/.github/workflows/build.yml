@@ -1,0 +1,137 @@
+name: Build & Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+env:
+  NODE_VERSION: '22'
+  EM_BUILD_MODE: 'true'
+  EM_IS_PUBLISH: 'true'
+  EM_IS_SERVER:  'true'
+  GH_TOKEN: ${{ secrets.GH_TOKEN }}
+
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      # Electron's main + renderer test layers need a display server on Linux.
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgtk-3-0 libnss3 libxss1 libasound2t64 libgbm1 || sudo apt-get install -y xvfb libgtk-3-0 libnss3 libxss1 libasound2 libgbm1
+      - run: npm ci
+      - name: Run framework + project test suites
+        run: xvfb-run --auto-servernum -- npx mgr test --reporter json
+        env:
+          # Skip integration suites that require live backend creds. Set to '1' on a separate
+          # workflow if you want to run them.
+          EM_TEST_INTEGRATION: '0'
+
+  build:
+    name: Build (${{ matrix.os }})
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_TOKEN }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      - run: npx mgr setup
+
+      # macOS — decode signing assets from secrets, then sign + notarize + publish.
+      # `npx mgr push-secrets` uploads .p12 / .p8 files as base64-encoded secrets;
+      # the workflow decodes them back to disk for electron-builder + notarytool to read.
+      - if: matrix.os == 'macos-latest'
+        run: |
+          mkdir -p build/certs
+          echo "${{ secrets.CSC_LINK }}"      | base64 --decode > build/certs/dev-id.p12
+          echo "${{ secrets.APPLE_API_KEY }}" | base64 --decode > build/certs/AuthKey.p8
+      - if: matrix.os == 'macos-latest'
+        env:
+          CSC_LINK:         build/certs/dev-id.p12
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY:    build/certs/AuthKey.p8
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_TEAM_ID:    ${{ secrets.APPLE_TEAM_ID }}
+        run: npm run release
+
+      # Linux — no signing
+      - if: matrix.os == 'ubuntu-latest'
+        run: npm run release
+
+      # Windows — build unsigned; signing happens in the windows-sign job below.
+      - if: matrix.os == 'windows-latest'
+        env:
+          EM_SKIP_WIN_SIGN: 'true'
+        run: npm run build
+
+      - if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-unsigned
+          path: release/*.exe
+
+  windows-sign:
+    name: Sign Windows
+    needs: build
+    # Strategy is config-driven. Set EM_WIN_SIGN_STRATEGY repo variable to:
+    #   self-hosted (default) — runs on a self-hosted runner with EV USB token attached
+    #   cloud                 — runs on hosted windows-latest, calls cloud signing provider
+    #   local                 — skip this job; sign locally via `npx mgr sign-windows`
+    if: ${{ vars.EM_WIN_SIGN_STRATEGY != 'local' }}
+    runs-on: ${{ vars.EM_WIN_SIGN_STRATEGY == 'cloud' && fromJSON('["windows-latest"]') || fromJSON('["self-hosted","windows","ev-token"]') }}
+    env:
+      EM_WIN_SIGN_STRATEGY: ${{ vars.EM_WIN_SIGN_STRATEGY || 'self-hosted' }}
+      # Cloud-provider env vars — only one set is consumed depending on `windows.signing.cloud.provider` in config:
+      AZURE_TENANT_ID:                  ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_CLIENT_ID:                  ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_CLIENT_SECRET:              ${{ secrets.AZURE_CLIENT_SECRET }}
+      AZURE_TRUSTED_SIGNING_ENDPOINT:   ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+      SSLCOM_USERNAME:                  ${{ secrets.SSLCOM_USERNAME }}
+      SSLCOM_PASSWORD:                  ${{ secrets.SSLCOM_PASSWORD }}
+      SSLCOM_CREDENTIAL_ID:             ${{ secrets.SSLCOM_CREDENTIAL_ID }}
+      DIGICERT_API_KEY:                 ${{ secrets.DIGICERT_API_KEY }}
+      DIGICERT_KEYPAIR_ALIAS:           ${{ secrets.DIGICERT_KEYPAIR_ALIAS }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-unsigned
+          path: release
+      - run: npx mgr sign-windows --in release --out release/signed
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: release/signed/*

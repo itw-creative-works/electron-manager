@@ -1,0 +1,58 @@
+// Classy Theme CSS Custom Properties
+// Converts SCSS variables to CSS custom properties for runtime theming
+// These override Bootstrap's CSS variables and allow dynamic theme switching
+
+// ============================================
+// Light Mode (Default)
+// ============================================
+:root,
+[data-bs-theme="light"] {
+  // Background colors
+  --bs-body-bg: #{$classy-bg-light};
+  --bs-body-bg-rgb: #{red($classy-bg-light)}, #{green($classy-bg-light)}, #{blue($classy-bg-light)};
+
+  --bs-secondary-bg: #{$classy-bg-light-secondary};
+  --bs-secondary-bg-rgb: #{red($classy-bg-light-secondary)}, #{green($classy-bg-light-secondary)}, #{blue($classy-bg-light-secondary)};
+
+  --bs-tertiary-bg: #{$classy-bg-light-tertiary};
+  --bs-tertiary-bg-rgb: #{red($classy-bg-light-tertiary)}, #{green($classy-bg-light-tertiary)}, #{blue($classy-bg-light-tertiary)};
+
+  // Component backgrounds - use secondary bg for elevated surfaces
+  // --bs-card-bg: #{$classy-bg-light-secondary};
+  // --bs-dropdown-bg: #{$classy-bg-light-secondary};
+  // --bs-modal-bg: #{$classy-bg-light-secondary};
+  // --bs-popover-bg: #{$classy-bg-light-secondary};
+  // --bs-offcanvas-bg: #{$classy-bg-light-secondary};
+  // --bs-accordion-bg: #{$classy-bg-light-secondary};
+
+  // Add more Bootstrap overrides here as needed
+  // Examples:
+  // --bs-body-color: #212529;
+  // --bs-border-color: #dee2e6;
+  // --bs-link-color: #{$primary};
+}
+
+// ============================================
+// Dark Mode
+// ============================================
+[data-bs-theme="dark"] {
+  // Background colors
+  --bs-body-bg: #{$classy-bg-dark};
+  --bs-body-bg-rgb: #{red($classy-bg-dark)}, #{green($classy-bg-dark)}, #{blue($classy-bg-dark)};
+
+  --bs-secondary-bg: #{$classy-bg-dark-secondary};
+  --bs-secondary-bg-rgb: #{red($classy-bg-dark-secondary)}, #{green($classy-bg-dark-secondary)}, #{blue($classy-bg-dark-secondary)};
+
+  --bs-tertiary-bg: #{$classy-bg-dark-tertiary};
+  --bs-tertiary-bg-rgb: #{red($classy-bg-dark-tertiary)}, #{green($classy-bg-dark-tertiary)}, #{blue($classy-bg-dark-tertiary)};
+
+  // Component backgrounds - use secondary bg for elevated surfaces
+  // --bs-card-bg: #{$classy-bg-dark-secondary};
+  // --bs-dropdown-bg: #{$classy-bg-dark-secondary};
+  // --bs-modal-bg: #{$classy-bg-dark-secondary};
+  // --bs-popover-bg: #{$classy-bg-dark-secondary};
+  // --bs-offcanvas-bg: #{$classy-bg-dark-secondary};
+  // --bs-accordion-bg: #{$classy-bg-dark-secondary};
+
+  // Add more Bootstrap overrides here as needed
+}

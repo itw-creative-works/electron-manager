@@ -1,0 +1,31 @@
+// =============================================================================
+// Link Utilities
+// =============================================================================
+// Custom link styles and variations.
+// These are universal utilities available to all UJ themes.
+
+// ============================================
+// Muted Link Style
+// ============================================
+// A link that looks like muted text but has hover effects
+.link-muted {
+  --bs-text-opacity: 1;
+  color: var(--bs-secondary-color) !important;
+  text-decoration: none;
+  transition: opacity 0.15s ease-in-out;
+
+  &:hover,
+  &:focus {
+    color: var(--bs-secondary-color) !important;
+    text-decoration: underline;
+    opacity: 0.75;
+  }
+}
+
+// ============================================
+// Active Nav Link Underline
+// ============================================
+// Adds underline to active nav links for better visibility
+.nav-link.active {
+  text-decoration: underline !important;
+}

@@ -1,0 +1,15 @@
+// Classy Utility Classes
+// Custom helper classes and theme-specific utilities
+
+// ============================================
+// Shadow Utilities (Classy-specific)
+// ============================================
+.shadow-xs { box-shadow: $classy-shadow-xs !important; }
+.shadow-sm { box-shadow: $classy-shadow-sm !important; }
+.shadow-md { box-shadow: $classy-shadow-md !important; }
+.shadow-lg { box-shadow: $classy-shadow-lg !important; }
+.shadow-xl { box-shadow: $classy-shadow-xl !important; }
+.shadow-2xl { box-shadow: $classy-shadow-2xl !important; }
+.shadow-glow { box-shadow: $classy-shadow-glow !important; }
+.shadow-none { box-shadow: none !important; }
+

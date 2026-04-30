@@ -1,0 +1,53 @@
+// Classy Text Components
+// Text effects and utilities
+
+// ============================================
+// Gradient Text Styles
+// ============================================
+.text-gradient-rainbow {
+  background-image: $classy-gradient-rainbow;
+  background-size: 300% 300%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.text-gradient-aurora {
+  background-image: $classy-gradient-aurora;
+  background-size: 300% 300%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+// ============================================
+// Accent Font
+// ============================================
+.text-accent {
+  font-family: $classy-font-accent;
+  font-weight: inherit;
+  font-style: italic;
+}
+
+// ============================================
+// Adaptive Text Colors
+// ============================================
+.text-adaptive {
+  @extend .text-light;
+}
+
+[data-bs-theme="dark"] .text-adaptive {
+  @extend .text-dark;
+}
+
+// ============================================
+// Text Decoration Utilities
+// ============================================
+.text-decoration-dotted {
+  text-decoration-style: dotted !important;
+}
+
+.text-decoration-dashed {
+  text-decoration-style: dashed !important;
+}
+

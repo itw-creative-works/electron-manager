@@ -1,0 +1,40 @@
+// =============================================================================
+// Typography Utilities
+// =============================================================================
+// Font weight, letter spacing, and line height utilities.
+// These are universal utilities available to all UJ themes.
+
+// ============================================
+// Font Weight Utilities
+// ============================================
+.fw-300 { font-weight: 300 !important; }
+.fw-400 { font-weight: 400 !important; }
+.fw-500 { font-weight: 500 !important; }
+.fw-600 { font-weight: 600 !important; }
+.fw-700 { font-weight: 700 !important; }
+.fw-800 { font-weight: 800 !important; }
+.fw-900 { font-weight: 900 !important; }
+
+// ============================================
+// Letter Spacing Utilities
+// ============================================
+.ls-tighter { letter-spacing: -0.04em !important; }
+.ls-tight { letter-spacing: -0.02em !important; }
+.ls-normal { letter-spacing: 0 !important; }
+.ls-wide { letter-spacing: 0.02em !important; }
+.ls-wider { letter-spacing: 0.04em !important; }
+
+// ============================================
+// Line Height Utilities
+// ============================================
+.lh-1 { line-height: 1 !important; }
+.lh-tight { line-height: 1.2 !important; }
+.lh-normal { line-height: 1.6 !important; }
+.lh-relaxed { line-height: 1.8 !important; }
+.lh-loose { line-height: 2 !important; }
+
+// ============================================
+// Text Decoration Utilities
+// ============================================
+.text-decoration-dotted { text-decoration-style: dotted !important; }
+.text-decoration-dashed { text-decoration-style: dashed !important; }

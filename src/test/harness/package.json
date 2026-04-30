@@ -1,0 +1,6 @@
+{
+  "name": "em-test-harness",
+  "version": "0.0.0",
+  "private": true,
+  "main": "main-entry.js"
+}

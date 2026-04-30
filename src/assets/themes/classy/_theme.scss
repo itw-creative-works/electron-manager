@@ -1,0 +1,34 @@
+// Forward theme configuration (allows consuming project to override)
+@forward 'config';
+@use 'config' as *;
+
+// Import root overrides (CSS custom properties)
+@import 'css/base/root';
+
+// Import base styles
+@import 'css/base/animations';
+@import 'css/base/backgrounds';
+@import 'css/base/borders';
+@import 'css/base/typography';
+@import 'css/base/utilities';
+
+// Import layout styles
+@import 'css/layout/backend';
+@import 'css/layout/blog';
+@import 'css/layout/general';
+@import 'css/layout/navigation';
+@import 'css/layout/team';
+
+// Import component styles
+@import 'css/components/accordion';
+@import 'css/components/badges';
+@import 'css/components/buttons';
+@import 'css/components/cards';
+@import 'css/components/carousel';
+@import 'css/components/forms';
+@import 'css/components/infinite-scroll';
+@import 'css/components/text';
+
+// Import universal Bootstrap overrides (shared across all UJ themes)
+// Must come AFTER Bootstrap is loaded via config to use @extend
+@import '../bootstrap/overrides';

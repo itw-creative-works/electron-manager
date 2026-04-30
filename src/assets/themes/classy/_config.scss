@@ -1,0 +1,189 @@
+// Classy Theme Configuration
+// ALL customizable variables are defined here with !default
+// Consuming projects can override any of these using @use ... with ()
+
+// ============================================
+// Bootstrap Color Overrides
+// ============================================
+$primary: #5B47FB !default;
+$secondary: #6C757D !default;
+$success: #10B981 !default;
+$info: #00D4FF !default;
+$warning: #FFB800 !default;
+$danger: #DC3545 !default;
+$light: #F8F9FA !default;
+$dark: #1A1A23 !default;
+
+// ============================================
+// Typography
+// ============================================
+$font-family-sans-serif: 'Lexend', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !default;
+$headings-font-weight: 700 !default;
+$classy-font-mono: monospace !default;
+$classy-font-accent: 'Instrument Serif', serif !default;
+// $classy-font-accent: 'DM Serif Display', serif !default;
+// $classy-font-accent: 'Crimson Pro', serif !default;
+
+// ============================================
+// Border Radius
+// ============================================
+$border-radius: 0.5rem !default;
+$border-radius-sm: 0.375rem !default;
+$border-radius-lg: 0.75rem !default;
+$border-radius-xl: 1rem !default;
+$border-radius-2xl: 1.5rem !default;
+$border-radius-pill: 50rem !default;
+
+// Classy-specific border radius aliases
+$classy-radius-sm: $border-radius-sm !default;
+$classy-radius-md: $border-radius !default;
+$classy-radius-lg: $border-radius-lg !default;
+$classy-radius-xl: $border-radius-xl !default;
+$classy-radius-2xl: $border-radius-2xl !default;
+$classy-radius-full: 9999px !default;
+
+// ============================================
+// Background Colors (Light Mode)
+// ============================================
+$classy-bg-light: #ffffff !default;              // Main body background
+$classy-bg-light-secondary: #f6f6f6 !default;    // Secondary backgrounds (cards, sidebars)
+$classy-bg-light-tertiary: #f0f0f0 !default;     // Tertiary backgrounds (hover states)
+
+// ============================================
+// Background Colors (Dark Mode)
+// ============================================
+$classy-bg-dark: #121212 !default;               // Main body background
+$classy-bg-dark-secondary: #171717 !default;     // Secondary backgrounds (cards, sidebars)
+$classy-bg-dark-tertiary: #212121 !default;      // Tertiary backgrounds (hover states)
+
+// ============================================
+// Classy-Specific Colors
+// ============================================
+$classy-primary: $primary !default;
+$classy-primary-dark: darken($primary, 10%) !default;
+$classy-primary-light: lighten($primary, 10%) !default;
+$classy-primary-soft: mix($primary, white, 10%) !default;
+
+$classy-secondary: $secondary !default;
+$classy-secondary-dark: darken($secondary, 5%) !default;
+$classy-secondary-light: lighten($secondary, 5%) !default;
+
+$classy-accent: $info !default;
+$classy-accent-dark: darken($info, 10%) !default;
+$classy-accent-light: lighten($info, 10%) !default;
+
+$classy-dark: $dark !default;
+$classy-dark-900: lighten($dark, 5%) !default;
+$classy-dark-800: lighten($dark, 10%) !default;
+$classy-dark-700: lighten($dark, 15%) !default;
+$classy-dark-600: lighten($dark, 20%) !default;
+
+$classy-gray: #6B7280 !default;
+$classy-gray-light: #9CA3AF !default;
+$classy-gray-lighter: #D1D5DB !default;
+$classy-gray-lightest: #F3F4F6 !default;
+
+$classy-white: #FFFFFF !default;
+$classy-off-white: #FAFBFC !default;
+$classy-cream: #FFF9F5 !default;
+
+// ============================================
+// Gradient Definitions
+// ============================================
+$classy-gradient-primary: linear-gradient(135deg, $classy-primary 0%, $classy-accent 100%) !default;
+$classy-gradient-dark: linear-gradient(135deg, $classy-dark 0%, $classy-dark-800 100%) !default;
+$classy-gradient-light: linear-gradient(135deg, $classy-white 0%, $classy-off-white 100%) !default;
+$classy-gradient-sunset: linear-gradient(135deg, #FF6B6B 0%, #FFB84D 100%) !default;
+$classy-gradient-aurora: linear-gradient(135deg, #5B47FB 0%, #00D4FF 50%, #FF6B6B 100%) !default;
+$classy-gradient-rainbow: linear-gradient(60deg, #f79533, #f37055, #ef4e7b, #a166ab, #5073b8, #1098ad, #07b39b, #6fba82) !default;
+
+// ============================================
+// Typography Scale
+// ============================================
+$classy-font-size-xs: 0.75rem !default;
+$classy-font-size-sm: 0.875rem !default;
+$classy-font-size-base: 1rem !default;
+$classy-font-size-lg: 1.125rem !default;
+$classy-font-size-xl: 1.25rem !default;
+$classy-font-size-2xl: 1.5rem !default;
+$classy-font-size-3xl: 1.875rem !default;
+$classy-font-size-4xl: 2.25rem !default;
+$classy-font-size-5xl: 3rem !default;
+$classy-font-size-6xl: 3.75rem !default;
+
+// ============================================
+// Spacing Scale
+// ============================================
+$classy-spacing-xs: 0.25rem !default;
+$classy-spacing-sm: 0.5rem !default;
+$classy-spacing-md: 1rem !default;
+$classy-spacing-lg: 1.5rem !default;
+$classy-spacing-xl: 2rem !default;
+$classy-spacing-2xl: 3rem !default;
+$classy-spacing-3xl: 4rem !default;
+$classy-spacing-4xl: 6rem !default;
+
+// ============================================
+// Shadow System
+// ============================================
+$classy-shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.05) !default;
+$classy-shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06) !default;
+$classy-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06) !default;
+$classy-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05) !default;
+$classy-shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04) !default;
+$classy-shadow-2xl: 0 25px 50px -12px rgba(0, 0, 0, 0.25) !default;
+$classy-shadow-glow: 0 0 40px rgba(91, 71, 251, 0.15) !default;
+
+// ============================================
+// Transition Timing
+// ============================================
+$classy-transition-fast: all 0.15s cubic-bezier(.2,.3,0,1) !default;
+$classy-transition-base: all 0.3s cubic-bezier(.2,.3,0,1) !default;
+$classy-transition-slow: all 0.5s cubic-bezier(.2,.3,0,1) !default;
+$classy-transition-bounce: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55) !default;
+
+// ============================================
+// Responsive Breakpoints
+// ============================================
+// Bootstrap-compatible breakpoint values
+$classy-breakpoint-sm: 576px !default;
+$classy-breakpoint-md: 768px !default;
+$classy-breakpoint-lg: 992px !default;
+$classy-breakpoint-xl: 1200px !default;
+$classy-breakpoint-xxl: 1400px !default;
+
+// ============================================
+// Component Sizing
+// ============================================
+// Avatar sizes map
+$avatar-sizes: (
+  null: 3rem,    // default
+  2xs: 0.5rem,
+  xs: 1.5rem,
+  sm: 2rem,
+  md: 2.5rem,
+  lg: 3.5rem,
+  xl: 5rem,
+  2xl: 7.5rem,
+  3xl: 10rem,
+  4xl: 12.5rem,
+  5xl: 15rem
+) !default;
+
+// Forward Bootstrap with our configuration
+@forward '../bootstrap/scss/bootstrap.scss' with (
+  $primary: $primary,
+  $secondary: $secondary,
+  $success: $success,
+  $info: $info,
+  $warning: $warning,
+  $danger: $danger,
+  $light: $light,
+  $dark: $dark,
+  $font-family-sans-serif: $font-family-sans-serif,
+  $headings-font-weight: $headings-font-weight,
+  $border-radius: $border-radius,
+  $border-radius-sm: $border-radius-sm,
+  $border-radius-lg: $border-radius-lg,
+  $enable-negative-margins: true
+);

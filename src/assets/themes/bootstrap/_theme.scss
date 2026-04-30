@@ -1,0 +1,11 @@
+// =============================================================================
+// UJ Bootstrap Theme
+// =============================================================================
+// Base Bootstrap theme with universal overrides.
+// All UJ themes that extend Bootstrap inherit these utilities.
+
+// Import Bootstrap
+@use './scss/bootstrap.scss' as *;
+
+// Import UJ universal overrides
+@use './overrides' as *;

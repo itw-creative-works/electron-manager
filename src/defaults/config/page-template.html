@@ -1,0 +1,20 @@
+<!doctype html>
+<html data-bs-theme="{{ theme.appearance }}">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>{{ page.title }}</title>
+
+    <!-- Main CSS — present on every page (compiled from src/assets/scss/main.scss by gulp/sass). -->
+    <link href="../../assets/css/main.bundle.css?cb={{ cacheBust }}" rel="stylesheet">
+
+    <!-- Per-page CSS — present only on this view (compiled from src/assets/scss/pages/{{ page.name }}.scss). -->
+    <link href="../../assets/css/components/{{ page.name }}.bundle.css?cb={{ cacheBust }}" rel="stylesheet">
+  </head>
+  <body>
+    {{ content }}
+
+    <!-- Per-page JS — entry bundle for this view (compiled by webpack renderer config). -->
+    <script src="../../assets/js/components/{{ page.name }}.bundle.js?cb={{ cacheBust }}"></script>
+  </body>
+</html>

@@ -1,0 +1,42 @@
+// Classy Blog Layout
+// Responsive image sizing for blog posts and cards
+
+// ============================================
+// Blog Card Images
+// ============================================
+.blog-post-card-image {
+  height: 240px;
+  width: 100%;
+}
+
+@media (max-width: 991.98px) {
+  .blog-post-card-image {
+    height: 240px;
+  }
+}
+
+@media (max-width: 575.98px) {
+  .blog-post-card-image {
+    height: 200px;
+  }
+}
+
+// ============================================
+// Blog Post Page Images
+// ============================================
+.blog-post-image {
+  min-height: 600px;
+  width: 100%;
+}
+
+@media (max-width: 991.98px) {
+  .blog-post-image {
+    min-height: 360px;
+  }
+}
+
+@media (max-width: 575.98px) {
+  .blog-post-image {
+    min-height: 240px;
+  }
+}

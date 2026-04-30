@@ -1,0 +1,25 @@
+// =============================================================================
+// Color Shade CSS Custom Properties
+// =============================================================================
+// Provides hover/active shade variants for light and dark colors.
+// These are used by adaptive buttons and can be reused elsewhere.
+
+:root,
+[data-bs-theme="light"] {
+  // Dark color shades (for hover/active states on dark buttons)
+  --bs-dark-hover: #3a3a44;
+  --bs-dark-active: #34343e;
+
+  // Light color shades (for hover/active states on light buttons)
+  --bs-light-hover: #d3d6db;
+  --bs-light-active: #c8ccd1;
+}
+
+[data-bs-theme="dark"] {
+  // In dark mode, the values are the same but semantic meaning is swapped
+  --bs-dark-hover: #3a3a44;
+  --bs-dark-active: #34343e;
+
+  --bs-light-hover: #d3d6db;
+  --bs-light-active: #c8ccd1;
+}

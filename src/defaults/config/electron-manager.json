@@ -1,0 +1,86 @@
+{
+  brand: {
+    id: 'myapp',
+    name: 'MyApp',
+    url: 'https://myapp.example',
+    contact: { email: 'support@myapp.example' },
+    images: {
+      brandmark: '',
+      wordmark:  '',
+      icon:      'src/assets/icons/icon.png',
+    },
+  },
+  app: {
+    appId:       'com.itwcw.myapp',
+    productName: 'MyApp',
+    copyright:   '© ITW Creative Works',
+  },
+  // Auto-updater (electron-updater wrapper). Feed URL is auto-derived from `releases` (above).
+  // Set `EM_DEV_UPDATE=available|unavailable|error` to simulate updates in dev.
+  autoUpdate: {
+    enabled:        true,
+    channel:        'latest',
+    autoDownload:   true,
+    startupDelayMs: 10000,        // 10s after whenReady → first check
+    intervalMs:     3600000,      // 1h between periodic checks (lib default is 60000 / 60s)
+    maxAgeMs:       2592000000,   // 30d — once an update has been pending this long, force install
+  },
+  // Tray, menu, and context-menu are defined in JS files (full power, no DSL).
+  // See src/tray/index.js, src/menu/index.js, src/context-menu/index.js.
+  tray:        { enabled: true,  definition: 'src/tray/index.js' },
+  menu:        { enabled: true,  definition: 'src/menu/index.js' },
+  contextMenu: { enabled: true,  definition: 'src/context-menu/index.js' },
+  // Startup mode controls how the app launches:
+  //   normal     — main window shows immediately, dock icon visible (typical app)
+  //   hidden     — no window auto-shown; consumer calls manager.windows.show() later. Dock icon still appears
+  //                briefly on launch (no plist trick can fix this without going tray-only).
+  //   tray-only  — true agent app: no dock icon at all, no taskbar entry, no cmd-tab presence. Production
+  //                builds inject LSUIElement=true into Info.plist so there is ZERO dock bounce on launch.
+  //                Showing a window still works — it just won't pin a permanent dock icon.
+  startup: {
+    mode:        'normal',
+    openAtLogin: false,
+  },
+  windows: {
+    main:     { view: 'main',     width: 1024, height: 720, show: true,  hideOnClose: false },
+    settings: { view: 'settings', width: 600,  height: 480, show: false, hideOnClose: true  },
+    about:    { view: 'about',    width: 480,  height: 360, show: false, hideOnClose: true  },
+  },
+  signing: {
+    windows: {
+      strategy: 'self-hosted',
+      cloud: { provider: null, options: {} },
+    },
+  },
+  // Releases — public repo where built artifacts (and the auto-update feed) live.
+  // The app repo can stay private; this one MUST be public for unauthenticated downloads + auto-updates.
+  // owner defaults to the app repo's owner, so a single line `repo: 'update-server'` is usually all you need.
+  // setup auto-creates this repo if it doesn't exist (uses GH_TOKEN).
+  releases: {
+    enabled: true,
+    owner:   null,              // null = use app repo owner
+    repo:    'update-server',
+  },
+  // Downloads — fixed-name mirror release. After every successful release, EM re-uploads the
+  // versioned artifacts (MyApp-1.0.1.dmg) to a stable tag with stable names (MyApp-mac-arm64.dmg).
+  // Marketing site links to https://github.com/<owner>/<repo>/releases/download/<tag>/<asset>
+  // and that link never changes across versions.
+  downloads: {
+    enabled: true,
+    owner:   null,              // null = use app repo owner
+    repo:    'download-server',
+    tag:     'installer',
+  },
+  deepLinks: {
+    schemes: ['myapp'],
+    routes:  { 'auth/token': 'deepLink:authToken' },
+  },
+  sentry:         { dsn: '' },
+  firebaseConfig: {},
+  webManager:     {},
+  em: {
+    environment:    'production',
+    cacheBreaker:   null,
+    liveReloadPort: 35729,
+  },
+}

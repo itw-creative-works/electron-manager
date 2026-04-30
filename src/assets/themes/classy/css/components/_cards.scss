@@ -1,0 +1,33 @@
+// Classy Card Components
+// Modern card designs with glass effects and subtle animations
+
+// ============================================
+// Base Card Styles
+// ============================================
+.card {
+  background: var(--bs-secondary-bg);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  border-radius: $classy-radius-xl;
+  box-shadow: $classy-shadow-sm;
+  position: relative;
+
+  // Allow badges to overflow (except when overflow-hidden is explicitly set)
+  &:has(.badge):not(.overflow-hidden) {
+    overflow: visible !important;
+  }
+
+  .card-header {
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+    padding: 1.5rem;
+    font-weight: 600;
+  }
+
+  .card-body {
+    padding: 1.5rem;
+  }
+
+  .card-footer {
+    border-top: 1px solid rgba(0, 0, 0, 0.05);
+    padding: 1rem 1.5rem;
+  }
+}

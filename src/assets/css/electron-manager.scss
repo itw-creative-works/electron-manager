@@ -1,0 +1,14 @@
+// ============================================
+// Electron Manager — Main SCSS Entry
+// ============================================
+// Consumer projects import via: `@use 'electron-manager' as * with ($primary: #5B47FB);`
+//
+// gulp/sass adds <em-package-root>/dist/assets/css and <em-package-root>/dist/assets/themes/<theme>
+// to the sass loadPaths so the bare 'electron-manager' import resolves to this file.
+
+// Forward the active theme so consumers can override theme variables via @use ... with ()
+@forward 'theme';
+@use 'theme' as *;
+
+// EM-specific core styles (desktop-targeted)
+@use 'core/_initialize' as *;

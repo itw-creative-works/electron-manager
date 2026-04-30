@@ -1,0 +1,34 @@
+// ============================================
+// Theme Configuration
+// ============================================
+// Customize Classy theme variables here. See:
+// node_modules/electron-manager/dist/assets/themes/classy/_config.scss for all available variables.
+
+@use 'electron-manager' as * with (
+  // ============================================
+  // Brand Colors
+  // ============================================
+  $primary: #5B47FB,
+  // $secondary: #6C757D,
+
+  // ============================================
+  // Backgrounds
+  // ============================================
+  // $classy-bg-light: #FFFFFF,
+  // $classy-bg-dark: #212529,
+
+  // ============================================
+  // Typography (uncomment to customize)
+  // ============================================
+  // $font-family-sans-serif: -apple-system, sans-serif,
+
+  // ============================================
+  // Borders (uncomment to customize)
+  // ============================================
+  // $border-radius: 0.5rem,
+);
+
+// ============================================
+// Custom Global Styles
+// ============================================
+// Add your project-specific styles below — applied on every page.

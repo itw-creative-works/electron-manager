@@ -1,0 +1,74 @@
+// =============================================================================
+// Extended Spacing Utilities
+// =============================================================================
+// Additional spacing utilities beyond Bootstrap's defaults.
+// These are universal utilities available to all UJ themes.
+
+// ============================================
+// Spacer (local definition - matches Bootstrap default)
+// ============================================
+$_spacer: 1rem;
+
+// ============================================
+// Extended Padding & Margin Classes (6-10)
+// ============================================
+// Size mapping: 6=4rem, 7=5rem, 8=6rem, 9=8rem, 10=10rem
+@for $i from 6 through 10 {
+  $size: if($i == 6, 4, if($i == 7, 5, if($i == 8, 6, if($i == 9, 8, 10))));
+
+  // Padding
+  .p-#{$i} { padding: $_spacer * $size !important; }
+  .pt-#{$i} { padding-top: $_spacer * $size !important; }
+  .pb-#{$i} { padding-bottom: $_spacer * $size !important; }
+  .ps-#{$i} { padding-left: $_spacer * $size !important; }
+  .pe-#{$i} { padding-right: $_spacer * $size !important; }
+  .px-#{$i} {
+    padding-left: $_spacer * $size !important;
+    padding-right: $_spacer * $size !important;
+  }
+  .py-#{$i} {
+    padding-top: $_spacer * $size !important;
+    padding-bottom: $_spacer * $size !important;
+  }
+
+  // Margin
+  .m-#{$i} { margin: $_spacer * $size !important; }
+  .mt-#{$i} { margin-top: $_spacer * $size !important; }
+  .mb-#{$i} { margin-bottom: $_spacer * $size !important; }
+  .ms-#{$i} { margin-left: $_spacer * $size !important; }
+  .me-#{$i} { margin-right: $_spacer * $size !important; }
+  .mx-#{$i} {
+    margin-left: $_spacer * $size !important;
+    margin-right: $_spacer * $size !important;
+  }
+  .my-#{$i} {
+    margin-top: $_spacer * $size !important;
+    margin-bottom: $_spacer * $size !important;
+  }
+}
+
+// ============================================
+// Viewport Height Utilities
+// ============================================
+.vh-50 { height: 50vh !important; }
+.vh-75 { height: 75vh !important; }
+.vh-80 { height: 80vh !important; }
+.vh-90 { height: 90vh !important; }
+.vh-100 { height: 100vh !important; }
+
+// Min-Height utilities using viewport height (vh) units
+.min-vh-50 { min-height: 50vh !important; }
+.min-vh-75 { min-height: 75vh !important; }
+.min-vh-80 { min-height: 80vh !important; }
+.min-vh-90 { min-height: 90vh !important; }
+.min-vh-100 { min-height: 100vh !important; }
+
+// ============================================
+// Max Width Utilities (Bootstrap Breakpoints)
+// ============================================
+// Max width utility classes based on Bootstrap grid breakpoints
+.mw-sm { max-width: 576px !important; }
+.mw-md { max-width: 768px !important; }
+.mw-lg { max-width: 992px !important; }
+.mw-xl { max-width: 1200px !important; }
+.mw-xxl { max-width: 1400px !important; }

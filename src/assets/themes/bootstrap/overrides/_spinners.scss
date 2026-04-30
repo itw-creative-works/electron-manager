@@ -1,0 +1,22 @@
+// =============================================================================
+// Extended Spinner Sizes
+// =============================================================================
+// Large spinner variants for Bootstrap spinners.
+// These are universal utilities available to all UJ themes.
+
+// ============================================
+// Large Spinner - Border Variant
+// ============================================
+.spinner-border-lg {
+  --bs-spinner-width: 3rem;
+  --bs-spinner-height: 3rem;
+  --bs-spinner-border-width: 0.375rem;
+}
+
+// ============================================
+// Large Spinner - Grow Variant
+// ============================================
+.spinner-grow-lg {
+  --bs-spinner-width: 3rem;
+  --bs-spinner-height: 3rem;
+}

@@ -1,0 +1,27 @@
+// Classy Animation Utilities
+// Keyframes and animation classes for dynamic effects
+
+// ============================================
+// Keyframe Animations
+// ============================================
+
+@keyframes gradient-shimmer {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+// ============================================
+// Animation Classes
+// ============================================
+
+// Gradient animation modifier - works with all rainbow gradient classes
+.gradient-animated {
+  animation: gradient-shimmer 5s ease-out infinite alternate !important;
+}

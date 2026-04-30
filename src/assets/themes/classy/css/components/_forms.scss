@@ -1,0 +1,150 @@
+// Classy Form Components
+// Modern form styling with consistent rounded corners
+
+// ============================================
+// Input Groups
+// ============================================
+.input-group {
+  > .form-control {
+    border-radius: $classy-radius-lg;
+
+    &:not(:last-child) {
+      border-top-right-radius: 0;
+      border-bottom-right-radius: 0;
+    }
+
+    &:not(:first-child) {
+      border-top-left-radius: 0;
+      border-bottom-left-radius: 0;
+    }
+  }
+
+  // Buttons in input groups
+  > .btn {
+    border-radius: $classy-radius-lg;
+
+    &:not(:last-child) {
+      border-top-right-radius: 0;
+      border-bottom-right-radius: 0;
+    }
+
+    &:not(:first-child) {
+      border-top-left-radius: 0;
+      border-bottom-left-radius: 0;
+    }
+
+    // Last button in group
+    &:last-child {
+      border-top-left-radius: 0;
+      border-bottom-left-radius: 0;
+    }
+
+    // First button in group
+    &:first-child {
+      border-top-right-radius: 0;
+      border-bottom-right-radius: 0;
+    }
+  }
+
+  // Input group text
+  > .input-group-text {
+    border-radius: $classy-radius-lg;
+
+    &:not(:last-child) {
+      border-top-right-radius: 0;
+      border-bottom-right-radius: 0;
+    }
+
+    &:not(:first-child) {
+      border-top-left-radius: 0;
+      border-bottom-left-radius: 0;
+    }
+  }
+}
+
+// ============================================
+// Form Controls
+// ============================================
+.form-control,
+.form-select {
+  border-radius: $classy-radius-lg;
+  border: 1px solid var(--bs-border-color);
+  background-color: var(--bs-body-bg);
+  transition: all 0.2s ease;
+
+  &:focus {
+    border-color: $primary;
+    box-shadow: 0 0 0 0.25rem rgba($primary, 0.25);
+    background-color: var(--bs-body-bg);
+  }
+
+  // // Override Chrome/Safari autofill background color with subtle indicator
+  &:-webkit-autofill,
+  &:-webkit-autofill:hover,
+  &:-webkit-autofill:focus {
+    -webkit-box-shadow: 0 0 0 1000px var(--bs-body-bg) inset !important;
+    -webkit-text-fill-color: var(--bs-body-color) !important;
+    caret-color: var(--bs-body-color);
+    border-color: $primary !important;
+    box-shadow: 0 0 0 1000px var(--bs-body-bg) inset, 0 0 0 2px rgba($primary, 0.15) !important;
+  }
+}
+
+// ============================================
+// Form Labels & Text
+// ============================================
+.form-label {
+  font-weight: 500;
+  margin-bottom: 0.5rem;
+}
+
+// Form text
+.form-text {
+  font-size: 0.875rem;
+  color: $classy-gray;
+}
+
+// ============================================
+// Custom Checkboxes & Radios
+// ============================================
+.form-check-input {
+  border-radius: $classy-radius-sm;
+
+  &[type="radio"] {
+    border-radius: 50%;
+  }
+
+  &:checked {
+    background-color: $primary;
+    border-color: $primary;
+  }
+
+  &:focus {
+    border-color: $primary;
+    box-shadow: 0 0 0 0.25rem rgba($primary, 0.25);
+  }
+}
+
+// ============================================
+// File Drop Zones
+// ============================================
+[data-file-drop] {
+  cursor: pointer;
+  border: 2px dashed var(--bs-border-color) !important;
+  border-radius: $classy-radius-lg;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+
+  &.file-drop-active {
+    border-color: $primary !important;
+    background-color: rgba($primary, 0.05);
+  }
+
+  &.file-drop-has-file {
+    border-color: $success !important;
+    border-style: solid !important;
+  }
+
+  &.file-drop-error {
+    border-color: $danger !important;
+  }
+}

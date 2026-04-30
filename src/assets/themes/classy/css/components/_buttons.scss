@@ -1,0 +1,264 @@
+// Classy Button Components
+// Modern button styles inspired by premium SaaS websites
+
+// ============================================
+// Base Button Styles
+// ============================================
+.btn {
+  font-weight: 600;
+  border-radius: $classy-radius-lg;
+  border: 2px solid transparent;
+  transition: all 0.2s ease;
+  position: relative;
+  overflow: hidden;
+  letter-spacing: -0.01em;
+
+  &:focus {
+    box-shadow: 0 0 0 0.25rem rgba($primary, 0.25);
+  }
+
+  // // Slot machine hover effect
+  // // Works on direct text nodes when wrapped in any inline element
+  // > * {
+  //   position: relative;
+  //   display: inline-block;
+  //   transition: transform 0.3s ease;
+
+  //   // Create duplicate text below using the same content
+  //   &::before {
+  //     content: attr(data-hover);
+  //     position: absolute;
+  //     top: 100%;
+  //     left: 0;
+  //     width: max-content;
+  //     transform: translate3d(0, 0, 0);
+  //   }
+  // }
+
+  // // On hover, slide the content upward
+  // &:hover > * {
+  //   transform: translateY(-100%);
+  // }
+}
+
+// ============================================
+// Primary Button Enhancement
+// ============================================
+.btn-primary {
+  box-shadow: $classy-shadow-md, inset 0 1px 0 rgba(255, 255, 255, 0.15);
+
+  &:hover {
+    box-shadow: $classy-shadow-lg, inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  }
+
+  &:active {
+    box-shadow: $classy-shadow-sm, inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  }
+}
+
+// ============================================
+// Glass Morphism Buttons
+// ============================================
+.btn-glass {
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: var(--bs-body-color);
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.2);
+    color: var(--bs-body-color);
+    box-shadow: $classy-shadow-lg;
+  }
+
+  &.btn-glass-dark {
+    background: rgba(0, 0, 0, 0.1);
+
+    &:hover {
+      background: rgba(0, 0, 0, 0.2);
+    }
+  }
+}
+
+// ============================================
+// Glow Effect Button
+// ============================================
+.btn-glow {
+  background: $primary;
+  color: white;
+  box-shadow: 0 0 20px rgba($primary, 0.4);
+
+  &:hover {
+    background: darken($primary, 5%);
+    color: white;
+    box-shadow: 0 0 30px rgba($primary, 0.6);
+    transform: translateY(-2px);
+  }
+}
+
+// ============================================
+// Secondary Button
+// ============================================
+.btn-secondary {
+  &:hover {
+    box-shadow: $classy-shadow-md;
+  }
+}
+
+// ============================================
+// Outline Button Overrides
+// ============================================
+[class*="btn-outline-"] {
+  border-width: 2px !important;
+  border-style: solid !important;
+
+  &:not(:hover):not(:active):not(.active) {
+    background: transparent !important;
+  }
+
+  // btn-check checked state needs active background, not transparent
+  // Extra :checked specificity to beat the :not(:hover):not(:active):not(.active) rule above (0,4,0)
+  .btn-check:checked:checked + & {
+    background: var(--bs-btn-active-bg) !important;
+  }
+}
+
+.btn-outline-primary {
+  border-color: $primary !important;
+  color: $primary !important;
+
+  &:hover {
+    background: $primary !important;
+    border-color: $primary !important;
+    color: white !important;
+    box-shadow: $classy-shadow-md;
+  }
+}
+
+.btn-outline-secondary {
+  border-color: $secondary !important;
+  color: $secondary !important;
+
+  &:hover {
+    background: $secondary !important;
+    border-color: $secondary !important;
+    color: white !important;
+  }
+}
+
+.btn-outline-success {
+  border-color: $success !important;
+  color: $success !important;
+
+  &:hover {
+    background: $success !important;
+    border-color: $success !important;
+    color: white !important;
+  }
+}
+
+.btn-outline-danger {
+  border-color: $danger !important;
+  color: $danger !important;
+
+  &:hover {
+    background: $danger !important;
+    border-color: $danger !important;
+    color: white !important;
+  }
+}
+
+.btn-outline-warning {
+  border-color: $warning !important;
+  color: $warning !important;
+
+  &:hover {
+    background: $warning !important;
+    border-color: $warning !important;
+    color: white !important;
+  }
+}
+
+.btn-outline-info {
+  border-color: $info !important;
+  color: $info !important;
+
+  &:hover {
+    background: $info !important;
+    border-color: $info !important;
+    color: white !important;
+  }
+}
+
+.btn-outline-light {
+  border-color: $light !important;
+  color: $light !important;
+
+  &:hover {
+    background: $light !important;
+    border-color: $light !important;
+    color: $dark !important;
+  }
+}
+
+.btn-outline-dark {
+  border-color: $dark !important;
+  color: $dark !important;
+
+  &:hover {
+    background: $dark !important;
+    border-color: $dark !important;
+    color: white !important;
+  }
+}
+
+// ============================================
+// Button Groups
+// ============================================
+.btn-group {
+  .btn {
+    border-radius: 0;
+
+    &:first-child {
+      border-top-left-radius: $classy-radius-lg;
+      border-bottom-left-radius: $classy-radius-lg;
+    }
+
+    &:last-child {
+      border-top-right-radius: $classy-radius-lg;
+      border-bottom-right-radius: $classy-radius-lg;
+    }
+  }
+
+  &.btn-group-pill .btn {
+    &:first-child {
+      border-top-left-radius: $classy-radius-full;
+      border-bottom-left-radius: $classy-radius-full;
+    }
+
+    &:last-child {
+      border-top-right-radius: $classy-radius-full;
+      border-bottom-right-radius: $classy-radius-full;
+    }
+  }
+}
+
+// ============================================
+// Gradient Rainbow Button
+// ============================================
+.btn-gradient-rainbow {
+  border-width: 0 !important;
+  border-color: transparent !important;
+  background-color: transparent !important;
+  background-image: $classy-gradient-rainbow !important;
+  background-size: 300% 300% !important;
+  text-transform: none !important;
+  color: rgba(255, 255, 255, 1) !important;
+  box-shadow: 0px 4px 6px -1px rgba(0, 0, 0, 0.1), 0px 2px 4px -1px rgba(0, 0, 0, 0.06) !important;
+  transition-duration: 0.3s !important;
+
+  &:hover {
+    opacity: 0.70;
+  }
+}
