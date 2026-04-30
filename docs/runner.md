@@ -17,7 +17,7 @@ Hand this section to a fresh Claude session on the Windows box. It's the linear 
 - Git for Windows (`winget install Git.Git`)
 - EV USB token plugged in, SafeNet (or vendor) drivers installed, token unlocked once after boot
 - Visual Studio Build Tools 2022 with the "Desktop development with C++" workload (provides `signtool.exe`) — `winget install Microsoft.VisualStudio.2022.BuildTools` then in the Installer enable that workload
-- A GitHub Personal Access Token with `repo`, `admin:org`, `workflow` scopes (https://github.com/settings/tokens)
+- A GitHub Personal Access Token (classic) with `repo`, `workflow`, `admin:org` scopes (https://github.com/settings/tokens). The runner-registration-token API requires `admin:org`; `manage_runners:org` alone is insufficient.
 
 **Step 1 — Install EM globally:**
 ```powershell
@@ -94,11 +94,13 @@ Done. You never touch the Windows box again unless you replace the EV token or m
 
 ## What `GH_TOKEN` needs
 
-For full automation (auto-registering against new orgs without prompting), the token needs **`admin:org` scope** on every org you want serviced. Issue a fresh PAT at <https://github.com/settings/tokens> with:
+For full automation (auto-registering against new orgs without prompting), the token needs **`admin:org` scope** on every org you want serviced. Issue a fresh PAT (classic) at <https://github.com/settings/tokens> with:
 
 - `repo` (full)
-- `admin:org` (full)
 - `workflow`
+- `admin:org` (full)
+
+**Why not `manage_runners:org`?** GitHub's UI lists it as a minimum-privilege scope under `admin:org`, but the actual REST endpoint EM uses (`POST /orgs/{org}/actions/runners/registration-token`) explicitly requires `admin:org` (full) per their docs. `manage_runners:org` alone returns 403. Fine-grained tokens with "Self-hosted runners: write" do work but must be issued per-org, defeating auto-discovery.
 
 If your token only has `repo` scope, runner registration will fail per-org with a clear message telling you to broaden the scope.
 
@@ -240,7 +242,7 @@ The Windows service runs as `LocalSystem` (or the account you configured) — th
 - Or: install SafeNet client with "Per-machine" mode so the token is accessible from any account.
 
 ### `register-org` fails with 403
-Your `GH_TOKEN` lacks `admin:org` scope for that org. Re-issue the token at <https://github.com/settings/tokens> with `admin:org` checked.
+Your `GH_TOKEN` lacks `admin:org` scope for that org. Re-issue the token at <https://github.com/settings/tokens> with `admin:org` (full) checked. `manage_runners:org` alone is insufficient — see "What `GH_TOKEN` needs" above.
 
 ### `actions.runner` service won't start
 1. Open `eventvwr.msc` → Windows Logs → Application. Look for entries from `actions-runner-svc`.

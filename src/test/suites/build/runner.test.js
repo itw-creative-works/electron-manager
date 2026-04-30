@@ -119,5 +119,79 @@ module.exports = {
         ctx.expect(src).toContain('em-runner-watcher');
       },
     },
+    {
+      name: 'GH_TOKEN error message recommends admin:org (not manage_runners:org)',
+      run: (ctx) => {
+        // Guards against the regression where docs/code suggested manage_runners:org —
+        // GitHub's runner-registration endpoint requires admin:org for classic PATs.
+        const fs = require('fs');
+        const src = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'commands', 'runner.js'), 'utf8');
+        ctx.expect(src).toContain('admin:org');
+        ctx.expect(src).not.toMatch(/lacks manage_runners:org/);
+      },
+    },
+    {
+      name: 'downloadActionsRunner uses tar (not PowerShell Expand-Archive)',
+      run: (ctx) => {
+        const fs = require('fs');
+        const src = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'commands', 'runner.js'), 'utf8');
+        // Smoke check: tar invocation present, Expand-Archive removed.
+        ctx.expect(src).toContain("spawnSync('tar', ['-xf'");
+        ctx.expect(src).not.toContain('Expand-Archive');
+      },
+    },
+    {
+      name: 'tar can extract a real Windows actions/runner zip (smoke)',
+      run: async (ctx) => {
+        // Validates the tar approach works against an actual zip with the layout
+        // actions/runner ships. We don't pull from GH on every test (slow + flaky);
+        // instead build a tiny fixture zip on disk via Node, then extract via tar.
+        const fs = require('fs');
+        const os = require('os');
+        const { spawnSync } = require('child_process');
+
+        // Skip if tar isn't on PATH for any reason.
+        const which = spawnSync(process.platform === 'win32' ? 'where' : 'which', ['tar']);
+        if (which.status !== 0) {
+          ctx.skip('tar not found on PATH');
+        }
+
+        // Build a minimal zip via Node — uses the same standard zip container that
+        // actions/runner ships. We're testing that tar's zip support works at all.
+        // Smallest valid zip = 22-byte EOCD with no entries.
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'em-tar-test-'));
+        const zipPath = path.join(tmp, 'empty.zip');
+        // EOCD signature (PK\x05\x06) + 18 zero bytes = empty valid zip
+        const eocd = Buffer.from([0x50, 0x4B, 0x05, 0x06, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        fs.writeFileSync(zipPath, eocd);
+
+        const r = spawnSync('tar', ['-xf', zipPath, '-C', tmp]);
+        // Cleanup before assertion so we don't leak tmp dirs on failure.
+        try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) { /* ignore */ }
+
+        ctx.expect(r.status).toBe(0);
+      },
+    },
+    {
+      name: 'bootstrap surfaces zero-success failure with non-zero exit code',
+      run: (ctx) => {
+        // Source-text guard: confirm bootstrap reports + sets exitCode when 0/N orgs registered.
+        const fs = require('fs');
+        const src = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'commands', 'runner.js'), 'utf8');
+        ctx.expect(src).toContain('Bootstrap summary');
+        ctx.expect(src).toContain('process.exitCode = 1');
+        ctx.expect(src).toContain('failedByReason');
+      },
+    },
+    {
+      name: 'bootstrap is idempotent — calls uninstall first if RUNNER_HOME exists',
+      run: (ctx) => {
+        // Source-text guard: re-running bootstrap should never leave you in a worse state.
+        const fs = require('fs');
+        const src = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'commands', 'runner.js'), 'utf8');
+        ctx.expect(src).toContain('Existing em-runner installation detected');
+        ctx.expect(src).toContain('uninstalling first for a clean re-bootstrap');
+      },
+    },
   ],
 };

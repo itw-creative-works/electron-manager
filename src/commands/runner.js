@@ -51,16 +51,24 @@ async function bootstrap(options) {
   ensureWindows();
   ensureGhToken();
 
+  // Idempotent by replacement: always tear down any prior install before starting.
+  // Cheaper to think about than smart skip-logic per-org/per-service. Re-running
+  // bootstrap on a working setup briefly drops the runner (~5s) then re-creates it.
+  if (jetpack.exists(RUNNER_HOME)) {
+    logger.log(`Existing em-runner installation detected — uninstalling first for a clean re-bootstrap...`);
+    try {
+      await uninstall();
+    } catch (e) {
+      logger.warn(`Pre-bootstrap uninstall hit an error (continuing anyway): ${e.message}`);
+    }
+  }
+
   logger.log(`Bootstrapping em-runner under ${RUNNER_HOME}`);
   jetpack.dir(RUNNER_HOME);
 
-  // 1. Download actions/runner if not present.
+  // 1. Download actions/runner.
   const runnerDir = path.join(RUNNER_HOME, 'actions-runner');
-  if (!jetpack.exists(path.join(runnerDir, 'config.cmd'))) {
-    await downloadActionsRunner(runnerDir);
-  } else {
-    logger.log(`actions/runner already installed at ${runnerDir}`);
-  }
+  await downloadActionsRunner(runnerDir);
 
   // 2. Discover orgs the GH_TOKEN has admin on.
   const orgs = await discoverAdminOrgs();
@@ -71,11 +79,17 @@ async function bootstrap(options) {
   }
 
   // 3. Register against each org (idempotent — skips if already registered with our labels).
+  // Track outcomes so we can summarize cleanly + dedupe identical errors.
+  const succeeded = [];
+  const failedByReason = new Map();   // reason -> [orgs that failed for that reason]
   for (const org of orgs) {
     try {
       await registerOrg({ ...options, _: ['runner', 'register-org', org] });
+      succeeded.push(org);
     } catch (e) {
-      logger.warn(`register-org ${org} failed: ${e.message}`);
+      const reason = e.message || String(e);
+      if (!failedByReason.has(reason)) failedByReason.set(reason, []);
+      failedByReason.get(reason).push(org);
     }
   }
 
@@ -87,7 +101,30 @@ async function bootstrap(options) {
     bootstrappedAt: new Date().toISOString(),
     actionsRunnerVersion: ACTIONS_RUNNER_VERSION,
     labels: RUNNER_LABELS,
+    registeredOrgs: succeeded,
   });
+
+  // 6. Summarize. If at least one org succeeded, bootstrap is "partial success" — watcher
+  // can pick up the rest later when permissions are fixed. If zero succeeded, surface that
+  // loudly: the runner isn't actually serving anything.
+  logger.log('');
+  logger.log(`────── Bootstrap summary ──────`);
+  logger.log(`Successfully registered: ${succeeded.length} / ${orgs.length} org(s)`);
+  if (succeeded.length > 0) logger.log(`  ✓ ${succeeded.join(', ')}`);
+  if (failedByReason.size > 0) {
+    logger.log(`Failed: ${orgs.length - succeeded.length} org(s)`);
+    for (const [reason, failedOrgs] of failedByReason) {
+      logger.log(`  ✗ ${reason}`);
+      logger.log(`    affected: ${failedOrgs.join(', ')}`);
+    }
+  }
+  logger.log('');
+
+  if (succeeded.length === 0 && orgs.length > 0) {
+    logger.error(`Bootstrap partially failed: 0 of ${orgs.length} orgs registered. The watcher service is installed but has nothing to serve. Fix the GH_TOKEN scopes, then run 'npx mgr runner bootstrap' again.`);
+    process.exitCode = 1;
+    return;
+  }
 
   logger.log('Bootstrap complete. The watcher will auto-register new orgs as they become available.');
   logger.log(`Run 'npx mgr runner status' any time to check service health.`);
@@ -111,7 +148,7 @@ async function registerOrg(options) {
     regToken = data.token;
   } catch (e) {
     if (e.status === 403) {
-      throw new Error(`GH_TOKEN lacks admin:org scope for ${org}. Re-issue the token at https://github.com/settings/tokens with admin:org checked.`);
+      throw new Error(`GH_TOKEN lacks admin:org scope for ${org}. Classic PATs need 'admin:org' (full) for runner registration — manage_runners:org alone is insufficient. Re-issue at https://github.com/settings/tokens.`);
     }
     throw e;
   }
@@ -233,7 +270,7 @@ function ensureWindows() {
 
 function ensureGhToken() {
   if (!process.env.GH_TOKEN) {
-    throw new Error('GH_TOKEN env var required. Set it (with admin:org scope) before running runner commands.');
+    throw new Error('GH_TOKEN env var required. Classic PAT needs scopes: repo + workflow + admin:org. Set it before running runner commands.');
   }
 }
 
@@ -246,13 +283,12 @@ async function downloadActionsRunner(runnerDir) {
   const res = await wonderfulFetch(url, { response: 'buffer', tries: 3 });
   fs.writeFileSync(zipPath, Buffer.isBuffer(res) ? res : Buffer.from(res));
 
-  // Extract via PowerShell (built-in on Windows).
+  // Extract via tar (BSD tar ships with Windows 10+ and macOS — handles zip natively, no PowerShell).
   const { spawnSync } = require('child_process');
-  const ps = spawnSync('powershell', [
-    '-NoProfile', '-Command',
-    `Expand-Archive -Path "${zipPath}" -DestinationPath "${runnerDir}" -Force`,
-  ], { stdio: 'inherit' });
-  if (ps.status !== 0) throw new Error(`Failed to extract actions-runner.zip (PowerShell exit ${ps.status})`);
+  const t = spawnSync('tar', ['-xf', zipPath, '-C', runnerDir], { stdio: 'inherit' });
+  if (t.status !== 0) {
+    throw new Error(`Failed to extract actions-runner.zip (tar exit ${t.status}). On Windows ensure tar.exe is on PATH (it is by default on Windows 10+).`);
+  }
   jetpack.remove(zipPath);
   logger.log(`Extracted actions/runner → ${runnerDir}`);
 }
