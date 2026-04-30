@@ -1,6 +1,6 @@
 {
   "name": "electron-manager",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Electron Manager — all-in-one development framework for Electron apps",
   "main": "dist/index.js",
   "exports": {

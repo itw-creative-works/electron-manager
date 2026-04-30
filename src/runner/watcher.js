@@ -1,4 +1,4 @@
-// em-runner-watcher: long-running daemon installed as a Windows service by `npx mgr runner bootstrap`.
+// em-runner-watcher: long-running daemon installed as a Windows service by `npx mgr runner install`.
 //
 // Responsibilities:
 //   1. Self-update: on each tick, run `npm i -g electron-manager@latest`. Always uses the freshest CLI.

@@ -401,12 +401,12 @@ downloads: {
 
 ### ✅ Pass 2.20 — Windows EV-token runner (DONE Mac-side, 245 passing — Windows smoke-test deferred)
 
-Built the self-bootstrapping Windows code-signing runner. **Not smoke-tested on actual Windows yet** — that's deferred to when Ian's at the Windows box. All Mac-side surface (CLI dispatch, error paths, watcher daemon source code, docs) is in place.
+Built the self-installing Windows code-signing runner. **Not smoke-tested on actual Windows yet** — that's deferred to when Ian's at the Windows box. All Mac-side surface (CLI dispatch, error paths, watcher daemon source code, docs) is in place.
 
 **New `npx mgr runner` subcommand surface:**
 
 ```bash
-npx mgr runner bootstrap            # one-time on Windows; downloads actions/runner, registers vs every admin org, installs watcher service
+npx mgr runner install              # idempotent setup on Windows; downloads actions/runner, registers vs every admin org, installs watcher service. Tears down any prior install first, so re-running is safe.
 npx mgr runner register-org <org>   # manual single-org registration
 npx mgr runner start                # start services
 npx mgr runner stop                 # stop services
@@ -424,18 +424,18 @@ npx mgr runner self-update          # force npm i -g electron-manager@latest
 
 **Auto-onboarding new orgs:** zero Windows interaction. The watcher detects admin access to any new GH org within 60s and auto-registers. So onboarding a new app under a brand-new org is purely a Mac-side `npx mgr setup` step.
 
-**Docs:** `docs/runner.md` — full bootstrap walkthrough, GH_TOKEN scope requirements (`admin:org` needed for full automation), troubleshooting, architecture diagram.
+**Docs:** `docs/runner.md` — full install walkthrough, GH_TOKEN scope requirements (`admin:org` needed for full automation), troubleshooting, architecture diagram.
 
 **Tests added (`runner.test.js`, 7 tests):**
 - module shape + exports
 - pinned `actions/runner` version format
 - unknown subcommand throws
-- bootstrap on non-Windows refuses without `EM_RUNNER_FORCE`
+- install on non-Windows refuses without `EM_RUNNER_FORCE`
 - `register-org` without org throws clear usage error
-- bootstrap without `GH_TOKEN` throws
+- install without `GH_TOKEN` throws
 - watcher daemon source file exists and references the expected API surface
 
-**Next pass when Ian's at the Windows box:** smoke-test bootstrap end-to-end, then validate a real cross-platform release that sees the runner pick up the windows-sign job.
+**Next pass when Ian's at the Windows box:** smoke-test `runner install` end-to-end, then validate a real cross-platform release that sees the runner pick up the windows-sign job.
 
 ### ✅ Pass 2.21 — Real auto-updater (DONE, 259 passing)
 

@@ -1,6 +1,6 @@
 # Windows Code-Signing Runner
 
-EM ships a self-bootstrapping Windows runner so you can EV-token sign every consumer app from a single Windows box, with zero per-org setup after the initial bootstrap.
+EM ships a self-installing Windows runner so you can EV-token sign every consumer app from a single Windows box, with zero per-org setup after the initial install.
 
 ## Why a runner?
 
@@ -36,10 +36,10 @@ Copies `where.exe` to a temp location, signs it, verifies it, prints PASS/FAIL. 
 
 If smoke passes you've proven: drivers see the token, signtool finds the cert, your password is right, the timestamp server is reachable.
 
-**Step 3 — Bootstrap the runner:**
+**Step 3 — Install the runner:**
 ```powershell
 $env:GH_TOKEN = "ghp_xxx_with_admin_org_scope"
-npx mgr runner bootstrap
+npx mgr runner install
 npx mgr runner status
 ```
 `status` should show the watcher service running and at least one org registered.
@@ -75,13 +75,13 @@ If you hit any specific signtool error, jump to the "Debugging signtool errors" 
 ## One-time setup (Windows box, ever)
 
 ```powershell
-# Run on the Windows box, ONE TIME, ever.
+# Run on the Windows box. Idempotent — safe to re-run if anything's weird.
 npm install -g electron-manager
 $env:GH_TOKEN = "ghp_xxx_token_with_admin_org_scope"
-npx mgr runner bootstrap
+npx mgr runner install
 ```
 
-`bootstrap`:
+`install`:
 1. Downloads `actions/runner` (pinned version) into `%USERPROFILE%\.em-runner\actions-runner\`.
 2. Discovers every GitHub org you have admin on (via `GH_TOKEN`).
 3. Registers a runner with labels `[self-hosted, windows, ev-token]` against each org.
@@ -187,8 +187,8 @@ EM's `validate-certs` command will warn if it detects a missing token / driver, 
 ┌──────────────────────────────────┐         ┌────────────────────────────────────┐
 │  YOUR MAC (developer)            │         │  WINDOWS BOX (signing runner)      │
 │                                  │         │                                    │
-│  npx mgr setup                   │         │  npx mgr runner bootstrap          │
-│  (per consumer project)          │         │  (one time, ever)                  │
+│  npx mgr setup                   │         │  npx mgr runner install            │
+│  (per consumer project)          │         │  (idempotent; re-run anytime)      │
 │                                  │         │                                    │
 │  • detects org                   │         │  • downloads actions/runner        │
 │  • validates GH org has runner   │         │  • registers vs every admin org    │
@@ -249,7 +249,7 @@ Your `GH_TOKEN` lacks `admin:org` scope for that org. Re-issue the token at <htt
 2. Common cause: working directory `%USERPROFILE%\.em-runner\actions-runner` isn't writable by the service account. Either fix permissions or change the service's "Log On" user.
 
 ### Watcher service appears installed but isn't ticking
-Check `%USERPROFILE%\.em-runner\watcher.log`. If it stops after a `tick: error GH API …`, your `GH_TOKEN` rotated or got revoked. Re-set it via `$env:GH_TOKEN = …` (in the service's environment, not just your shell — easiest: `npx mgr runner uninstall && npx mgr runner bootstrap` to reinstall the service with the new token baked in).
+Check `%USERPROFILE%\.em-runner\watcher.log`. If it stops after a `tick: error GH API …`, your `GH_TOKEN` rotated or got revoked. Update `.env` with the new token, then run `npx mgr runner install` — it's idempotent and re-bakes the new token into the watcher service.
 
 ### After Windows update, signtool can't find the token
 The SafeNet driver sometimes detaches after major OS updates. Open SafeNet Authentication Client tray app → check token shows up → run `npx mgr runner status` to confirm services are healthy. Then `npx mgr sign-windows --smoke` to validate end-to-end.
@@ -267,4 +267,4 @@ The SafeNet driver sometimes detaches after major OS updates. Open SafeNet Authe
 
 ## Pinning + upgrades
 
-EM pins the `actions/runner` version it downloads (look at `ACTIONS_RUNNER_VERSION` in `src/commands/runner.js`). To upgrade the runner binary itself, bump that constant in EM, ship a new release, and the watcher's self-update will pull the new EM. On next bootstrap the new version is downloaded; existing installations are not auto-replaced (safer — runner upgrades sometimes change the service registration flow).
+EM pins the `actions/runner` version it downloads (look at `ACTIONS_RUNNER_VERSION` in `src/commands/runner.js`). To upgrade the runner binary itself, bump that constant in EM, ship a new release, and the watcher's self-update will pull the new EM. Then re-run `npx mgr runner install` on the Windows box — it tears down the old install and lays down the new actions/runner version cleanly.

@@ -41,7 +41,7 @@ module.exports = {
       },
     },
     {
-      name: 'runner bootstrap on non-Windows refuses without override',
+      name: 'runner install on non-Windows refuses without override',
       run: async (ctx) => {
         const runner = require(path.join(__dirname, '..', '..', '..', 'commands', 'runner.js'));
         const origForce = process.env.EM_RUNNER_FORCE;
@@ -49,7 +49,7 @@ module.exports = {
 
         let threw;
         try {
-          await runner({ _: ['runner', 'bootstrap'] });
+          await runner({ _: ['runner', 'install'] });
         } catch (e) { threw = e; }
 
         if (origForce !== undefined) process.env.EM_RUNNER_FORCE = origForce;
@@ -85,7 +85,7 @@ module.exports = {
       },
     },
     {
-      name: 'runner bootstrap without GH_TOKEN throws',
+      name: 'runner install without GH_TOKEN throws',
       run: async (ctx) => {
         const runner = require(path.join(__dirname, '..', '..', '..', 'commands', 'runner.js'));
         const origForce = process.env.EM_RUNNER_FORCE;
@@ -95,7 +95,7 @@ module.exports = {
 
         let threw;
         try {
-          await runner({ _: ['runner', 'bootstrap'] });
+          await runner({ _: ['runner', 'install'] });
         } catch (e) { threw = e; }
 
         if (origForce !== undefined) process.env.EM_RUNNER_FORCE = origForce;
@@ -173,24 +173,24 @@ module.exports = {
       },
     },
     {
-      name: 'bootstrap surfaces zero-success failure with non-zero exit code',
+      name: 'install surfaces zero-success failure with non-zero exit code',
       run: (ctx) => {
-        // Source-text guard: confirm bootstrap reports + sets exitCode when 0/N orgs registered.
+        // Source-text guard: confirm install reports + sets exitCode when 0/N orgs registered.
         const fs = require('fs');
         const src = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'commands', 'runner.js'), 'utf8');
-        ctx.expect(src).toContain('Bootstrap summary');
+        ctx.expect(src).toContain('Install summary');
         ctx.expect(src).toContain('process.exitCode = 1');
         ctx.expect(src).toContain('failedByReason');
       },
     },
     {
-      name: 'bootstrap is idempotent — calls uninstall first if RUNNER_HOME exists',
+      name: 'install is idempotent — calls uninstall first if RUNNER_HOME exists',
       run: (ctx) => {
-        // Source-text guard: re-running bootstrap should never leave you in a worse state.
+        // Source-text guard: re-running install should never leave you in a worse state.
         const fs = require('fs');
         const src = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'commands', 'runner.js'), 'utf8');
         ctx.expect(src).toContain('Existing em-runner installation detected');
-        ctx.expect(src).toContain('uninstalling first for a clean re-bootstrap');
+        ctx.expect(src).toContain('uninstalling first for a clean re-install');
       },
     },
   ],

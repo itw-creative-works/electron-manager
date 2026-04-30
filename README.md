@@ -79,7 +79,7 @@ Each subsystem has its own API reference under [`docs/`](docs/):
 - [hooks](docs/hooks.md) — lifecycle hooks (build/pre, build/post, release/pre, release/post, notarize)
 - [signing](docs/signing.md) — macOS + Windows code signing reference, cert files, env vars
 - [releasing](docs/releasing.md) — end-to-end release walkthrough (`.env` → GitHub Release)
-- [runner](docs/runner.md) — Windows EV-token signing runner — `npx mgr runner bootstrap`, auto-onboards new GH orgs
+- [runner](docs/runner.md) — Windows EV-token signing runner — `npx mgr runner install`, auto-onboards new GH orgs
 - [test-framework](docs/test-framework.md) — writing tests, running them, layers
 - [build-system](docs/build-system.md) — gulp, webpack, electron-builder pipeline
 

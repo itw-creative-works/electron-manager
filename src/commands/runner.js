@@ -1,12 +1,13 @@
 // `npx mgr runner <subcommand>` — Windows EV-token signing runner manager.
 //
 // Lives outside any consumer project (run from a globally-installed EM on the Windows box).
-// One-time bootstrap downloads actions/runner, registers as Windows service, kicks off the
+// `install` downloads actions/runner, registers as a Windows service, and kicks off the
 // em-runner-watcher daemon. Watcher polls GH for orgs the user is admin in, auto-registers
-// runners for any new org so the user never touches the Windows box after bootstrap.
+// runners for any new org so the user never touches the Windows box after install.
 //
 // Subcommands:
-//   bootstrap            One-time setup: install actions/runner + watcher service.
+//   install              Idempotent setup: install actions/runner + watcher service.
+//                        Tears down any prior install first, so re-running is safe.
 //   register-org <org>   Manually register the runner against a specific GH org.
 //   start                Start the runner + watcher services.
 //   stop                 Stop them.
@@ -14,7 +15,7 @@
 //   uninstall            Remove everything.
 //   self-update          Force an immediate self-update of EM (npm i -g electron-manager@latest).
 //
-// All commands except `bootstrap` and `register-org` are no-ops on non-Windows platforms.
+// All commands except `install` and `register-org` are no-ops on non-Windows platforms.
 
 const path     = require('path');
 const fs       = require('fs');
@@ -33,7 +34,7 @@ module.exports = async function (options) {
   const sub = (options._ && options._[1]) || 'status';
 
   switch (sub) {
-    case 'bootstrap':    return bootstrap(options);
+    case 'install':      return install(options);
     case 'register-org': return registerOrg(options);
     case 'start':        return startServices(options);
     case 'stop':          return stopServices(options);
@@ -41,29 +42,29 @@ module.exports = async function (options) {
     case 'uninstall':    return uninstall(options);
     case 'self-update':  return selfUpdate(options);
     default:
-      logger.error(`Unknown subcommand: "${sub}". Try one of: bootstrap, register-org, start, stop, status, uninstall, self-update.`);
+      logger.error(`Unknown subcommand: "${sub}". Try one of: install, register-org, start, stop, status, uninstall, self-update.`);
       throw new Error(`Unknown runner subcommand: ${sub}`);
   }
 };
 
-// ─── bootstrap ──────────────────────────────────────────────────────────────────
-async function bootstrap(options) {
+// ─── install ────────────────────────────────────────────────────────────────────
+async function install(options) {
   ensureWindows();
   ensureGhToken();
 
   // Idempotent by replacement: always tear down any prior install before starting.
   // Cheaper to think about than smart skip-logic per-org/per-service. Re-running
-  // bootstrap on a working setup briefly drops the runner (~5s) then re-creates it.
+  // install on a working setup briefly drops the runner (~5s) then re-creates it.
   if (jetpack.exists(RUNNER_HOME)) {
-    logger.log(`Existing em-runner installation detected — uninstalling first for a clean re-bootstrap...`);
+    logger.log(`Existing em-runner installation detected — uninstalling first for a clean re-install...`);
     try {
       await uninstall();
     } catch (e) {
-      logger.warn(`Pre-bootstrap uninstall hit an error (continuing anyway): ${e.message}`);
+      logger.warn(`Pre-install uninstall hit an error (continuing anyway): ${e.message}`);
     }
   }
 
-  logger.log(`Bootstrapping em-runner under ${RUNNER_HOME}`);
+  logger.log(`Installing em-runner under ${RUNNER_HOME}`);
   jetpack.dir(RUNNER_HOME);
 
   // 1. Download actions/runner.
@@ -96,19 +97,19 @@ async function bootstrap(options) {
   // 4. Install the em-runner-watcher service.
   await installWatcherService();
 
-  // 5. Save bootstrap metadata so other commands know we've been set up.
+  // 5. Save install metadata so other commands know we've been set up.
   saveConfig({
-    bootstrappedAt: new Date().toISOString(),
+    installedAt: new Date().toISOString(),
     actionsRunnerVersion: ACTIONS_RUNNER_VERSION,
     labels: RUNNER_LABELS,
     registeredOrgs: succeeded,
   });
 
-  // 6. Summarize. If at least one org succeeded, bootstrap is "partial success" — watcher
+  // 6. Summarize. If at least one org succeeded, install is "partial success" — watcher
   // can pick up the rest later when permissions are fixed. If zero succeeded, surface that
   // loudly: the runner isn't actually serving anything.
   logger.log('');
-  logger.log(`────── Bootstrap summary ──────`);
+  logger.log(`────── Install summary ──────`);
   logger.log(`Successfully registered: ${succeeded.length} / ${orgs.length} org(s)`);
   if (succeeded.length > 0) logger.log(`  ✓ ${succeeded.join(', ')}`);
   if (failedByReason.size > 0) {
@@ -121,12 +122,12 @@ async function bootstrap(options) {
   logger.log('');
 
   if (succeeded.length === 0 && orgs.length > 0) {
-    logger.error(`Bootstrap partially failed: 0 of ${orgs.length} orgs registered. The watcher service is installed but has nothing to serve. Fix the GH_TOKEN scopes, then run 'npx mgr runner bootstrap' again.`);
+    logger.error(`Install partially failed: 0 of ${orgs.length} orgs registered. The watcher service is installed but has nothing to serve. Fix the GH_TOKEN scopes, then run 'npx mgr runner install' again.`);
     process.exitCode = 1;
     return;
   }
 
-  logger.log('Bootstrap complete. The watcher will auto-register new orgs as they become available.');
+  logger.log('Install complete. The watcher will auto-register new orgs as they become available.');
   logger.log(`Run 'npx mgr runner status' any time to check service health.`);
 }
 
@@ -157,7 +158,7 @@ async function registerOrg(options) {
   const runnerDir = path.join(RUNNER_HOME, 'actions-runner');
   const configCmd = path.join(runnerDir, 'config.cmd');
   if (!jetpack.exists(configCmd)) {
-    throw new Error(`actions/runner not installed yet. Run 'npx mgr runner bootstrap' first.`);
+    throw new Error(`actions/runner not installed yet. Run 'npx mgr runner install' first.`);
   }
 
   const { spawnSync } = require('child_process');
@@ -199,7 +200,7 @@ async function statusServices() {
   ensureWindows();
   const cfg = readConfig();
   logger.log(`em-runner home: ${RUNNER_HOME}`);
-  logger.log(`Bootstrapped: ${cfg.bootstrappedAt || '(not yet)'}`);
+  logger.log(`Installed: ${cfg.installedAt || '(not yet)'}`);
   logger.log(`Labels: ${(cfg.labels || RUNNER_LABELS).join(', ')}`);
   logger.log(`Registered orgs: ${(cfg.registeredOrgs || []).join(', ') || '(none)'}`);
   logger.log('');
@@ -327,7 +328,7 @@ async function installWatcherService() {
   try {
     Service = require('node-windows').Service;
   } catch (e) {
-    throw new Error('node-windows missing. Run `npm i -g node-windows` on the Windows box, then re-run bootstrap.');
+    throw new Error('node-windows missing. Run `npm i -g node-windows` on the Windows box, then re-run `npx mgr runner install`.');
   }
 
   const svc = new Service({
