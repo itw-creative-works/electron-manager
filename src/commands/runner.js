@@ -216,6 +216,14 @@ async function registerOrg(options) {
   logger.log(`  Cloning actions-runner template → actions-runner-${org.toLowerCase()}/`);
   jetpack.copy(templateDir, orgRunnerDir, { overwrite: true });
 
+  // Grant NT AUTHORITY\NETWORK SERVICE read+execute on the runner dir + everything
+  // up the hierarchy. The runner service runs as NETWORK SERVICE by default (no
+  // explicit --windowslogonaccount); on user-profile-relative install paths
+  // (C:\Users\<user>\...) NETWORK SERVICE has no access by default and the service
+  // crashes with "Access denied" at startup. ValidateExecutePermission walks up the
+  // entire path so we must grant on each ancestor too.
+  grantNetworkServiceAccess(orgRunnerDir);
+
   const configCmd = path.join(orgRunnerDir, 'config.cmd');
   const runnerName = `em-runner-${os.hostname().toLowerCase()}-${org.toLowerCase()}`.slice(0, 64);   // GH max 64 chars
 
@@ -650,6 +658,52 @@ function scState(name) {
 
 function escapeRegExp(s) {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Grant NT AUTHORITY\NETWORK SERVICE read+execute on `targetDir` recursively, AND
+// read+execute on every ancestor up to (but not including) the user profile root.
+// actions/runner's ValidateExecutePermission walks up the entire path hierarchy at
+// startup and dies if any ancestor isn't traversable by the service account.
+//
+// We stop at USERPROFILE because NETWORK SERVICE having read on the whole user dir
+// is broader than needed — granting just the chain of ancestors that lead to the
+// runner is the minimum.
+function grantNetworkServiceAccess(targetDir) {
+  if (process.platform !== 'win32') return;
+  const { spawnSync } = require('child_process');
+
+  // Recursive read+execute on the runner dir itself.
+  const recursive = spawnSync('icacls', [targetDir, '/grant', 'NT AUTHORITY\\NETWORK SERVICE:(OI)(CI)(RX)', '/T', '/C', '/Q'], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    encoding: 'utf8',
+  });
+  if (recursive.status !== 0) {
+    logger.warn(`  icacls (recursive) on ${targetDir} exited ${recursive.status}: ${(recursive.stderr || recursive.stdout || '').trim().slice(0, 200)}`);
+  }
+
+  // Walk ancestors and grant traversal-only on each. Stop at USERPROFILE (or drive root)
+  // so we don't expose siblings under user profile to the service account.
+  const userProfile = (process.env.USERPROFILE || '').toLowerCase();
+  let dir = path.dirname(targetDir);
+  const visited = new Set();
+  while (dir && !visited.has(dir.toLowerCase())) {
+    visited.add(dir.toLowerCase());
+    const lc = dir.toLowerCase();
+    // Stop AT user profile (not above) so we don't escalate beyond what's needed.
+    if (lc === userProfile) break;
+    // Stop at drive root (e.g. C:\).
+    if (/^[a-z]:\\?$/.test(lc)) break;
+    const r = spawnSync('icacls', [dir, '/grant', 'NT AUTHORITY\\NETWORK SERVICE:(RX)', '/C', '/Q'], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      encoding: 'utf8',
+    });
+    if (r.status !== 0) {
+      logger.warn(`  icacls on ancestor ${dir} exited ${r.status}: ${(r.stderr || r.stdout || '').trim().slice(0, 200)}`);
+    }
+    const next = path.dirname(dir);
+    if (next === dir) break;
+    dir = next;
+  }
 }
 
 function readConfig() {

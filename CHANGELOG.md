@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.2.10 — runner: grant NETWORK SERVICE access to runner dir + ancestors
+
+The runner service runs as `NT AUTHORITY\NETWORK SERVICE` by default (no
+explicit `--windowslogonaccount`). When the install path lives under the user
+profile (e.g. `C:\Users\<user>\Documents\.../.gh-runners`) NETWORK SERVICE has
+no read access, and the runner crashes at startup with:
+
+> System.UnauthorizedAccessException: Access to the path '...\.gh-runners' is denied.
+
+actions/runner's `ValidateExecutePermission` walks the entire path hierarchy
+on startup, so granting access only on the runner dir isn't enough — every
+ancestor up to the user profile must be traversable by NETWORK SERVICE.
+
+Fix: after cloning the runner template into the per-org dir, run `icacls`:
+1. Recursive `(OI)(CI)(RX)` on the runner dir itself.
+2. Non-recursive `(RX)` on every ancestor up to `%USERPROFILE%` (stops there
+   to avoid exposing siblings).
+
+After this, the service starts cleanly and the runner shows as **online** at
+GitHub instead of registering then immediately crashing.
+
 ## 1.2.9 — runner: delete stale runners before re-register, mirror: hyphen-separated names
 
 ### Runner: delete stale GitHub-side runners before re-registering
