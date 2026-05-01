@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.2.2 — fix mac entitlements path + windows env syntax
+
+### Bugfixes uncovered by first end-to-end CI run
+
+- **`build/entitlements.mac.plist: cannot read entitlement data`** — The
+  generated `dist/electron-builder.yml` had path `build/entitlements.mac.plist`
+  meant as project-relative, but `gulp/build-config.js`'s `rel()` helper was
+  resolving it relative to `distRoot` instead of `projectRoot`. electron-builder
+  reads paths from cwd (which is projectRoot), so codesign was looking at
+  `<project>/build/entitlements.mac.plist` (doesn't exist) instead of
+  `<project>/dist/build/entitlements.mac.plist`. Fixed by passing `projectRoot`
+  through to `baseConfig()` and preferring it for relative path resolution.
+- **`'EM_BUILD_MODE' is not recognized as an internal or external command`**
+  on the Windows CI runner — cmd.exe doesn't accept the unix `VAR=value cmd`
+  prefix. Switched the consumer-injected `projectScripts.{build,publish,release}`
+  to `npx cross-env EM_BUILD_MODE=true ...`. Added `cross-env` as an EM dep
+  (pulled in transitively, so `npx cross-env` works without consumer pkg.json
+  changes).
+
 ## 1.2.1 — release pipeline finalize, manual-trigger workflow, CI test fixes
 
 ### Release pipeline — closes the v1.2.0 gap

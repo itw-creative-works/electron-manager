@@ -40,7 +40,7 @@ module.exports = function buildConfig(done) {
     logger.log(`resolved icons: mac=${Object.keys(icons.macos).length}, win=${Object.keys(icons.windows).length}, linux=${Object.keys(icons.linux).length}`);
 
     // Build the full config object from EM defaults + consumer overrides.
-    let builderConfig = baseConfig(config, { entitlementsPath, icons, distRoot });
+    let builderConfig = baseConfig(config, { entitlementsPath, icons, distRoot, projectRoot });
 
     // Mode-dependent injections. `hidden` mode bakes LSUIElement=true into Info.plist
     // → on macOS the app launches with no dock icon, no Cmd+Tab presence, completely
@@ -108,8 +108,16 @@ function baseConfig(config, extras = {}) {
   const productName = config?.app?.productName || 'App';
   const copyright   = config?.app?.copyright   || '© ITW Creative Works';
 
-  const { entitlementsPath, icons, distRoot } = extras;
-  const rel = (abs) => abs && distRoot ? path.relative(distRoot, abs) : abs;
+  const { entitlementsPath, icons, distRoot, projectRoot } = extras;
+  // Paths in dist/electron-builder.yml must be project-relative because electron-builder
+  // resolves them against the cwd it was invoked from (which is projectRoot, not distRoot).
+  // Falling back to distRoot for older callers, but projectRoot is correct.
+  const rel = (abs) => {
+    if (!abs) return abs;
+    if (projectRoot) return path.relative(projectRoot, abs);
+    if (distRoot)    return path.relative(distRoot, abs);
+    return abs;
+  };
 
   const out = {
     appId,
@@ -168,7 +176,7 @@ function baseConfig(config, extras = {}) {
     out.mac.entitlementsInherit = rel(entitlementsPath);
   }
 
-  // Wire icons. electron-builder resolves these as paths relative to the config file (dist/electron-builder.yml).
+  // Wire icons. electron-builder resolves these as paths relative to the cwd it was invoked from (projectRoot).
   if (icons?.macos?.app)  out.mac.icon   = rel(icons.macos.app);
   if (icons?.macos?.dmg)  out.dmg.background = rel(icons.macos.dmg);
   if (icons?.windows?.app) out.win.icon  = rel(icons.windows.app);

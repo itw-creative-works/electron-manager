@@ -1,6 +1,6 @@
 {
   "name": "electron-manager",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Electron Manager — all-in-one development framework for Electron apps",
   "main": "dist/index.js",
   "exports": {
@@ -57,9 +57,9 @@
   "projectScripts": {
     "start": "npx mgr clean && npx mgr setup && npm run gulp --",
     "gulp": "gulp --cwd ./ --gulpfile ./node_modules/electron-manager/dist/gulp/main.js",
-    "build": "npx mgr clean && npx mgr setup && EM_BUILD_MODE=true npm run gulp -- build",
-    "publish": "EM_BUILD_MODE=true EM_IS_PUBLISH=true npm run gulp -- publish",
-    "release": "npx mgr clean && npx mgr setup && EM_BUILD_MODE=true EM_IS_PUBLISH=true npm run gulp -- publish",
+    "build": "npx mgr clean && npx mgr setup && npx cross-env EM_BUILD_MODE=true npm run gulp -- build",
+    "publish": "npx cross-env EM_BUILD_MODE=true EM_IS_PUBLISH=true npm run gulp -- publish",
+    "release": "npx mgr clean && npx mgr setup && npx cross-env EM_BUILD_MODE=true EM_IS_PUBLISH=true npm run gulp -- publish",
     "postinstall": "node node_modules/electron-manager/scripts/sync-nvmrc.js",
     "test": "npx mgr test",
     "electron": "electron ."
@@ -102,6 +102,7 @@
     "@octokit/rest": "^22.0.1",
     "@sentry/electron": "^7.13.0",
     "chalk": "^5.6.2",
+    "cross-env": "^7.0.3",
     "dotenv": "^17.4.2",
     "electron-store": ">=11",
     "electron-updater": "^6.8.3",
