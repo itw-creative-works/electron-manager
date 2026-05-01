@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.2.13 — windows EV signing: wire WIN_EV_TOKEN_PATH / WIN_CSC_KEY_PASSWORD / SIGNTOOL_PATH
+
+Self-hosted Windows EV-token signing was broken end-to-end: the consumer's `.env`
+scaffold didn't include the EV signing vars, and the `windows-sign` workflow job
+didn't map them from secrets to the job env. Result: `npx mgr sign-windows` ran
+but immediately threw "WIN_EV_TOKEN_PATH (or WIN_CSC_LINK) not set — cannot sign."
+
+The old comment in `_.env` claimed signtool credentials "live on the runner machine
+itself, not in the consumer's .env" — but the runner runs as `NT AUTHORITY\NETWORK
+SERVICE` which doesn't read user-profile env files. The vars HAVE to be plumbed
+through GH Actions secrets to reach the job.
+
+Fixes:
+1. Added `WIN_EV_TOKEN_PATH`, `WIN_CSC_KEY_PASSWORD`, `SIGNTOOL_PATH` to the default
+   `_.env` scaffold (Default section, so `npx mgr push-secrets` picks them up).
+2. Added the same three vars to the `windows-sign` job's `env:` block, mapped from
+   `secrets.*`. Cloud-provider vars stay in place for when strategy=cloud.
+3. Updated `_.env` doc comment to point at `Get-ChildItem Cert:\CurrentUser\My`
+   for finding the cert thumbprint (which is what `WIN_EV_TOKEN_PATH` should be —
+   signtool's `/sha1` selector matches by thumbprint).
+
+After upgrade, consumers fill `WIN_EV_TOKEN_PATH` (cert thumbprint),
+`WIN_CSC_KEY_PASSWORD` (SafeNet token PIN), and `SIGNTOOL_PATH` (full path to
+signtool.exe on the runner host) in their `.env` Default section, then run
+`npx mgr push-secrets` to push them to GH Actions secrets. The next workflow
+run will sign successfully.
+
 ## 1.2.12 — workflow: windows-sign job uses cmd.exe (not PowerShell)
 
 Self-hosted Windows runners commonly have PowerShell ExecutionPolicy set to

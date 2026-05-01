@@ -148,6 +148,12 @@ jobs:
       run:
         shell: cmd
     env:
+      # Self-hosted EV USB token signing — these tell signtool which cert to use and
+      # how to authenticate to the SafeNet driver. Set in the consumer's .env and
+      # pushed to GH Actions secrets via `npx mgr push-secrets`.
+      WIN_EV_TOKEN_PATH:                ${{ secrets.WIN_EV_TOKEN_PATH }}
+      WIN_CSC_KEY_PASSWORD:             ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+      SIGNTOOL_PATH:                    ${{ secrets.SIGNTOOL_PATH }}
       # Cloud-provider env vars — only one set is consumed depending on `signing.windows.cloud.provider` in config:
       AZURE_TENANT_ID:                  ${{ secrets.AZURE_TENANT_ID }}
       AZURE_CLIENT_ID:                  ${{ secrets.AZURE_CLIENT_ID }}
