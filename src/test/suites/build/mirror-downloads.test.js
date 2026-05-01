@@ -82,10 +82,17 @@ module.exports = {
       },
     },
     {
-      name: 'stableName: sanitizes product name (spaces, weird chars)',
+      name: 'stableName: sanitizes product name (spaces → hyphens, weird chars stripped)',
       run: (ctx) => {
         const { stableName } = require(path.join(__dirname, '..', '..', '..', 'gulp', 'tasks', 'mirror-downloads.js'));
-        ctx.expect(stableName('MyApp-1.0.1.dmg', 'My App!')).toBe('MyApp.dmg');
+        // Multi-word product names → hyphenated stable names. "My App!" → "My-App".
+        ctx.expect(stableName('MyApp-1.0.1.dmg', 'My App!')).toBe('My-App.dmg');
+        // Real example from deployment-playground.
+        ctx.expect(stableName('Deployment Playground-1.0.1.dmg', 'Deployment Playground')).toBe('Deployment-Playground.dmg');
+        ctx.expect(stableName('Deployment Playground-Setup-1.0.1.exe', 'Deployment Playground')).toBe('Deployment-Playground-Setup.exe');
+        ctx.expect(stableName('Deployment Playground-1.0.1.AppImage', 'Deployment Playground')).toBe('Deployment-Playground.AppImage');
+        // .deb uses lowercase product name + underscores per Debian convention.
+        ctx.expect(stableName('deployment-playground_1.0.1_amd64.deb', 'Deployment Playground')).toBe('deployment-playground_amd64.deb');
       },
     },
   ],

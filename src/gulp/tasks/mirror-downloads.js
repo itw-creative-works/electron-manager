@@ -191,7 +191,12 @@ function stableName(filename, productName) {
 }
 
 function sanitizeForFilename(name) {
-  return String(name || 'app').replace(/[^A-Za-z0-9._-]+/g, '');
+  // Replace spaces (and other non-filename chars) with hyphens, then collapse runs.
+  // "Deployment Playground" → "Deployment-Playground" (not "DeploymentPlayground").
+  return String(name || 'app')
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
 }
 
 // Exported for tests.

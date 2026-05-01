@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.2.9 — runner: delete stale runners before re-register, mirror: hyphen-separated names
+
+### Runner: delete stale GitHub-side runners before re-registering
+
+Re-running `mgr runner install` was leaving accumulated dead runners on the
+GitHub org side. Each failed install left an offline runner behind. Each
+subsequent install hit "A runner exists with the same name" and actions/runner
+auto-suffixed the new name (e.g. `em-runner-...-deployment-p-2872`). The
+service was created with the suffixed name, but EM's verify step expected the
+clean name and threw "no service was created."
+
+Fix: BEFORE register, list all runners on the org and delete any whose name
+starts with `em-runner-<hostname>-<org>` (our convention). Conservative match
+prefix means we never touch user-created runners or runners from other hosts.
+Re-register then gets the clean name.
+
+Also: the post-install service verify now matches `actions.runner.<org>.*`
+instead of pinning the exact name, so even if a suffix slips through, it's
+recognized.
+
+### Mirror: hyphenated product names in stable filenames
+
+`mirror-downloads.stableName` was stripping spaces from product names entirely:
+`Deployment Playground` → `DeploymentPlayground.dmg`. Switched to replacing
+non-filename-safe chars with hyphens: → `Deployment-Playground.dmg`. Matches
+both common convention and what's already on update-server's electron-builder
+artifacts (e.g. `Deployment-Playground-1.0.1-arm64.dmg`).
+
+Naming examples for `productName: "Deployment Playground"`:
+
+- `Deployment-Playground.dmg` (was `DeploymentPlayground.dmg`)
+- `Deployment-Playground-Setup.exe` (was `DeploymentPlaygroundSetup.exe`)
+- `Deployment-Playground.AppImage`
+- `deployment-playground_amd64.deb` (lowercase + underscore per Debian convention, unchanged)
+
 ## 1.2.8 — runner install: stdio inherit so service install actually runs
 
 The piped-stdio capture in v1.2.7 (and every prior version) was the reason

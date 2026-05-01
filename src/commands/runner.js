@@ -157,6 +157,33 @@ async function registerOrg(options) {
   const { getOctokit } = require('../utils/github.js');
   const octokit = getOctokit();
 
+  // Delete any existing runners on the org side that match our naming convention for
+  // THIS host. Without this, re-running install accumulates orphaned runners (one per
+  // failed/aborted install, one per host rename, etc.) which causes actions/runner to
+  // auto-suffix the new runner's name (e.g. `-2872`) and breaks our ability to predict
+  // service names. Match prefix is `em-runner-<host>-<org>` so we never touch user-
+  // created runners or runners from other hosts.
+  //
+  // We do this BEFORE fetching the registration token because the token is one-shot
+  // and we want it fresh right before config.cmd uses it.
+  const hostPrefix    = `em-runner-${os.hostname().toLowerCase()}-${org.toLowerCase()}`;
+  try {
+    const { data: existing } = await octokit.rest.actions.listSelfHostedRunnersForOrg({ org, per_page: 100 });
+    const ours = (existing.runners || []).filter((r) => (r.name || '').toLowerCase().startsWith(hostPrefix));
+    for (const r of ours) {
+      try {
+        await octokit.rest.actions.deleteSelfHostedRunnerFromOrg({ org, runner_id: r.id });
+        logger.log(`  Deleted stale runner ${r.name} (id=${r.id}) on ${org}`);
+      } catch (e) {
+        logger.warn(`  Failed to delete stale runner ${r.name} (id=${r.id}): ${e.message}`);
+      }
+    }
+  } catch (e) {
+    // 403 here means GH_TOKEN can list but not delete — surface it but continue. Worst
+    // case: actions/runner auto-suffixes and the user gets a working but ugly-named runner.
+    logger.warn(`  Could not list/delete existing runners for ${org}: ${e.message}`);
+  }
+
   // Fetch a runner registration token (1-hour expiry, used immediately).
   let regToken;
   try {
@@ -239,17 +266,19 @@ async function registerOrg(options) {
   }
 
   // Sanity check — config.cmd's success exit doesn't always mean the service was created
-  // (e.g. if --runasservice was silently ignored). Verify by running sc query for the
-  // expected service name. If it's missing, fail with a clear error pointing at admin
-  // privileges, since that's the most common cause when --runasservice silently skips.
-  const expectedSvcName = `actions.runner.${org}.${runnerName}`;
-  const verify = spawnSync('sc', ['query', expectedSvcName], { encoding: 'utf8' });
-  if (verify.status === 1060) {
+  // (e.g. if --runasservice was silently ignored when stdout/stderr aren't a real TTY).
+  // Enumerate services matching `actions.runner.<org>.*` and verify at least one exists.
+  const svcQuery = spawnSync('sc', ['query', 'state=', 'all'], { encoding: 'utf8' });
+  const svcOut   = svcQuery.stdout || '';
+  const svcRe    = new RegExp(`^SERVICE_NAME:\\s*(actions\\.runner\\.${escapeRegExp(org)}\\.\\S+)`, 'mi');
+  const svcMatch = svcRe.exec(svcOut);
+  if (!svcMatch) {
     throw new Error(
-      `Runner service ${expectedSvcName} was NOT created for ${org} despite config.cmd succeeding. ` +
+      `No actions.runner.${org}.* service was created despite config.cmd succeeding. ` +
       `Most common cause: not running as Administrator. Re-run this command from an elevated cmd prompt.`
     );
   }
+  logger.log(`  Service: ${svcMatch[1]}`);
 
   // Track in our config.
   const cfg = readConfig();
@@ -617,6 +646,10 @@ function scState(name) {
   const out = r.stdout || '';
   const m = /STATE\s*:\s*\d+\s+(\w+)/.exec(out);
   return m ? m[1].toUpperCase() : 'UNKNOWN';
+}
+
+function escapeRegExp(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function readConfig() {
