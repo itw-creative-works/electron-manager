@@ -171,41 +171,45 @@ async function registerOrg(options) {
 
   // Per-org actions-runner directory. Each registration writes config files at the top of
   // its dir; sharing one dir across orgs would race + clobber. Cost: ~120 MB per org on disk.
+  //
+  // Always nuke + re-clone from _template. Otherwise stale config (.runner, .credentials,
+  // _diag/) from a prior failed/partial run sticks around — and on the next install,
+  // config.cmd refuses with "Cannot configure the runner because it is already configured."
+  // Reusing the dir was an attempt at idempotency that broke re-install. Fresh dir per
+  // install is the only reliably-clean state.
   const orgRunnerDir = path.join(RUNNER_HOME, `actions-runner-${org.toLowerCase()}`);
-  if (!jetpack.exists(path.join(orgRunnerDir, 'config.cmd'))) {
-    const templateDir = options._templateDir || path.join(RUNNER_HOME, '_template');
-    if (!jetpack.exists(path.join(templateDir, 'config.cmd'))) {
-      throw new Error(`actions/runner template not found at ${templateDir}. Run 'npx mgr runner install' first.`);
-    }
-    logger.log(`  Cloning actions-runner template → actions-runner-${org.toLowerCase()}/`);
-    jetpack.copy(templateDir, orgRunnerDir, { overwrite: true });
+  const templateDir  = options._templateDir || path.join(RUNNER_HOME, '_template');
+  if (!jetpack.exists(path.join(templateDir, 'config.cmd'))) {
+    throw new Error(`actions/runner template not found at ${templateDir}. Run 'npx mgr runner install' first.`);
   }
+  if (jetpack.exists(orgRunnerDir)) {
+    logger.log(`  Removing stale actions-runner-${org.toLowerCase()}/ before re-clone…`);
+    jetpack.remove(orgRunnerDir);
+  }
+  logger.log(`  Cloning actions-runner template → actions-runner-${org.toLowerCase()}/`);
+  jetpack.copy(templateDir, orgRunnerDir, { overwrite: true });
 
   const configCmd = path.join(orgRunnerDir, 'config.cmd');
-  const svcCmd    = path.join(orgRunnerDir, 'svc.cmd');
   const runnerName = `em-runner-${os.hostname().toLowerCase()}-${org.toLowerCase()}`.slice(0, 64);   // GH max 64 chars
 
-  // Two-phase flow:
+  // config.cmd --runasservice handles register + service install + service start
+  // in one shot when invoked from an elevated (admin) shell. No separate svc.cmd
+  // step is needed — Windows runners ship without svc.cmd; the service install
+  // is built into config.cmd's --runasservice path. Verified against actions/runner
+  // v2.319.1 by running standalone: it produces "Service ... successfully installed",
+  // "successfully configured", and "started successfully" messages all from config.cmd.
   //
-  // 1. config.cmd registers the runner with GitHub AND (because of --runasservice)
-  //    drops svc.cmd into the runner dir. Without --runasservice, svc.cmd is never
-  //    generated and step 2 fails with "command not recognized."
-  // 2. svc.cmd install + svc.cmd start actually create + start the Windows service.
-  //
-  // Why both? actions/runner's --runasservice docs claim it installs the service
-  // unattended, but in practice when --windowslogonaccount/--windowslogonpassword
-  // aren't passed too, the install step is silently skipped — runner registers with
-  // GH but no service exists locally. The SUPPORTED reliable path (per actions/runner
-  // README) is to use --runasservice purely as the "drop svc.cmd files" trigger, then
-  // explicitly call `svc.cmd install` ourselves. That defaults the service identity
-  // to NT AUTHORITY\NETWORK SERVICE (no creds needed) and surfaces real errors.
+  // The flag IS silently ignored if the runner dir is already in a "configured" state
+  // (config.cmd refuses to re-configure with "Cannot configure the runner because it
+  // is already configured"). That's why the per-org dir gets nuked + re-cloned above
+  // every install rather than reused.
   const args = [
     '--unattended',
     '--url',          `https://github.com/${org}`,
     '--token',        regToken,
     '--name',         runnerName,
     '--labels',       RUNNER_LABELS.join(','),
-    '--runasservice', // drops svc.cmd; service install/start happens below
+    '--runasservice',
     '--replace',
   ];
 
@@ -219,15 +223,15 @@ async function registerOrg(options) {
     cwd:      orgRunnerDir,
     stdio:    ['ignore', 'pipe', 'pipe'],   // capture so we can surface real errors
     encoding: 'utf8',
-    timeout:  120000,                        // 2 min hard cap
+    timeout:  180000,                        // 3 min — config.cmd does network + service install
   });
 
   if (r.error) {
     throw new Error(`Could not spawn config.cmd: ${r.error.message}`);
   }
   if (r.status !== 0) {
-    const stdoutTail = (r.stdout || '').trim().split('\n').slice(-10).join('\n');
-    const stderrTail = (r.stderr || '').trim().split('\n').slice(-10).join('\n');
+    const stdoutTail = (r.stdout || '').trim().split('\n').slice(-15).join('\n');
+    const stderrTail = (r.stderr || '').trim().split('\n').slice(-15).join('\n');
     const detail = [
       stdoutTail && `stdout: ${stdoutTail}`,
       stderrTail && `stderr: ${stderrTail}`,
@@ -235,37 +239,17 @@ async function registerOrg(options) {
     throw new Error(`config.cmd exited ${r.status === null ? 'null (killed)' : r.status} for ${org}.\n${detail || '(no output captured)'}`);
   }
 
-  // svc.cmd should now exist (config --runasservice drops it). If it doesn't, that means
-  // config silently skipped the service-install path — surface a clear error rather than
-  // leaving the user with a registered-but-orphaned runner.
-  if (!jetpack.exists(svcCmd)) {
-    throw new Error(`svc.cmd was not created at ${svcCmd}. config.cmd's --runasservice step likely failed silently — re-run with admin privileges (Run as Administrator).`);
-  }
-
-  // Install + start the Windows service that actually RUNS the runner agent.
-  // svc.cmd defaults to running as NT AUTHORITY\NETWORK SERVICE — no creds required.
-  // Requires admin (the install step calls sc.exe create, which needs admin).
-  const svcInstall = spawnSync('cmd.exe', ['/c', svcCmd, 'install'], {
-    cwd:      orgRunnerDir,
-    stdio:    ['ignore', 'pipe', 'pipe'],
-    encoding: 'utf8',
-    timeout:  60000,
-  });
-  if (svcInstall.status !== 0) {
-    const tail = ((svcInstall.stdout || '') + (svcInstall.stderr || '')).trim().split('\n').slice(-8).join('\n');
-    throw new Error(`svc.cmd install failed for ${org} (exit ${svcInstall.status}):\n${tail}`);
-  }
-
-  const svcStart = spawnSync('cmd.exe', ['/c', svcCmd, 'start'], {
-    cwd:      orgRunnerDir,
-    stdio:    ['ignore', 'pipe', 'pipe'],
-    encoding: 'utf8',
-    timeout:  60000,
-  });
-  if (svcStart.status !== 0) {
-    const tail = ((svcStart.stdout || '') + (svcStart.stderr || '')).trim().split('\n').slice(-8).join('\n');
-    // Don't fail hard — the service is installed, user can start it manually if start failed.
-    logger.warn(`svc.cmd start failed for ${org} (exit ${svcStart.status}): ${tail}`);
+  // Sanity check — config.cmd's success exit doesn't always mean the service was created
+  // (e.g. if --runasservice was silently ignored). Verify by running sc query for the
+  // expected service name. If it's missing, fail with a clear error pointing at admin
+  // privileges, since that's the most common cause when --runasservice silently skips.
+  const expectedSvcName = `actions.runner.${org}.${runnerName}`;
+  const verify = spawnSync('sc', ['query', expectedSvcName], { encoding: 'utf8' });
+  if (verify.status === 1060) {
+    throw new Error(
+      `Runner service ${expectedSvcName} was NOT created for ${org} despite config.cmd succeeding. ` +
+      `Most common cause: not running as Administrator. Re-run this command from an elevated cmd prompt.`
+    );
   }
 
   // Track in our config.

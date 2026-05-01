@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.2.7 — runner install nukes per-org dirs before re-cloning (FOR REAL this time)
+
+The actual root cause of all the runner-install failures: `mgr runner install`
+was reusing per-org runner directories if `config.cmd` already existed in them
+(this was meant to be an "idempotent skip if already cloned" optimization).
+But once a runner has been registered, the dir contains `.runner`, `.credentials`,
+and `_diag/` — actions/runner sees these and refuses to re-configure with:
+
+> Cannot configure the runner because it is already configured. To reconfigure
+> the runner, run 'config.cmd remove' or './config.sh remove' first.
+
+So every "re-install" silently failed: config.cmd exited non-zero, no service
+was ever created, but the registration call to GitHub had already happened
+(or not — depending on order of operations).
+
+Fix: always wipe the per-org dir before cloning from `_template`. An "install"
+should always produce a fully-fresh state. Cost: ~2-3s extra per org (jetpack
+remove + copy of ~120MB). Tradeoff is worth it — the previous "smart" reuse
+made install completely unreliable on re-runs.
+
+Also reverts the v1.2.5/v1.2.6 confusion around `svc.cmd`. Verified by hand:
+`config.cmd --runasservice` from an elevated shell runs the full register +
+service install + service start sequence in one shot. No separate `svc.cmd
+install` step is needed. Windows runners don't ship `svc.cmd` at all — that
+was an incorrect assumption from the v1.2.5 attempt.
+
+Added a post-config sanity check that runs `sc query actions.runner.<org>.<name>`
+and throws with a clear "not running as Administrator?" error if the service
+doesn't exist after config.cmd succeeds.
+
 ## 1.2.6 — runner service install: actually correct this time
 
 v1.2.5 dropped `--runasservice` from `config.cmd` and tried to call
