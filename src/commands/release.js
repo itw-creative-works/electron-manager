@@ -34,7 +34,9 @@ module.exports = async function release(options = {}) {
     throw new Error('GH_TOKEN not set in env. Set it in .env (or shell) so we can dispatch the workflow.');
   }
 
-  const octokit = getOctokit();
+  // silent: true — suppress octokit's default console output for transient 404s
+  // (in-progress job logs return 404 until the step completes).
+  const octokit = getOctokit({ silent: true });
   if (!octokit) {
     throw new Error('Failed to create octokit (missing GH_TOKEN?).');
   }

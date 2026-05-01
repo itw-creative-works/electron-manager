@@ -33,11 +33,18 @@ async function discoverRepo(projectRoot) {
   throw new Error('Could not determine GitHub owner/repo. Set package.json `repository.url` or git remote origin.');
 }
 
-function getOctokit() {
+// silent: true — pass a no-op logger so transient 404s during polling (e.g. fetching
+// in-progress job logs) don't spam the console. Errors still surface via thrown rejections.
+function getOctokit(opts = {}) {
   const token = process.env.GH_TOKEN;
   if (!token) return null;
   const { Octokit } = require('@octokit/rest');
-  return new Octokit({ auth: token });
+  const config = { auth: token };
+  if (opts.silent) {
+    const noop = () => {};
+    config.log = { debug: noop, info: noop, warn: noop, error: noop };
+  }
+  return new Octokit(config);
 }
 
 // Idempotent: returns true if the repo exists (created or already there), false on failure.

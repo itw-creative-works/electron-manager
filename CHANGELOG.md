@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.4 — silent octokit during release stream
+
+`getOctokit({ silent: true })` passes a no-op logger to octokit so transient
+404s during `mgr release` polling (in-progress jobs return 404 for log
+endpoints until each step completes) don't spam the console. Errors still
+surface via thrown rejections.
+
+Cosmetic-only fix — the actual release flow worked end-to-end in v1.2.3.
+
 ## 1.2.3 — `npm run release` now triggers CI + streams logs locally
 
 ### `npm run release` redefined: trigger CI, stream logs, exit on success
