@@ -26,11 +26,16 @@ const Manager  = new (require('../build.js'));
 const logger   = Manager.logger('runner');
 
 const RUNNER_LABELS = ['self-hosted', 'windows', 'ev-token'];
-// Runner files live inside the cwd (typically the EM clone on the runner box) under .gh-runners/.
-// Override via EM_RUNNER_HOME if you want them somewhere else (e.g. a separate disk for size).
-// Falls back to <cwd>/.gh-runners so everything's self-contained next to the EM project.
-// Add /.gh-runners/ to your .gitignore — EM's own .gitignore already has it.
-const RUNNER_HOME = process.env.EM_RUNNER_HOME || path.join(process.cwd(), '.gh-runners');
+// Runner files default to C:\actions-runners on Windows so the runner service (running
+// as NT AUTHORITY\NETWORK SERVICE) can read them without icacls gymnastics. User-profile
+// paths (C:\Users\<user>\...) deny NETWORK SERVICE by default, and actions/runner walks
+// the FULL path hierarchy at startup checking traversal — denying anywhere kills it.
+// Override via EM_RUNNER_HOME if you want them somewhere else.
+function defaultRunnerHome() {
+  if (process.platform === 'win32') return 'C:\\actions-runners';
+  return path.join(process.cwd(), '.gh-runners');
+}
+const RUNNER_HOME = process.env.EM_RUNNER_HOME || defaultRunnerHome();
 const ACTIONS_RUNNER_VERSION = '2.319.1';   // pinned; bump intentionally
 
 module.exports = async function (options) {
@@ -660,49 +665,21 @@ function escapeRegExp(s) {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-// Grant NT AUTHORITY\NETWORK SERVICE read+execute on `targetDir` recursively, AND
-// read+execute on every ancestor up to (but not including) the user profile root.
-// actions/runner's ValidateExecutePermission walks up the entire path hierarchy at
-// startup and dies if any ancestor isn't traversable by the service account.
-//
-// We stop at USERPROFILE because NETWORK SERVICE having read on the whole user dir
-// is broader than needed — granting just the chain of ancestors that lead to the
-// runner is the minimum.
+// Grant NT AUTHORITY\NETWORK SERVICE read+execute on `targetDir` recursively.
+// The runner service runs as NETWORK SERVICE; it walks its install path's full
+// hierarchy at startup and crashes if any ancestor denies traversal. By installing
+// to C:\actions-runners by default (RUNNER_HOME), we avoid all the user-profile
+// issues — but we still grant explicit RX on the runner dir for safety/idempotency
+// (in case something downstream removes inherited perms).
 function grantNetworkServiceAccess(targetDir) {
   if (process.platform !== 'win32') return;
   const { spawnSync } = require('child_process');
-
-  // Recursive read+execute on the runner dir itself.
-  const recursive = spawnSync('icacls', [targetDir, '/grant', 'NT AUTHORITY\\NETWORK SERVICE:(OI)(CI)(RX)', '/T', '/C', '/Q'], {
+  const r = spawnSync('icacls', [targetDir, '/grant', 'NT AUTHORITY\\NETWORK SERVICE:(OI)(CI)(RX)', '/T', '/C', '/Q'], {
     stdio: ['ignore', 'pipe', 'pipe'],
     encoding: 'utf8',
   });
-  if (recursive.status !== 0) {
-    logger.warn(`  icacls (recursive) on ${targetDir} exited ${recursive.status}: ${(recursive.stderr || recursive.stdout || '').trim().slice(0, 200)}`);
-  }
-
-  // Walk ancestors and grant traversal-only on each. Stop at USERPROFILE (or drive root)
-  // so we don't expose siblings under user profile to the service account.
-  const userProfile = (process.env.USERPROFILE || '').toLowerCase();
-  let dir = path.dirname(targetDir);
-  const visited = new Set();
-  while (dir && !visited.has(dir.toLowerCase())) {
-    visited.add(dir.toLowerCase());
-    const lc = dir.toLowerCase();
-    // Stop AT user profile (not above) so we don't escalate beyond what's needed.
-    if (lc === userProfile) break;
-    // Stop at drive root (e.g. C:\).
-    if (/^[a-z]:\\?$/.test(lc)) break;
-    const r = spawnSync('icacls', [dir, '/grant', 'NT AUTHORITY\\NETWORK SERVICE:(RX)', '/C', '/Q'], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      encoding: 'utf8',
-    });
-    if (r.status !== 0) {
-      logger.warn(`  icacls on ancestor ${dir} exited ${r.status}: ${(r.stderr || r.stdout || '').trim().slice(0, 200)}`);
-    }
-    const next = path.dirname(dir);
-    if (next === dir) break;
-    dir = next;
+  if (r.status !== 0) {
+    logger.warn(`  icacls on ${targetDir} exited ${r.status}: ${(r.stderr || r.stdout || '').trim().slice(0, 200)}`);
   }
 }
 

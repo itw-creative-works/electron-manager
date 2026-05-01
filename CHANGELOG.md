@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.2.11 — runner: install to C:\actions-runners (escape user profile entirely)
+
+v1.2.10 tried to fix the NETWORK SERVICE permission issue by walking up
+ancestors with icacls — but it stopped AT `%USERPROFILE%` (don't grant
+broader than needed). actions/runner walks `C:\Users\<user>` itself,
+which still denied → still crashed.
+
+Cleaner fix: install runners to `C:\actions-runners\` by default on Windows
+instead of `<EM-clone>/.gh-runners`. NETWORK SERVICE has read access to
+`C:\` by default, so no icacls walk is needed. The path's also shorter,
+which helps with Windows MAX_PATH issues on deep node_modules trees inside
+`_work/`.
+
+Override via `EM_RUNNER_HOME` if you genuinely want it elsewhere.
+
+Existing user-profile installs need to be uninstalled before upgrading:
+`npx mgr runner uninstall && npx mgr runner install`.
+
+(The icacls grant on the runner dir itself is kept for safety, but no longer
+walks ancestors.)
+
 ## 1.2.10 — runner: grant NETWORK SERVICE access to runner dir + ancestors
 
 The runner service runs as `NT AUTHORITY\NETWORK SERVICE` by default (no
