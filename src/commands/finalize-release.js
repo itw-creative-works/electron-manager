@@ -99,17 +99,28 @@ async function uploadSignedWindows({ octokit, owner, repo, tag, signedDir, confi
     return;
   }
 
-  // Find the update-server release by tag. Mac/linux's electron-builder publish
-  // step should have created it already.
+  // Find the update-server release by tag. Normally mac/linux's electron-builder
+  // publish step has already created it (as a draft). For partial-platform runs
+  // (`--platforms windows` on a brand-new version) it doesn't exist yet — in that
+  // case we create it ourselves as a draft so we have a place to attach signed
+  // assets. The `finalize` job is the one gated on all-platforms before flipping
+  // draft → published, so a draft created here just sits until a full run completes.
   let release;
   try {
     const { data } = await octokit.rest.repos.getReleaseByTag({ owner, repo, tag });
     release = data;
   } catch (err) {
-    if (err.status === 404) {
-      throw new Error(`Update-server release ${tag} not found at ${owner}/${repo}. Did mac/linux build/publish succeed?`);
-    }
-    throw err;
+    if (err.status !== 404) throw err;
+    logger.log(`No release at ${owner}/${repo}@${tag} yet — creating draft so we have somewhere to upload signed assets...`);
+    const { data } = await octokit.rest.repos.createRelease({
+      owner, repo,
+      tag_name: tag,
+      name: tag,
+      body: `Draft release auto-created by electron-manager for partial-platform run. Will be filled in by subsequent runs and published once all platforms have built.`,
+      draft: true,
+      prerelease: false,
+    });
+    release = data;
   }
 
   logger.log(`Uploading ${files.length} signed file(s) to ${owner}/${repo}@${tag} (release id ${release.id})...`);

@@ -3,6 +3,12 @@ name: Build & Release
 # Manual-trigger only — releases are intentional, not a side effect of every commit.
 on:
   workflow_dispatch:
+    inputs:
+      platforms:
+        description: 'Platforms to build (comma-separated). Examples: all, windows, mac,linux'
+        required: false
+        default: 'all'
+        type: string
 
 env:
   NODE_VERSION: '{{ versions.node }}'
@@ -16,8 +22,50 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Resolve which platforms to build from the workflow_dispatch `platforms` input.
+  # Outputs a JSON matrix (consumed by the build job) plus per-platform booleans
+  # (consumed by windows-strategy / windows-sign gating). When `platforms` is
+  # omitted (older invocations) the input defaults to 'all'.
+  setup:
+    name: Setup (resolve target platforms)
+    runs-on: ubuntu-latest
+    outputs:
+      matrix:  ${{ steps.resolve.outputs.matrix }}
+      mac:     ${{ steps.resolve.outputs.mac }}
+      windows: ${{ steps.resolve.outputs.windows }}
+      linux:   ${{ steps.resolve.outputs.linux }}
+    steps:
+      - id: resolve
+        run: |
+          input="${{ github.event.inputs.platforms || 'all' }}"
+          input="$(echo "$input" | tr '[:upper:]' '[:lower:]')"
+
+          mac=false; win=false; linux=false
+          if [[ "$input" == *all* ]]; then mac=true; win=true; linux=true; fi
+          if [[ "$input" == *mac* ]] || [[ "$input" == *darwin* ]]; then mac=true; fi
+          if [[ "$input" == *win* ]]; then win=true; fi
+          if [[ "$input" == *linux* ]] || [[ "$input" == *ubuntu* ]]; then linux=true; fi
+
+          entries=()
+          $mac   && entries+=('"macos-latest"')
+          $win   && entries+=('"windows-latest"')
+          $linux && entries+=('"ubuntu-latest"')
+          if [ ${#entries[@]} -eq 0 ]; then
+            echo "Error: '$input' did not match any platform. Use: all | mac | windows | linux | comma-separated combos." >&2
+            exit 1
+          fi
+
+          matrix="[$(IFS=,; echo "${entries[*]}")]"
+          echo "Resolved input='$input' → mac=$mac, win=$win, linux=$linux, matrix=$matrix"
+
+          echo "matrix=$matrix"  >> "$GITHUB_OUTPUT"
+          echo "mac=$mac"        >> "$GITHUB_OUTPUT"
+          echo "windows=$win"    >> "$GITHUB_OUTPUT"
+          echo "linux=$linux"    >> "$GITHUB_OUTPUT"
+
   test:
     name: Test
+    needs: setup
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -47,11 +95,11 @@ jobs:
 
   build:
     name: Build (${{ matrix.os }})
-    needs: test
+    needs: [setup, test]
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest, ubuntu-latest]
+        os: ${{ fromJSON(needs.setup.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
@@ -114,7 +162,8 @@ jobs:
   # source of truth = the consumer's config file; workflow doesn't duplicate the value.
   windows-strategy:
     name: Resolve Windows signing strategy
-    needs: build
+    needs: [setup, build]
+    if: needs.setup.outputs.windows == 'true'
     runs-on: ubuntu-latest
     outputs:
       strategy: ${{ steps.resolve.outputs.strategy }}
@@ -133,12 +182,12 @@ jobs:
 
   windows-sign:
     name: Sign Windows
-    needs: [build, windows-strategy]
+    needs: [setup, build, windows-strategy]
     # Strategy comes from config.signing.windows.strategy (read by windows-strategy job).
     #   self-hosted (default) — runs on a self-hosted runner with EV USB token attached
     #   cloud                 — runs on hosted windows-latest, calls cloud signing provider
     #   local                 — skip this job; sign locally via `npx mgr sign-windows`
-    if: ${{ needs.windows-strategy.outputs.strategy != 'local' }}
+    if: needs.setup.outputs.windows == 'true' && needs.windows-strategy.outputs.strategy != 'local'
     runs-on: ${{ needs.windows-strategy.outputs.strategy == 'cloud' && fromJSON('["windows-latest"]') || fromJSON('["self-hosted","windows","ev-token"]') }}
     # Use cmd.exe (not PowerShell) on Windows. Self-hosted runners often have PowerShell
     # ExecutionPolicy set to Restricted, which blocks the Actions-generated wrapper .ps1
@@ -182,9 +231,10 @@ jobs:
 
   finalize:
     name: Finalize release
-    # Run after every required job. windows-sign is skipped when strategy=local; this
-    # job still runs and just won't have signed Windows assets to upload.
-    needs: [build, windows-sign]
+    # Run after every required job. windows-sign is skipped when strategy=local OR when
+    # `inputs.platforms` excludes windows; this job still runs and just won't flip the
+    # release to published in those cases (see step gate below).
+    needs: [setup, build, windows-sign]
     if: always() && needs.build.result == 'success'
     runs-on: ubuntu-latest
     steps:
@@ -195,5 +245,11 @@ jobs:
           cache: npm
       - run: npm ci
       # Flip the update-server release from Draft to Published so electron-updater
-      # can read it. Idempotent — safe to run even if already published.
-      - run: npx mgr finalize-release --publish
+      # can read it. Idempotent — safe to run even if already published. ONLY runs
+      # on all-platforms builds: a partial run (e.g. `--platforms windows`) leaves
+      # the release as a draft, so subsequent runs can fill in the missing platform
+      # assets before electron-updater starts seeing the version.
+      - if: needs.setup.outputs.mac == 'true' && needs.setup.outputs.linux == 'true' && needs.setup.outputs.windows == 'true'
+        run: npx mgr finalize-release --publish
+      - if: needs.setup.outputs.mac != 'true' || needs.setup.outputs.linux != 'true' || needs.setup.outputs.windows != 'true'
+        run: echo "Partial-platform run (mac=${{ needs.setup.outputs.mac }} linux=${{ needs.setup.outputs.linux }} windows=${{ needs.setup.outputs.windows }}) — leaving release as draft. Run with --platforms all to publish."

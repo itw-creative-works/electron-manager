@@ -52,17 +52,24 @@ module.exports = async function release(options = {}) {
   // Discover ref (current branch or override via --ref).
   const ref = options.ref || (await currentBranch(projectRoot)) || 'main';
 
-  logger.log(`Triggering ${owner}/${repo} workflow ${WORKFLOW_FILE} on ref=${ref}...`);
+  // Optional --platforms / --platform flag forwarded as a workflow input. Accepts a
+  // single value ('windows') or comma-separated list ('mac,linux'). Special value
+  // 'all' or undefined builds every platform — same as the workflow's default. We
+  // only attach `inputs` when the user explicitly passed a flag, so older consumer
+  // workflows (without a `platforms` input declared) keep working unchanged.
+  const platforms = options.platforms || options.platform || null;
+
+  const dispatchArgs = { owner, repo, workflow_id: WORKFLOW_FILE, ref };
+  if (platforms) dispatchArgs.inputs = { platforms: String(platforms) };
+
+  const platformsLabel = platforms ? ` (platforms=${platforms})` : '';
+  logger.log(`Triggering ${owner}/${repo} workflow ${WORKFLOW_FILE} on ref=${ref}${platformsLabel}...`);
 
   // 1. Mark a "before" timestamp so we can identify the new run we just dispatched.
   const before = new Date();
 
   // 2. Dispatch.
-  await octokit.rest.actions.createWorkflowDispatch({
-    owner, repo,
-    workflow_id: WORKFLOW_FILE,
-    ref,
-  });
+  await octokit.rest.actions.createWorkflowDispatch(dispatchArgs);
 
   // 3. Wait for the new run to appear (GH Actions takes a few seconds to register it).
   const run = await waitForNewRun({ octokit, owner, repo, after: before, workflowFile: WORKFLOW_FILE });

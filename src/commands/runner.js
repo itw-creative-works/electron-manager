@@ -28,6 +28,17 @@ const Manager  = new (require('../build.js'));
 const logger   = Manager.logger('runner');
 
 const RUNNER_LABELS = ['self-hosted', 'windows', 'ev-token'];
+
+// Per-org runner is registered as a Scheduled Task (not a Windows Service) named
+// `em-runner-<host>-<org>`. Tasks run in the user's INTERACTIVE session (Session 1)
+// at logon, which is the only context that can both (a) read the user's
+// CurrentUser\My cert store where SafeNet/eToken EV certs live and (b) host the
+// SafeNet "Token Logon" PIN dialog so automately can type into it. Windows
+// services run in Session 0 (no desktop) and fail at both. Task name is the same
+// as the GH-side runner name so debugging stays sane.
+function runnerTaskName(org) {
+  return `em-runner-${os.hostname().toLowerCase()}-${org.toLowerCase()}`.slice(0, 64);
+}
 // Runner files default to C:\actions-runners on Windows so the runner service (running
 // as NT AUTHORITY\NETWORK SERVICE) can read them without icacls gymnastics. User-profile
 // paths (C:\Users\<user>\...) deny NETWORK SERVICE by default, and actions/runner walks
@@ -105,14 +116,14 @@ async function install(options) {
   }
 
   // 3a. Fetch logon credentials ONCE (env > DPAPI file > prompt). Reused across all
-  //     orgs below so the user isn't prompted N times.
+  //     orgs below so the user isn't prompted N times. Used to specify which user's
+  //     interactive session each Logon Task runs in. Defaults to the current user
+  //     when nothing is configured.
   const logonCreds = await getLogonCredentials();
   if (logonCreds) {
-    logger.log(`Runner services will run as ${logonCreds.account} (creds source: ${logonCreds.source}).`);
+    logger.log(`Logon Tasks will run as ${logonCreds.account} (creds source: ${logonCreds.source}).`);
   } else {
-    logger.warn('No logon credentials configured — services will run as NT AUTHORITY\\NETWORK SERVICE.');
-    logger.warn('That account cannot see your CurrentUser cert store, so EV-token signing will fail.');
-    logger.warn('Run `npx mgr runner set-credentials` (or set WIN_RUNNER_LOGON_ACCOUNT/PASSWORD) to fix.');
+    logger.log(`Logon Tasks will run as ${os.userInfo().username} (current user — no creds configured).`);
   }
 
   // 3b. For each org: copy the template dir, run config.cmd inside it, register as service.
@@ -244,51 +255,35 @@ async function registerOrg(options) {
   logger.log(`  Cloning actions-runner template → actions-runner-${org.toLowerCase()}/`);
   jetpack.copy(templateDir, orgRunnerDir, { overwrite: true });
 
-  // Grant NT AUTHORITY\NETWORK SERVICE read+execute on the runner dir + everything
-  // up the hierarchy. The runner service runs as NETWORK SERVICE by default (no
-  // explicit --windowslogonaccount); on user-profile-relative install paths
-  // (C:\Users\<user>\...) NETWORK SERVICE has no access by default and the service
-  // crashes with "Access denied" at startup. ValidateExecutePermission walks up the
-  // entire path so we must grant on each ancestor too.
-  grantNetworkServiceAccess(orgRunnerDir);
-
   const configCmd = path.join(orgRunnerDir, 'config.cmd');
-  const runnerName = `em-runner-${os.hostname().toLowerCase()}-${org.toLowerCase()}`.slice(0, 64);   // GH max 64 chars
+  const runnerName = runnerTaskName(org);   // same name on GH side + Task Scheduler side
 
-  // config.cmd --runasservice handles register + service install + service start
-  // in one shot when invoked from an elevated (admin) shell. No separate svc.cmd
-  // step is needed — Windows runners ship without svc.cmd; the service install
-  // is built into config.cmd's --runasservice path. Verified against actions/runner
-  // v2.319.1 by running standalone: it produces "Service ... successfully installed",
-  // "successfully configured", and "started successfully" messages all from config.cmd.
-  //
-  // The flag IS silently ignored if the runner dir is already in a "configured" state
-  // (config.cmd refuses to re-configure with "Cannot configure the runner because it
-  // is already configured"). That's why the per-org dir gets nuked + re-cloned above
-  // every install rather than reused.
+  // config.cmd registers the runner against GH and writes .runner / .credentials
+  // into the per-org dir. We do NOT pass --runasservice anymore — service-mode
+  // runners run in Session 0 (no desktop, no access to the user's CurrentUser\My
+  // cert store) and signtool can't see EV certs there. Instead we create a
+  // Scheduled Task below that runs run.cmd in the user's interactive session
+  // when they log on. See runnerTaskName() for context.
   const args = [
     '--unattended',
     '--url',          `https://github.com/${org}`,
     '--token',        regToken,
     '--name',         runnerName,
     '--labels',       RUNNER_LABELS.join(','),
-    '--runasservice',
     '--replace',
   ];
 
-  // Optional: run the service as a specific Windows user (instead of the default
-  // NT AUTHORITY\NETWORK SERVICE) so it can see the user's cert store for EV signing.
-  // Creds are pre-fetched by install() and passed through options.logonCreds; for
-  // single-org register-org calls we fetch them here.
+  // Logon credentials are still supported (env / DPAPI file / interactive prompt)
+  // and used to specify which user's session the Logon Task runs in. Defaults to
+  // the current invoking user — same behavior most consumers expect.
   const logonCreds = options.logonCreds !== undefined
     ? options.logonCreds
     : await getLogonCredentials();
+  const taskAccount = (logonCreds && logonCreds.account) || os.userInfo().username;
   if (logonCreds) {
-    args.push('--windowslogonaccount',  logonCreds.account);
-    args.push('--windowslogonpassword', logonCreds.password);
-    logger.log(`  Service will run as ${logonCreds.account} (creds source: ${logonCreds.source})`);
+    logger.log(`  Logon Task will run as ${logonCreds.account} (creds source: ${logonCreds.source})`);
   } else {
-    logger.log(`  Service will run as NT AUTHORITY\\NETWORK SERVICE (default — no logon creds configured)`);
+    logger.log(`  Logon Task will run as ${taskAccount} (current user — no creds configured)`);
   }
 
   // Run via `cmd.exe /c` instead of `shell: true`. .cmd files can't be spawned directly
@@ -316,53 +311,64 @@ async function registerOrg(options) {
     throw new Error(`config.cmd exited ${r.status === null ? 'null (killed)' : r.status} for ${org}. See output above.`);
   }
 
-  // Sanity check — config.cmd's success exit doesn't always mean the service was created
-  // (e.g. if --runasservice was silently ignored when stdout/stderr aren't a real TTY).
-  // Enumerate services matching `actions.runner.<org>.*` and verify at least one exists.
-  const svcQuery = spawnSync('sc', ['query', 'state=', 'all'], { encoding: 'utf8' });
-  const svcOut   = svcQuery.stdout || '';
-  const svcRe    = new RegExp(`^SERVICE_NAME:\\s*(actions\\.runner\\.${escapeRegExp(org)}\\.\\S+)`, 'mi');
-  const svcMatch = svcRe.exec(svcOut);
-  if (!svcMatch) {
-    throw new Error(
-      `No actions.runner.${org}.* service was created despite config.cmd succeeding. ` +
-      `Most common cause: not running as Administrator. Re-run this command from an elevated cmd prompt.`
-    );
+  // Verify config.cmd actually wrote the registration files. Without these the
+  // runner can't authenticate with GH at run time.
+  if (!jetpack.exists(path.join(orgRunnerDir, '.runner')) || !jetpack.exists(path.join(orgRunnerDir, '.credentials'))) {
+    throw new Error(`config.cmd succeeded but .runner / .credentials are missing in ${orgRunnerDir}. The runner is not configured.`);
   }
-  logger.log(`  Service: ${svcMatch[1]}`);
+
+  // Create the Scheduled Task that runs `run.cmd` in the user's interactive session
+  // at logon. /SC ONLOGON + /RU <user> binds the task to that user's logon session
+  // (Session 1+, with desktop access) — exactly what's needed for signtool to see
+  // the EV cert and for automately to type the SafeNet PIN. /RL HIGHEST runs with
+  // the user's elevated token (matches what an "Run as administrator" cmd would
+  // get) which is needed for some npm/electron-builder operations.
+  const taskName = runnerTaskName(org);
+  createRunnerLogonTask({
+    taskName,
+    runnerDir: orgRunnerDir,
+    account:   taskAccount,
+    password:  (logonCreds && logonCreds.password) || null,
+  });
 
   // Track in our config.
   const cfg = readConfig();
   cfg.registeredOrgs = Array.from(new Set([...(cfg.registeredOrgs || []), org]));
   saveConfig(cfg);
 
-  logger.log(`✓ Registered + service installed for ${org}`);
+  logger.log(`✓ Registered runner + Logon Task '${taskName}' created for ${org}`);
 }
 
 // ─── start / stop / status ──────────────────────────────────────────────────────
 async function startServices() {
   ensureWindows();
-  const services = listActionsRunnerServices();
-  if (services.length === 0) {
-    logger.warn('No actions.runner.* services installed. Run `npx mgr runner install` first.');
+  const tasks = listEmRunnerTasks();
+  if (tasks.length === 0) {
+    logger.warn('No em-runner-* Logon Tasks installed. Run `npx mgr runner install` first.');
   }
-  for (const name of services) {
-    const r = scControl('start', name);
+  for (const name of tasks) {
+    const r = runTask(name);
     logger.log(`${r.ok ? '✓' : '✗'} start ${name}${r.ok ? '' : ` — ${r.message}`}`);
   }
+  // Watcher remains a service for now (it lives in Session 0 and just orchestrates
+  // org registration; it doesn't sign anything itself).
   const watcher = scControl('start', WATCHER_SERVICE_NAME);
-  logger.log(`${watcher.ok ? '✓' : '✗'} start ${WATCHER_SERVICE_NAME}${watcher.ok ? '' : ` — ${watcher.message}`}`);
+  if (watcher.exitCode !== 1060) {
+    logger.log(`${watcher.ok ? '✓' : '✗'} start ${WATCHER_SERVICE_NAME}${watcher.ok ? '' : ` — ${watcher.message}`}`);
+  }
 }
 
 async function stopServices() {
   ensureWindows();
-  const services = listActionsRunnerServices();
-  for (const name of services) {
-    const r = scControl('stop', name);
+  const tasks = listEmRunnerTasks();
+  for (const name of tasks) {
+    const r = endTask(name);
     logger.log(`${r.ok ? '✓' : '✗'} stop ${name}${r.ok ? '' : ` — ${r.message}`}`);
   }
   const watcher = scControl('stop', WATCHER_SERVICE_NAME);
-  logger.log(`${watcher.ok ? '✓' : '✗'} stop ${WATCHER_SERVICE_NAME}${watcher.ok ? '' : ` — ${watcher.message}`}`);
+  if (watcher.exitCode !== 1060) {
+    logger.log(`${watcher.ok ? '✓' : '✗'} stop ${WATCHER_SERVICE_NAME}${watcher.ok ? '' : ` — ${watcher.message}`}`);
+  }
 }
 
 async function statusServices() {
@@ -374,18 +380,26 @@ async function statusServices() {
   logger.log(`Registered orgs: ${(cfg.registeredOrgs || []).join(', ') || '(none)'}`);
   logger.log('');
 
-  // Per-org runner services.
-  const services = listActionsRunnerServices();
-  if (services.length === 0) {
-    logger.warn('No actions.runner.* services installed.');
+  // Per-org runner Logon Tasks.
+  const tasks = listEmRunnerTasks();
+  if (tasks.length === 0) {
+    logger.warn('No em-runner-* Logon Tasks installed.');
     logger.warn('Run `npx mgr runner install` to create them — registration alone is not enough.');
   } else {
-    logger.log(`Runner services (${services.length}):`);
-    for (const name of services) {
-      const state = scState(name);
-      const symbol = state === 'RUNNING' ? '✓' : state === 'STOPPED' ? '·' : '?';
+    logger.log(`Runner Logon Tasks (${tasks.length}):`);
+    for (const name of tasks) {
+      const state = taskState(name);
+      const symbol = state === 'RUNNING' ? '✓' : state === 'READY' ? '·' : '?';
       logger.log(`  ${symbol} ${name} — ${state}`);
     }
+  }
+
+  // Surface any leftover legacy services so users can clean them up.
+  const legacy = listActionsRunnerServices();
+  if (legacy.length > 0) {
+    logger.log('');
+    logger.warn(`Legacy actions.runner.* services detected (${legacy.length}). These are leftovers from the old service-mode runner and should be removed via 'npx mgr runner uninstall'.`);
+    for (const name of legacy) logger.log(`  · ${name}`);
   }
 
   // Watcher service.
@@ -406,8 +420,12 @@ async function uninstall() {
   // the lock-on-files issue better than raw `sc delete`.
   await uninstallWatcherService();
 
-  // Stop + delete each actions.runner.* service. We discover them via `sc query`
-  // since each service is named per-org.
+  // End + delete each em-runner-<host>-<org> Logon Task.
+  await uninstallActionsRunnerTasks();
+
+  // Stop + delete any leftover legacy actions.runner.* services from old EM
+  // versions that registered runners as Windows services. Idempotent — no-op
+  // if there are none.
   await uninstallActionsRunnerServices();
 
   // Deregister each org-side runner if we have a token and a working config.cmd.
@@ -701,6 +719,154 @@ function scState(name) {
 
 function escapeRegExp(s) {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// ─── Logon Task management (replaces service mode for runner job execution) ────
+//
+// Each per-org runner is registered as a Scheduled Task triggered "At log on of
+// <user>" with "Run with highest privileges". The task is a thin wrapper that
+// cd's to the runner dir and execs run.cmd. Tasks run in the user's interactive
+// session (Session 1+), where:
+//   - signtool can read the user's CurrentUser\My cert store
+//   - SafeNet's Token Logon PIN dialog can render on the desktop
+//   - automately can find that dialog and type the PIN
+//
+// Trade-off: the user must be logged in on the Windows host for the runner to
+// pick up jobs. With Windows auto-logon enabled (one-time setup), this is a
+// non-issue on a dedicated build box.
+
+// Create (or replace) a Logon Task for a runner.
+//   /SC ONLOGON       — fire when the named user logs on
+//   /RU <account>     — run as that user (their session is the one that triggers)
+//   /RP <password>    — only required when account != current invoking user
+//   /RL HIGHEST       — run with the user's elevated token (matches admin cmd)
+//   /F                — force overwrite if a task with this name already exists
+//   /TR "..."         — the action to run; we wrap run.cmd so cwd is set correctly
+function createRunnerLogonTask({ taskName, runnerDir, account, password }) {
+  if (process.platform !== 'win32') return;
+  const { spawnSync } = require('child_process');
+
+  const runCmd = path.join(runnerDir, 'run.cmd');
+  if (!jetpack.exists(runCmd)) {
+    throw new Error(`Cannot create Logon Task — run.cmd not found at ${runCmd}.`);
+  }
+
+  // /TR is the action to execute. We exec run.cmd directly (no `cmd /c` wrapper,
+  // no `cd /d` — actions/runner's run.cmd uses %~dp0 to find its own helpers, so
+  // cwd doesn't matter). Wrapping in `cmd /c "...&&..."` was the obvious thing
+  // to try first, but schtasks's /TR parser eats the `&&` even when fully
+  // quoted, so we keep it simple. The path is double-quoted to handle spaces.
+  const tr = `"${runCmd}"`;
+
+  // /RL HIGHEST is intentionally omitted: signtool, npm install, electron-builder,
+  // and automately keystroke injection don't require elevated tokens, and /RL
+  // HIGHEST is what triggers schtasks's "Access is denied" without explicit
+  // admin elevation at install time. ensureWindowsAdmin() still requires admin
+  // to create ONLOGON tasks at all (Windows policy), but we don't escalate
+  // beyond that.
+  const args = [
+    '/Create',
+    '/TN', taskName,
+    '/SC', 'ONLOGON',
+    '/RU', account,
+    '/TR', tr,
+    '/F',
+  ];
+  // Password is only needed if the task's RU differs from the invoking user, OR
+  // if you want the task to be runnable when no one is interactively logged in
+  // (which we don't — ONLOGON inherently requires a logon event). Pass it when
+  // we have it for safety, omit otherwise.
+  if (password) {
+    args.push('/RP', password);
+  }
+
+  const r = spawnSync('schtasks', args, { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' });
+  if (r.status !== 0) {
+    const msg = (r.stderr || r.stdout || '').trim().slice(0, 500);
+    throw new Error(`schtasks /Create failed (exit ${r.status}) for ${taskName}: ${msg}`);
+  }
+  logger.log(`  ✓ Logon Task created: ${taskName} (RU=${account}, runs run.cmd in ${runnerDir})`);
+}
+
+// Run a task immediately (don't wait for the next logon trigger). Useful for
+// `mgr runner start` and for the initial install so the user doesn't have to
+// log out + log back in before jobs are picked up.
+function runTask(taskName) {
+  if (process.platform !== 'win32') return { ok: false, message: 'not-windows' };
+  const { spawnSync } = require('child_process');
+  const r = spawnSync('schtasks', ['/Run', '/TN', taskName], { encoding: 'utf8' });
+  return {
+    ok: r.status === 0,
+    message: (r.stderr || r.stdout || '').trim().split('\n').slice(-2).join(' ').trim() || `exit ${r.status}`,
+    exitCode: r.status,
+  };
+}
+
+// End a running task instance. Used by `mgr runner stop`. Note: this terminates
+// the current run; if the user logs out + back in, the task fires again per its
+// ONLOGON trigger. To prevent that, the task itself must be deleted (uninstall).
+function endTask(taskName) {
+  if (process.platform !== 'win32') return { ok: false, message: 'not-windows' };
+  const { spawnSync } = require('child_process');
+  const r = spawnSync('schtasks', ['/End', '/TN', taskName], { encoding: 'utf8' });
+  return {
+    ok: r.status === 0,
+    message: (r.stderr || r.stdout || '').trim().split('\n').slice(-2).join(' ').trim() || `exit ${r.status}`,
+    exitCode: r.status,
+  };
+}
+
+// Returns 'RUNNING' | 'READY' | 'NOT_INSTALLED' | 'UNKNOWN'.
+// schtasks /Query /TN <name> /FO LIST prints "Status:  Running" or "Ready" etc.
+function taskState(taskName) {
+  if (process.platform !== 'win32') return 'UNKNOWN';
+  const { spawnSync } = require('child_process');
+  const r = spawnSync('schtasks', ['/Query', '/TN', taskName, '/FO', 'LIST'], { encoding: 'utf8' });
+  if (r.status !== 0) {
+    const msg = (r.stderr || '').toLowerCase();
+    if (msg.includes('cannot find') || msg.includes('does not exist')) return 'NOT_INSTALLED';
+    return 'UNKNOWN';
+  }
+  const out = r.stdout || '';
+  const m = /^Status:\s*(\w+)/m.exec(out);
+  return m ? m[1].toUpperCase() : 'UNKNOWN';
+}
+
+// Enumerate all em-runner-* Logon Tasks. Uses schtasks /Query /FO CSV /NH which
+// gives us TaskName,Next Run Time,Status — we just need the first column.
+function listEmRunnerTasks() {
+  if (process.platform !== 'win32') return [];
+  const { spawnSync } = require('child_process');
+  const r = spawnSync('schtasks', ['/Query', '/FO', 'CSV', '/NH'], { encoding: 'utf8' });
+  if (r.status !== 0) return [];
+  const names = new Set();
+  for (const rawLine of (r.stdout || '').split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    // CSV first field — strip leading quote, take up to next quote.
+    const m = /^"([^"]+)"/.exec(line);
+    if (!m) continue;
+    // schtasks output prefixes task path with "\" if at root: e.g. \em-runner-...
+    const tn = m[1].replace(/^\\/, '');
+    if (/^em-runner-/i.test(tn)) names.add(tn);
+  }
+  return [...names].sort();
+}
+
+async function uninstallActionsRunnerTasks() {
+  const tasks = listEmRunnerTasks();
+  if (tasks.length === 0) return;
+  const { spawnSync } = require('child_process');
+  for (const name of tasks) {
+    logger.log(`Removing Logon Task ${name}…`);
+    spawnSync('schtasks', ['/End',    '/TN', name],          { stdio: 'ignore' }); // best-effort end
+    const r = spawnSync('schtasks', ['/Delete', '/TN', name, '/F'], { encoding: 'utf8' });
+    if (r.status !== 0) {
+      logger.warn(`  schtasks /Delete failed for ${name} (exit ${r.status}): ${(r.stderr || '').trim().slice(0, 200)}`);
+    } else {
+      logger.log(`  ✓ Deleted ${name}`);
+    }
+  }
 }
 
 // ─── runner service logon credentials ───────────────────────────────────────
