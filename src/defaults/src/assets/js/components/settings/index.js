@@ -1,2 +1,10 @@
 // Settings window renderer entry.
-new (require('electron-manager/renderer'))().initialize();
+const Manager = require('electron-manager/renderer');
+
+const manager = new Manager();
+
+manager.initialize()
+  .then(() => {
+    const { logger } = manager;
+    logger.log('Settings window initialized!');
+  });

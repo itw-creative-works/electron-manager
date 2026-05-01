@@ -24,7 +24,9 @@ Living checklist of what's done, what's in progress, and what's deferred. Update
 
 ## Schema (`config/electron-manager.json`)
 
-Top-level keys:
+> **NOTE**: schema below is the v1.0.0 shape. v1.0.7 simplified it considerably — see CLAUDE.md "Config flow" for the current canonical reference. Diff vs below: `tray`/`menu`/`contextMenu` blocks removed (paths conventional, disable via runtime API), `deepLinks` block removed (scheme=brand.id, routes registered at runtime), `em:` block removed (was dead config), `app.icons` block added, `entitlements.mac` block added, `startup.openAtLogin` is now `{enabled, mode}` object.
+
+Top-level keys (v1.0.0):
 - `brand` — id (drives protocol scheme + appId), name, url, contact, images.
 - `app` — appId, productName, copyright, version (mirrors electron-builder fields).
 - `autoUpdate` — enabled, channel, feedUrl, devTest, autoDownload.

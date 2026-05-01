@@ -80,27 +80,37 @@ module.exports = {
       },
     },
     {
-      name: 'getWindowsSignStrategy defaults to self-hosted',
+      name: 'getWindowsSignStrategy defaults to self-hosted when no config',
       run: (ctx) => {
-        const prev = process.env.EM_WIN_SIGN_STRATEGY;
-        delete process.env.EM_WIN_SIGN_STRATEGY;
+        // No EM_WIN_SIGN_STRATEGY env-var support anymore — config is the only source.
+        // Run from a cwd with no electron-manager.json to confirm the default.
+        const fs = require('fs'); const os = require('os'); const path = require('path');
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'em-strategy-'));
+        const orig = process.cwd();
         try {
+          process.chdir(tmp);
           ctx.expect(Manager.getWindowsSignStrategy()).toBe('self-hosted');
         } finally {
-          if (prev !== undefined) process.env.EM_WIN_SIGN_STRATEGY = prev;
+          process.chdir(orig);
+          fs.rmSync(tmp, { recursive: true, force: true });
         }
       },
     },
     {
-      name: 'getWindowsSignStrategy honors env var override',
+      name: 'getWindowsSignStrategy reads config.signing.windows.strategy',
       run: (ctx) => {
-        const prev = process.env.EM_WIN_SIGN_STRATEGY;
-        process.env.EM_WIN_SIGN_STRATEGY = 'cloud';
+        const fs = require('fs'); const os = require('os'); const path = require('path');
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'em-strategy-'));
+        fs.mkdirSync(path.join(tmp, 'config'), { recursive: true });
+        fs.writeFileSync(path.join(tmp, 'config', 'electron-manager.json'),
+          `{ signing: { windows: { strategy: 'cloud' } } }`);
+        const orig = process.cwd();
         try {
+          process.chdir(tmp);
           ctx.expect(Manager.getWindowsSignStrategy()).toBe('cloud');
         } finally {
-          if (prev !== undefined) process.env.EM_WIN_SIGN_STRATEGY = prev;
-          else delete process.env.EM_WIN_SIGN_STRATEGY;
+          process.chdir(orig);
+          fs.rmSync(tmp, { recursive: true, force: true });
         }
       },
     },

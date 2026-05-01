@@ -1,6 +1,6 @@
 // Package the app via electron-builder, using the materialized config at
-// `dist/electron-builder.yml` (produced by gulp/build-config). Falls back to the
-// consumer's source `electron-builder.yml` if the dist version isn't there.
+// `dist/electron-builder.yml` (produced by gulp/build-config from electron-manager.json).
+// Consumers never ship an electron-builder.yml — the dist version is the only source of truth.
 //
 // This task does NOT publish — it just produces local artifacts under `release/`.
 // For publishing, see gulp/release.js.
@@ -16,18 +16,10 @@ const logger = Manager.logger('package');
 
 module.exports = function packageApp(done) {
   const projectRoot = process.cwd();
-  const distConfig  = path.join(projectRoot, 'dist', 'electron-builder.yml');
-  const srcConfig   = path.join(projectRoot, 'electron-builder.yml');
+  const config = path.join(projectRoot, 'dist', 'electron-builder.yml');
 
-  const config = jetpack.exists(distConfig)
-    ? distConfig
-    : jetpack.exists(srcConfig)
-      ? srcConfig
-      : null;
-
-  if (!config) {
-    logger.warn('No electron-builder.yml found — skipping package step.');
-    return done();
+  if (!jetpack.exists(config)) {
+    return done(new Error(`Missing ${config}. Run gulp/build-config first (it generates this file from electron-manager.json).`));
   }
 
   // Resolve electron-builder from the consumer's node_modules first, then EM's bundled one.

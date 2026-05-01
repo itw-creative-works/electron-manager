@@ -4,8 +4,9 @@
 //   1. Acquire the OS-level single-instance lock so only one copy of the app runs at a time.
 //      If the lock is lost, the user already had the app open — the OS forwarded our argv
 //      to that instance via the second-instance event (handled by lib/deep-link.js).
-//   2. Register `<scheme>://` URLs (from config.deepLinks.schemes) with the OS so the system
-//      routes them to this app. On macOS this also enables the open-url event.
+//   2. Register `<brand.id>://` URLs with the OS so the system routes them to this app.
+//      On macOS this also enables the open-url event. The scheme is always brand.id —
+//      no config knob.
 
 const LoggerLite = require('./logger-lite.js');
 
@@ -50,8 +51,12 @@ const protocol = {
       }
     }
 
-    // Register custom URL schemes.
-    const schemes = manager?.config?.deepLinks?.schemes || [];
+    // Register custom URL scheme. Always derived from brand.id — `<brand.id>://...` is
+    // the one and only scheme. No config knob; if you need multiple schemes for the same app,
+    // call `app.setAsDefaultProtocolClient(extra)` yourself in main.js.
+    const schemes = [];
+    const brandId = manager?.config?.brand?.id;
+    if (brandId) schemes.push(brandId);
     protocol._schemes = schemes;
     if (typeof app.setAsDefaultProtocolClient === 'function') {
       schemes.forEach((scheme) => {

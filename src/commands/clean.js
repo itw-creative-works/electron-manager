@@ -13,6 +13,16 @@ const dirs = [
 ];
 
 module.exports = async function (options) {
+  // Quick mode: keep existing build artifacts so the next gulp run is incremental.
+  // Only short-circuit if there's actually a dist/ to reuse — first runs still need a real clean.
+  if (Manager.isQuickMode()) {
+    if (jetpack.exists('dist')) {
+      logger.log('Quick mode: Skipping clean');
+      return;
+    }
+    logger.log('Quick mode: No existing build, running full clean');
+  }
+
   logger.log('Cleaning .temp, .em-cache, dist, release...');
 
   try {

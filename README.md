@@ -14,10 +14,10 @@
 
 - **One-line bootstrap** per Electron process: `require('electron-manager/main')`, `/preload`, `/renderer`.
 - **Modular feature library** — storage, IPC, tray, menu, context menu, window manager, startup, app-state, deep-link, auto-updater, web-manager auth, Sentry. Each feature is its own module with documented API.
-- **File-based feature definitions** — trays, menus, and context-menus are JS files (full power, no DSL): `src/tray/index.js`, `src/menu/index.js`, `src/context-menu/index.js`.
+- **File-based feature definitions** — trays, menus, and context-menus are JS files (full power, no DSL): `src/integrations/{tray,menu,context-menu}/index.js`. All three ship sensible **id-tagged defaults** (legacy-EM-style: about, preferences, check-for-updates, dev menu w/ inspector + log folders, etc.) and share the same **id-path mutation API**: `find`, `update`, `remove`, `enable`, `show`, `hide`, `insertBefore`, `insertAfter`, `appendTo`. Any default item is one line away from removal, customization, or repositioning.
 - **Zero-bounce tray-only launch on macOS** — production builds inject `LSUIElement: true` into Info.plist via build-config. No dock animation, no flash.
 - **Webpack-bundled** main / preload / renderer for source protection.
-- **Built-in test framework** — Jest-like syntax, three layers (build / main / renderer), spawns Electron for main-process tests.
+- **Built-in test framework** — Jest-like syntax, four layers: `build` (plain Node), `main` (spawned Electron), `renderer` (hidden BrowserWindow), and `boot` (spawns the consumer's actual built `dist/main.bundle.js` for end-to-end smoke tests against the live manager — no `npm start && sleep && kill` shell hacks). Boot layer always rebuilds the bundle first so tests never see stale code.
 - **Multi-platform build/release** via GitHub Actions — macOS sign + notarize, Linux, Windows EV-token signing (self-hosted runner now, cloud-signing pluggable).
 
 ## Quick start (consumer)
@@ -81,6 +81,7 @@ Each subsystem has its own API reference under [`docs/`](docs/):
 - [releasing](docs/releasing.md) — end-to-end release walkthrough (`.env` → GitHub Release)
 - [runner](docs/runner.md) — Windows EV-token signing runner — `npx mgr runner install`, auto-onboards new GH orgs
 - [test-framework](docs/test-framework.md) — writing tests, running them, layers
+- [test-boot-layer](docs/test-boot-layer.md) — boot test layer (spawns the consumer's actual built bundle for end-to-end smoke tests)
 - [build-system](docs/build-system.md) — gulp, webpack, electron-builder pipeline
 
 ## Status

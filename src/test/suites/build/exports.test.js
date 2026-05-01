@@ -40,7 +40,9 @@ module.exports = {
       name: 'every lib module exports a singleton or constructor',
       run: (ctx) => {
         const libDir = path.join(root, 'dist', 'lib');
-        const files = fs.readdirSync(libDir).filter((f) => f.endsWith('.js'));
+        // Skip leading-underscore files — they're internal utilities (mixins, helpers)
+        // shared between libs, not Electron-feature singletons.
+        const files = fs.readdirSync(libDir).filter((f) => f.endsWith('.js') && !f.startsWith('_'));
         ctx.expect(files.length).toBeGreaterThan(0);
 
         for (const file of files) {

@@ -161,7 +161,7 @@ Standard mode. Used by the GH Actions workflow.
 | `WIN_CSC_KEY_PASSWORD` | Token password (cached in SafeNet client for unattended signing) |
 | `WIN_TIMESTAMP_URL` | Optional — defaults to `http://timestamp.sectigo.com` |
 | `SIGNTOOL_PATH` | Optional — explicit path to signtool.exe; defaults to `signtool` on PATH (requires Windows SDK or VS Build Tools) |
-| `EM_WIN_SIGN_STRATEGY` | `self-hosted` (default) / `cloud` / `local` |
+| `signing.windows.strategy` | `self-hosted` (default) / `cloud` / `local` |
 
 ## Adding a new org
 

@@ -130,41 +130,64 @@ function isUploadable(filename) {
 }
 
 // Map a versioned electron-builder artifact name to a stable, versionless one.
-// Examples:
-//   MyApp-1.0.1.dmg                  → MyApp-mac-x64.dmg     (default mac arch is x64 if unspecified)
-//   MyApp-1.0.1-arm64.dmg            → MyApp-mac-arm64.dmg
-//   MyApp-1.0.1-mac.zip              → MyApp-mac-x64.zip
-//   MyApp-1.0.1-arm64-mac.zip        → MyApp-mac-arm64.zip
-//   MyApp-Setup-1.0.1.exe            → MyApp-win-x64.exe
-//   MyApp-1.0.1.AppImage             → MyApp-linux-x64.AppImage
-//   MyApp-1.0.1-arm64.AppImage       → MyApp-linux-arm64.AppImage
-//   MyApp-1.0.1.deb                  → MyApp-linux-x64.deb
+// Naming convention preserves legacy URLs from before the v1 EM rewrite — x64 builds
+// keep their original "default arch" filename, and only non-default archs get a suffix.
+//
+// Examples (productName=Somiibo, app name=somiibo):
+//   Somiibo-1.0.1.dmg                  → Somiibo.dmg               (legacy: Somiibo.dmg)
+//   Somiibo-1.0.1-arm64.dmg            → Somiibo-arm64.dmg         (new: Apple Silicon)
+//   Somiibo-1.0.1-mac.zip              → Somiibo-mac.zip           (auto-updater feed)
+//   Somiibo-1.0.1-arm64-mac.zip        → Somiibo-mac-arm64.zip
+//   Somiibo-Setup-1.0.1.exe            → Somiibo-Setup.exe         (legacy: Somiibo-Setup.exe)
+//   Somiibo-1.0.1.AppImage             → Somiibo.AppImage          (new: any-distro Linux)
+//   somiibo_1.0.1_amd64.deb            → somiibo_amd64.deb         (legacy: somiibo_amd64.deb)
 function stableName(filename, productName) {
   const product = sanitizeForFilename(productName);
   const lower   = filename.toLowerCase();
   const ext     = path.extname(filename).slice(1).toLowerCase();
 
-  // Determine platform from extension only — extension is the source of truth.
-  let platform;
-  if (ext === 'dmg' || ext === 'pkg') {
-    platform = 'mac';
-  } else if (ext === 'zip' && (lower.includes('mac.zip') || lower.includes('-mac.zip'))) {
-    platform = 'mac';
-  } else if (ext === 'exe' || ext === 'appx' || ext === 'msi') {
-    platform = 'win';
-  } else if (ext === 'appimage' || ext === 'deb' || ext === 'rpm' || ext === 'snap') {
-    platform = 'linux';
-  } else {
-    return null;
-  }
-
-  // Determine arch.
+  // Detect arch.
   let arch = 'x64';
   if (lower.includes('arm64')) arch = 'arm64';
   else if (lower.includes('ia32') || lower.includes('-x86')) arch = 'ia32';
 
-  // Normalize zip/dmg/etc to lowercase ext.
-  return `${product}-${platform}-${arch}.${ext}`;
+  // Per-platform stable naming.
+  if (ext === 'dmg' || ext === 'pkg') {
+    // Legacy: just `Product.dmg`. Apple Silicon: `Product-arm64.dmg`.
+    return arch === 'x64' ? `${product}.${ext}` : `${product}-${arch}.${ext}`;
+  }
+
+  if (ext === 'zip' && (lower.includes('mac.zip') || lower.includes('-mac.zip'))) {
+    // Auto-updater feed (electron-updater downloads these). Always include `mac` to
+    // disambiguate from any future Windows zip target.
+    return arch === 'x64' ? `${product}-mac.${ext}` : `${product}-mac-${arch}.${ext}`;
+  }
+
+  if (ext === 'exe' || ext === 'appx' || ext === 'msi') {
+    // Legacy NSIS installer name was "Product-Setup.exe". Preserve it for x64.
+    if (ext === 'exe') {
+      return arch === 'x64' ? `${product}-Setup.${ext}` : `${product}-Setup-${arch}.${ext}`;
+    }
+    return arch === 'x64' ? `${product}.${ext}` : `${product}-${arch}.${ext}`;
+  }
+
+  if (ext === 'appimage') {
+    return arch === 'x64' ? `${product}.AppImage` : `${product}-${arch}.AppImage`;
+  }
+
+  if (ext === 'deb') {
+    // Legacy used Debian's underscore convention: somiibo_amd64.deb.
+    // electron-builder picks "amd64" for x64 and "i386" for ia32 — match that.
+    const lcProduct = product.toLowerCase();
+    const debArch   = arch === 'x64' ? 'amd64' : (arch === 'ia32' ? 'i386' : arch);
+    return `${lcProduct}_${debArch}.deb`;
+  }
+
+  if (ext === 'rpm' || ext === 'snap') {
+    return arch === 'x64' ? `${product}.${ext}` : `${product}-${arch}.${ext}`;
+  }
+
+  return null;
 }
 
 function sanitizeForFilename(name) {

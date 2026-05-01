@@ -1,2 +1,14 @@
 // Main window renderer entry.
-new (require('electron-manager/renderer'))().initialize();
+const Manager = require('electron-manager/renderer');
+
+const manager = new Manager();
+
+manager.initialize()
+  .then(() => {
+    const { logger, ipc, storage, webManager } = manager;
+
+    // Add your main-window UI logic here.
+    // ...
+
+    logger.log('Main window initialized!');
+  });

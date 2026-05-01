@@ -12,7 +12,9 @@ function Manager() {
   return self;
 }
 
-Manager.prototype.initialize = function () {
+// Async even though there's nothing to await — keeps the API uniform with main + renderer
+// so consumers can do `manager.initialize().then(...)` regardless of which entry they're in.
+Manager.prototype.initialize = async function () {
   const self = this;
 
   let electron;

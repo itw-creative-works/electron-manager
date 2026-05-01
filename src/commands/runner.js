@@ -193,13 +193,16 @@ async function registerOrg(options) {
     '--replace',
   ];
 
+  // Run via `cmd.exe /c` instead of `shell: true`. .cmd files can't be spawned directly
+  // by Node's CreateProcess on Windows, so we need cmd.exe as the shell — but `shell: true`
+  // triggers Node 24's DEP0190 deprecation warning when args are passed as an array.
+  // Explicit `cmd.exe /c <script> <args>` is the supported, warning-free path.
   const { spawnSync } = require('child_process');
   logger.log(`Registering against ${org} (cwd: ${orgRunnerDir})…`);
-  const r = spawnSync(configCmd, args, {
+  const r = spawnSync('cmd.exe', ['/c', configCmd, ...args], {
     cwd:      orgRunnerDir,
     stdio:    ['ignore', 'pipe', 'pipe'],   // capture so we can surface real errors
     encoding: 'utf8',
-    shell:    true,                          // .cmd files need shell:true on Windows
     timeout:  120000,                        // 2 min hard cap
   });
 

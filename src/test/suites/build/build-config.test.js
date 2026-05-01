@@ -1,172 +1,108 @@
-// Build-layer tests for gulp/tasks/build-config.js — verify that the YAML injection
-// is correct, idempotent, and preserves other content.
+// Build-layer tests for gulp/tasks/build-config.js — verify the object generation
+// from EM defaults + consumer config + override merging.
 
 const path = require('path');
 
 module.exports = {
   type: 'suite',
   layer: 'build',
-  description: 'build-config — electron-builder.yml injection',
+  description: 'build-config — generate electron-builder.yml from electron-manager.json',
   tests: [
     {
-      name: 'task module exports a function plus injectMacExtendInfo',
+      name: 'task module exports a function plus baseConfig + deepMerge',
       run: (ctx) => {
         const mod = require(path.join(__dirname, '..', '..', '..', 'gulp', 'tasks', 'build-config.js'));
         ctx.expect(typeof mod).toBe('function');
-        ctx.expect(typeof mod.injectMacExtendInfo).toBe('function');
+        ctx.expect(typeof mod.baseConfig).toBe('function');
+        ctx.expect(typeof mod.deepMerge).toBe('function');
       },
     },
     {
-      name: 'injects LSUIElement under mac.extendInfo when extendInfo absent',
+      name: 'baseConfig: applies appId/productName/copyright from consumer config',
       run: (ctx) => {
-        const { injectMacExtendInfo } = require(path.join(__dirname, '..', '..', '..', 'gulp', 'tasks', 'build-config.js'));
-        const input = [
-          'appId: com.test',
-          'mac:',
-          '  category: public.app-category.utilities',
-          '  hardenedRuntime: true',
-          'win:',
-          '  target: nsis',
-          '',
-        ].join('\n');
-
-        const out = injectMacExtendInfo(input, { LSUIElement: true });
-        ctx.expect(out).toContain('extendInfo:');
-        ctx.expect(out).toContain('LSUIElement: true');
-        // Original keys must still be there.
-        ctx.expect(out).toContain('category: public.app-category.utilities');
-        ctx.expect(out).toContain('hardenedRuntime: true');
-        ctx.expect(out).toContain('win:');
+        const { baseConfig } = require(path.join(__dirname, '..', '..', '..', 'gulp', 'tasks', 'build-config.js'));
+        const out = baseConfig({
+          app: { appId: 'com.itwcreativeworks.somiibo', productName: 'Somiibo', copyright: '© Somiibo' },
+        });
+        ctx.expect(out.appId).toBe('com.itwcreativeworks.somiibo');
+        ctx.expect(out.productName).toBe('Somiibo');
+        ctx.expect(out.copyright).toBe('© Somiibo');
       },
     },
     {
-      name: 'merges into an existing mac.extendInfo block',
+      name: 'baseConfig: ships EM defaults for mac/win/linux targets',
       run: (ctx) => {
-        const { injectMacExtendInfo } = require(path.join(__dirname, '..', '..', '..', 'gulp', 'tasks', 'build-config.js'));
-        const input = [
-          'mac:',
-          '  category: x',
-          '  extendInfo:',
-          '    NSCameraUsageDescription: "We need the camera"',
-          '',
-        ].join('\n');
-
-        const out = injectMacExtendInfo(input, { LSUIElement: true });
-        ctx.expect(out).toContain('NSCameraUsageDescription:');
-        ctx.expect(out).toContain('LSUIElement: true');
+        const { baseConfig } = require(path.join(__dirname, '..', '..', '..', 'gulp', 'tasks', 'build-config.js'));
+        const out = baseConfig({});
+        // Mac: dmg + zip, both archs.
+        ctx.expect(out.mac.target.find((t) => t.target === 'dmg')).toBeDefined();
+        ctx.expect(out.mac.target.find((t) => t.target === 'zip')).toBeDefined();
+        ctx.expect(out.mac.target[0].arch).toEqual(['x64', 'arm64']);
+        // Win: nsis x64.
+        ctx.expect(out.win.target[0].target).toBe('nsis');
+        ctx.expect(out.win.target[0].arch).toEqual(['x64']);
+        // Linux: deb + AppImage, both x64. No i386.
+        const linuxTargets = out.linux.target.map((t) => t.target);
+        ctx.expect(linuxTargets).toContain('deb');
+        ctx.expect(linuxTargets).toContain('AppImage');
+        for (const t of out.linux.target) {
+          ctx.expect(t.arch).toEqual(['x64']);
+        }
       },
     },
     {
-      name: 'updates an existing key rather than duplicating it',
+      name: 'baseConfig: notarize is false (notarization runs via afterSign hook)',
       run: (ctx) => {
-        const { injectMacExtendInfo } = require(path.join(__dirname, '..', '..', '..', 'gulp', 'tasks', 'build-config.js'));
-        const input = [
-          'mac:',
-          '  extendInfo:',
-          '    LSUIElement: false',
-          '',
-        ].join('\n');
-
-        const out = injectMacExtendInfo(input, { LSUIElement: true });
-        const matches = out.match(/LSUIElement:/g) || [];
-        ctx.expect(matches.length).toBe(1);
-        ctx.expect(out).toContain('LSUIElement: true');
-        ctx.expect(out).not.toContain('LSUIElement: false');
+        const { baseConfig } = require(path.join(__dirname, '..', '..', '..', 'gulp', 'tasks', 'build-config.js'));
+        const out = baseConfig({});
+        ctx.expect(out.mac.notarize).toBe(false);
+        ctx.expect(out.mac.hardenedRuntime).toBe(true);
       },
     },
     {
-      name: 'idempotent: applying the same injection twice yields the same output',
+      name: 'deepMerge: arrays in override REPLACE (not concat) defaults',
       run: (ctx) => {
-        const { injectMacExtendInfo } = require(path.join(__dirname, '..', '..', '..', 'gulp', 'tasks', 'build-config.js'));
-        const input = [
-          'mac:',
-          '  category: x',
-          '',
-        ].join('\n');
-
-        const once  = injectMacExtendInfo(input, { LSUIElement: true });
-        const twice = injectMacExtendInfo(once,  { LSUIElement: true });
-        ctx.expect(twice).toBe(once);
+        const { deepMerge } = require(path.join(__dirname, '..', '..', '..', 'gulp', 'tasks', 'build-config.js'));
+        const out = deepMerge(
+          { mac: { target: [{ target: 'dmg' }, { target: 'zip' }] } },
+          { mac: { target: [{ target: 'dmg', arch: ['x64'] }] } },
+        );
+        ctx.expect(out.mac.target.length).toBe(1);
+        ctx.expect(out.mac.target[0].arch).toEqual(['x64']);
       },
     },
     {
-      name: 'injectPublish replaces existing publish block in place',
+      name: 'deepMerge: nested objects merge per-key',
       run: (ctx) => {
-        const { injectPublish } = require(path.join(__dirname, '..', '..', '..', 'gulp', 'tasks', 'build-config.js'));
-        const input = [
-          'appId: com.test',
-          '',
-          'publish:',
-          '  provider: github',
-          '  releaseType: release',
-          '',
-        ].join('\n');
-        const out = injectPublish(input, { provider: 'github', owner: 'foo', repo: 'update-server' });
-        ctx.expect(out).toContain('owner: foo');
-        ctx.expect(out).toContain('repo: update-server');
-        // releaseType defaults to 'release' (not draft)
-        ctx.expect(out).toContain('releaseType: release');
-        // Adjacent content preserved
-        ctx.expect(out).toContain('appId: com.test');
-        // Single publish block, not duplicated
-        ctx.expect((out.match(/^publish:/gm) || []).length).toBe(1);
+        const { deepMerge } = require(path.join(__dirname, '..', '..', '..', 'gulp', 'tasks', 'build-config.js'));
+        const out = deepMerge(
+          { mac: { hardenedRuntime: true, gatekeeperAssess: false } },
+          { mac: { gatekeeperAssess: true } },
+        );
+        ctx.expect(out.mac.hardenedRuntime).toBe(true);
+        ctx.expect(out.mac.gatekeeperAssess).toBe(true);
       },
     },
     {
-      name: 'injectPublish appends when no existing block',
+      name: 'deepMerge: top-level keys from override added to base',
       run: (ctx) => {
-        const { injectPublish } = require(path.join(__dirname, '..', '..', '..', 'gulp', 'tasks', 'build-config.js'));
-        const input = 'appId: com.test\n';
-        const out = injectPublish(input, { provider: 'github', owner: 'foo', repo: 'bar' });
-        ctx.expect(out).toContain('publish:');
-        ctx.expect(out).toContain('owner: foo');
-        ctx.expect(out).toContain('repo: bar');
+        const { deepMerge } = require(path.join(__dirname, '..', '..', '..', 'gulp', 'tasks', 'build-config.js'));
+        const out = deepMerge(
+          { appId: 'a', mac: {} },
+          { extraField: 'hello' },
+        );
+        ctx.expect(out.appId).toBe('a');
+        ctx.expect(out.extraField).toBe('hello');
       },
     },
     {
-      name: 'injectAfterSign replaces existing afterSign line',
+      name: 'baseConfig: falls back to safe defaults when consumer config is empty',
       run: (ctx) => {
-        const { injectAfterSign } = require(path.join(__dirname, '..', '..', '..', 'gulp', 'tasks', 'build-config.js'));
-        const input = [
-          'appId: com.test',
-          'afterSign: hooks/notarize.js',
-          'asar: true',
-          '',
-        ].join('\n');
-        const out = injectAfterSign(input, '/abs/path/to/notarize.js');
-        ctx.expect(out).toContain('afterSign: "/abs/path/to/notarize.js"');
-        ctx.expect(out).not.toContain('hooks/notarize.js');
-        ctx.expect(out).toContain('asar: true');
-        ctx.expect((out.match(/^afterSign:/gm) || []).length).toBe(1);
-      },
-    },
-    {
-      name: 'injectAfterSign appends when no existing line',
-      run: (ctx) => {
-        const { injectAfterSign } = require(path.join(__dirname, '..', '..', '..', 'gulp', 'tasks', 'build-config.js'));
-        const input = 'appId: com.test\n';
-        const out = injectAfterSign(input, '/abs/notarize.js');
-        ctx.expect(out).toContain('afterSign: "/abs/notarize.js"');
-      },
-    },
-    {
-      name: 'appends a complete mac block when none exists',
-      run: (ctx) => {
-        const { injectMacExtendInfo } = require(path.join(__dirname, '..', '..', '..', 'gulp', 'tasks', 'build-config.js'));
-        const input = [
-          'appId: com.test',
-          'win:',
-          '  target: nsis',
-          '',
-        ].join('\n');
-
-        const out = injectMacExtendInfo(input, { LSUIElement: true });
-        ctx.expect(out).toContain('mac:');
-        ctx.expect(out).toContain('extendInfo:');
-        ctx.expect(out).toContain('LSUIElement: true');
-        // Original lines are preserved.
-        ctx.expect(out).toContain('appId: com.test');
-        ctx.expect(out).toContain('win:');
+        const { baseConfig } = require(path.join(__dirname, '..', '..', '..', 'gulp', 'tasks', 'build-config.js'));
+        const out = baseConfig({});
+        ctx.expect(out.appId).toBeTruthy();
+        ctx.expect(out.productName).toBeTruthy();
+        ctx.expect(out.directories.output).toBe('release');
       },
     },
   ],

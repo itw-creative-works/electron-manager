@@ -1,56 +1,60 @@
 // Context Menu — file-based right-click menu definition.
 //
-// EM looks for the consumer's `src/context-menu/index.js` and calls it FOR EACH
+// EM looks for the consumer's `src/integrations/context-menu/index.js` and calls it FOR EACH
 // context-menu event with a builder API plus the event's `params`:
 //
-//   // src/context-menu/index.js
+//   // src/integrations/context-menu/index.js
 //   module.exports = ({ manager, menu, params, webContents }) => {
-//     // params has selectionText, isEditable, linkURL, srcURL, mediaType, etc.
-//     if (params.isEditable) {
-//       menu.item({ role: 'cut' });
-//       menu.item({ role: 'copy' });
-//       menu.item({ role: 'paste' });
-//     } else if (params.selectionText) {
-//       menu.item({ role: 'copy' });
-//       menu.item({
-//         label: `Search "${params.selectionText.slice(0, 20)}"`,
-//         click: () => require('electron').shell.openExternal(`https://google.com/search?q=${encodeURIComponent(params.selectionText)}`),
-//       });
-//     }
+//     // Start from EM's default template (undo/redo, cut/copy/paste, link items,
+//     // reload, dev-only inspect):
+//     menu.useDefaults();
 //
-//     if (params.linkURL) {
-//       menu.separator();
-//       menu.item({
-//         label: 'Open Link in Browser',
-//         click: () => require('electron').shell.openExternal(params.linkURL),
-//       });
-//     }
+//     // Mutate by id within this event's items:
+//     menu.remove('toggle-devtools');                        // hide dev tools
+//     menu.insertAfter('copy', { id: 'search-google',
+//       label: `Search "${params.selectionText.slice(0,20)}"`,
+//       click: () => require('electron').shell.openExternal(...) });
 //
-//     // Always add an Inspect option in dev.
-//     if (manager.isDevelopment()) {
-//       menu.separator();
-//       menu.item({ role: 'toggleDevTools' });
-//     }
+//     // Or build entirely from scratch — useDefaults() is optional:
+//     // menu.item({ id: 'copy', role: 'copy' });
+//     // menu.separator();
+//     // menu.item({ id: 'mine', label: 'Custom', click: ... });
 //   };
 //
-// Builder API per event:
+// Builder API (per event):
 //   menu.item(descriptor)
 //   menu.separator()
 //   menu.submenu(label, items)
+//   menu.useDefaults()           — populate with EM's default template based on params
+//   menu.clear()                 — wipe items added so far this event
 //
-// Returning an empty item list suppresses the menu (no popup).
+// Id-path API (per event, same shape as menu/tray):
+//   .find / .has / .update / .remove / .enable / .show / .hide /
+//   .insertBefore / .insertAfter / .appendTo
+//
+// Default template ids (flat — no `context/` prefix; the lib namespace is implicit):
+//   undo, redo                                   — when params.editFlags allow
+//   cut, copy, paste, paste-and-match-style,
+//   select-all                                   — when params.isEditable
+//   copy                                          — when params.selectionText (read-only)
+//   open-link, copy-link                          — when params.linkURL
+//   reload                                        — always (page reload)
+//   inspect, toggle-devtools                      — dev mode only
+//
+// Building no items (calling no menu.* methods) suppresses the popup entirely.
 //
 // EM auto-attaches the handler to every BrowserWindow's webContents that
 // goes through `manager.windows.createNamed()`. To attach manually:
 //   manager.contextMenu.attach(webContents)
 //
-// Config knobs:
-//   contextMenu.enabled (default true)
-//   contextMenu.definition (default 'src/context-menu/index.js')
+// Disabling at runtime: call `manager.contextMenu.disable()`. Idempotent. After
+// disable() the lib stops responding to context-menu events on already-attached
+// webContents — no new menus are shown. No config flag.
 
 const path = require('path');
 const fs   = require('fs');
 const LoggerLite = require('./logger-lite.js');
+const { buildIdApi } = require('./_menu-mixin.js');
 
 const logger = new LoggerLite('context-menu');
 
@@ -68,9 +72,8 @@ const contextMenu = {
 
     contextMenu._manager = manager;
 
-    const enabled = manager?.config?.contextMenu?.enabled !== false;
-    if (!enabled) {
-      logger.log('initialize — disabled via config.contextMenu.enabled=false');
+    if (contextMenu._disabled) {
+      logger.log('initialize — disabled via manager.contextMenu.disable() called pre-init');
       contextMenu._initialized = true;
       return;
     }
@@ -83,8 +86,8 @@ const contextMenu = {
       return;
     }
 
-    const relPath = manager?.config?.contextMenu?.definition || 'src/context-menu/index.js';
-    const absPath = path.isAbsolute(relPath) ? relPath : path.join(process.cwd(), relPath);
+    // Conventional path. No config knob — disable() at runtime if you don't want a context menu.
+    const absPath = path.join(process.cwd(), 'src', 'integrations', 'context-menu', 'index.js');
 
     if (fs.existsSync(absPath)) {
       const loadConsumerFile = require('../utils/load-consumer-file.js');
@@ -121,54 +124,91 @@ const contextMenu = {
 
   // Build the menu for the given (webContents, params) and pop it up.
   _popup(webContents, params) {
+    if (contextMenu._disabled) return;             // disabled at runtime → no menu
     const { Menu } = contextMenu._electron;
     if (!Menu) return;
 
+    const items = contextMenu._buildItemsForEvent(params, webContents);
+    if (items.length === 0) return; // suppress popup
+
+    const template = items.map((item) => contextMenu._resolveItem(item));
+    const builtMenu = Menu.buildFromTemplate(template);
+    builtMenu.popup({ window: webContents.getOwnerBrowserWindow?.() || undefined });
+  },
+
+  // Construct the per-event builder + run the consumer's (or default) definition fn.
+  // Returns the items array (live — but per-event, so post-event mutations are pointless).
+  _buildItemsForEvent(params, webContents) {
     const items = [];
-    const api = {
-      item:      (d)             => { items.push(d); },
-      separator: ()              => { items.push({ type: 'separator' }); },
-      submenu:   (label, subs)   => { items.push({ label, submenu: subs }); },
+
+    const idApi = buildIdApi({
+      getItems: () => items,
+      // Per-event: nothing to re-render. The popup happens after definition returns.
+      render: () => {},
+      logger,
+    });
+
+    const builder = {
+      item:        (d)            => { items.push(d); },
+      separator:   ()             => { items.push({ type: 'separator' }); },
+      submenu:     (label, subs)  => { items.push({ label, submenu: subs }); },
+      useDefaults: ()             => { contextMenu._populateDefaults(items, params); },
+      clear:       ()             => { items.length = 0; },
+      ...idApi,
     };
 
     const fn = contextMenu._definitionFn || contextMenu._defaultFn;
     try {
-      fn({ manager: contextMenu._manager, menu: api, params, webContents });
+      fn({ manager: contextMenu._manager, menu: builder, params, webContents });
     } catch (e) {
       logger.error('context-menu definition fn threw:', e);
-      return;
+      return [];
     }
 
-    if (items.length === 0) {
-      return; // suppress popup
-    }
-
-    const template = items.map((item) => contextMenu._resolveItem(item));
-    const menu = Menu.buildFromTemplate(template);
-    menu.popup({ window: webContents.getOwnerBrowserWindow?.() || undefined });
+    return items;
   },
 
-  // Default behavior when no consumer definition exists — provides sensible
-  // baseline copy/paste/inspect for editable fields, text selection, links.
-  _defaultFn({ manager, menu, params }) {
+  // Populate `items` with EM's default template based on context-menu params.
+  // Used by both `_defaultFn` (when no consumer file) and `menu.useDefaults()` (consumer opt-in).
+  // Item set + visibility gates mirror the legacy electron-manager context-menu behavior:
+  // undo/redo gated on canUndo/canRedo, edit ops gated on params.isEditable, etc.
+  _populateDefaults(items, params) {
+    const m = contextMenu._manager;
+    const flags = params.editFlags || {};
+
+    // Undo / redo — only when applicable. Hidden when canUndo/canRedo is false (matches legacy).
+    if (flags.canUndo) {
+      items.push({ id: 'undo', role: 'undo' });
+    }
+    if (flags.canRedo) {
+      items.push({ id: 'redo', role: 'redo' });
+    }
+    if (flags.canUndo || flags.canRedo) {
+      items.push({ type: 'separator' });
+    }
+
     if (params.isEditable) {
-      menu.item({ role: 'cut',   enabled: params.editFlags?.canCut !== false });
-      menu.item({ role: 'copy',  enabled: params.editFlags?.canCopy !== false });
-      menu.item({ role: 'paste', enabled: params.editFlags?.canPaste !== false });
+      items.push({ id: 'cut',                   role: 'cut',                enabled: flags.canCut   !== false });
+      items.push({ id: 'copy',                  role: 'copy',               enabled: flags.canCopy  !== false });
+      items.push({ id: 'paste',                 role: 'paste',              enabled: flags.canPaste !== false });
+      items.push({ id: 'paste-and-match-style', role: 'pasteAndMatchStyle', enabled: flags.canPaste !== false });
+      items.push({ id: 'select-all',            role: 'selectAll' });
     } else if (params.selectionText) {
-      menu.item({ role: 'copy' });
+      items.push({ id: 'copy', role: 'copy' });
     }
 
     if (params.linkURL) {
-      menu.separator();
-      menu.item({
+      if (items.length > 0) items.push({ type: 'separator' });
+      items.push({
+        id: 'open-link',
         label: 'Open Link in Browser',
         click: () => {
           const { shell } = require('electron');
           shell.openExternal(params.linkURL);
         },
       });
-      menu.item({
+      items.push({
+        id: 'copy-link',
         label: 'Copy Link Address',
         click: () => {
           const { clipboard } = require('electron');
@@ -177,10 +217,20 @@ const contextMenu = {
       });
     }
 
-    if (manager?.isDevelopment?.()) {
-      menu.separator();
-      menu.item({ role: 'toggleDevTools' });
+    // Reload — useful for both dev and prod. Separator only if there's already content above.
+    if (items.length > 0) items.push({ type: 'separator' });
+    items.push({ id: 'reload', role: 'reload' });
+
+    if (m?.isDevelopment?.()) {
+      items.push({ type: 'separator' });
+      items.push({ id: 'inspect',         role: 'inspectElement' });
+      items.push({ id: 'toggle-devtools', role: 'toggleDevTools' });
     }
+  },
+
+  // Default behavior when no consumer definition exists — sensible baseline.
+  _defaultFn({ menu, params }) {
+    menu.useDefaults();
   },
 
   // Same resolver pattern as tray/menu — supports dynamic label/enabled/etc.
@@ -229,20 +279,26 @@ const contextMenu = {
 
   // Test/inspection helpers — build the items list for given params without popping a menu.
   buildItems(params, webContents) {
-    const items = [];
-    const api = {
-      item:      (d)             => { items.push(d); },
-      separator: ()              => { items.push({ type: 'separator' }); },
-      submenu:   (label, subs)   => { items.push({ label, submenu: subs }); },
-    };
-    const fn = contextMenu._definitionFn || contextMenu._defaultFn;
-    fn({ manager: contextMenu._manager, menu: api, params, webContents });
-    return items;
+    return contextMenu._buildItemsForEvent(params || {}, webContents);
   },
 
   hasCustomDefinition() {
     return Boolean(contextMenu._definitionFn);
   },
+
+  // Disable the context menu entirely. Idempotent. Safe pre- or post-init.
+  // After this, _popup() short-circuits — already-attached webContents stop
+  // showing menus on right-click. No way to re-enable; call manager.contextMenu.define()
+  // and clear _disabled if you really need to.
+  disable() {
+    contextMenu._disabled = true;
+    contextMenu._definitionFn = null;
+    if (contextMenu._initialized) {
+      logger.log('disabled at runtime — context-menu events will be ignored');
+    }
+  },
+
+  isDisabled() { return Boolean(contextMenu._disabled); },
 };
 
 module.exports = contextMenu;

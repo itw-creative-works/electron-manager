@@ -24,7 +24,7 @@ function stageConsumer(overrides = {}) {
   jetpack.write(path.join(tmp, 'src', 'preload.js'), '// stub');
 
   const baseConfig = {
-    brand: { id: 'testapp', images: { icon: '' } },
+    brand: { id: 'testapp', name: 'TestApp', images: { icon: '' } },
     app:   { appId: 'com.test.app', productName: 'TestApp' },
   };
   const merged = { ...baseConfig, ...overrides };
@@ -86,13 +86,26 @@ module.exports = {
       },
     },
     {
-      name: 'fails when app.appId is missing',
+      name: 'fails when brand.name is missing',
       run: async (ctx) => {
-        const tmp = stageConsumer({ app: { productName: 'X' } });
+        // brand.name is now required (it drives the productName default).
+        const tmp = stageConsumer({ brand: { id: 'x' } });
         try {
           const err = await runAudit(tmp);
           ctx.expect(err).toBeDefined();
-          ctx.expect(err.message).toMatch(/app\.appId is required/);
+          ctx.expect(err.message).toMatch(/brand\.name is required/);
+        } finally {
+          fs.rmSync(tmp, { recursive: true, force: true });
+        }
+      },
+    },
+    {
+      name: 'passes when only brand.id + brand.name set (appId/productName auto-derive)',
+      run: async (ctx) => {
+        const tmp = stageConsumer({ brand: { id: 'x', name: 'X' } });
+        try {
+          const err = await runAudit(tmp);
+          ctx.expect(err).toBeNull();
         } finally {
           fs.rmSync(tmp, { recursive: true, force: true });
         }
@@ -132,7 +145,7 @@ module.exports = {
       name: 'passes when icon is missing in dev mode (icon is packaging-only)',
       run: async (ctx) => {
         const tmp = stageConsumer({
-          brand: { id: 'testapp', images: { icon: 'src/assets/icons/missing.png' } },
+          brand: { id: 'testapp', name: 'TestApp', images: { icon: 'src/assets/icons/missing.png' } },
           app:   { appId: 'com.test.app', productName: 'TestApp' },
         });
         try {
@@ -178,34 +191,16 @@ module.exports = {
       },
     },
     {
-      name: 'fails on malformed deepLinks.schemes (uppercase / spaces)',
+      name: 'fails on brand.id that is not a valid URL scheme',
       run: async (ctx) => {
+        // brand.id doubles as the deep-link scheme — must be lowercase, alnum/+/-/.
         const tmp = stageConsumer({
-          brand: { id: 'testapp' },
-          app:   { appId: 'com.test.app', productName: 'TestApp' },
-          deepLinks: { schemes: ['MyApp'] },
+          brand: { id: 'My App!', name: 'X' },
         });
         try {
           const err = await runAudit(tmp);
           ctx.expect(err).toBeDefined();
-          ctx.expect(err.message).toMatch(/deepLinks\.schemes/);
-        } finally {
-          fs.rmSync(tmp, { recursive: true, force: true });
-        }
-      },
-    },
-    {
-      name: 'in publish mode, fails when electron-builder.yml is missing',
-      run: async (ctx) => {
-        const tmp = stageConsumer({
-          brand: { id: 'testapp' },
-          app:   { appId: 'com.test.app', productName: 'TestApp' },
-          releases: { enabled: true, repo: 'update-server' },
-        });
-        try {
-          const err = await runAudit(tmp, { EM_IS_PUBLISH: 'true' });
-          ctx.expect(err).toBeDefined();
-          ctx.expect(err.message).toMatch(/electron-builder\.yml.*not found/);
+          ctx.expect(err.message).toMatch(/brand\.id.*URL scheme/);
         } finally {
           fs.rmSync(tmp, { recursive: true, force: true });
         }
@@ -214,14 +209,17 @@ module.exports = {
     {
       name: 'collects multiple errors into one numbered list',
       run: async (ctx) => {
+        // Multiple required fields missing + an invalid mode → must collect all into one
+        // numbered list (not stop at first failure).
         const tmp = stageConsumer({
-          brand: {},
-          app:   {},
+          brand:   {},
+          app:     {},
+          startup: { mode: 'invisible' },
         });
         try {
           const err = await runAudit(tmp);
           ctx.expect(err).toBeDefined();
-          // Expect at least three numbered lines (brand.id, app.appId, app.productName).
+          // brand.id, brand.name, startup.mode = 3 numbered lines.
           ctx.expect(err.message).toMatch(/1\. /);
           ctx.expect(err.message).toMatch(/2\. /);
           ctx.expect(err.message).toMatch(/3\. /);

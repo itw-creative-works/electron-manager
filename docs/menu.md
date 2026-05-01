@@ -1,38 +1,34 @@
 # Application Menu
 
-File-based application menu (the macOS menu bar / Windows + Linux menu). Same builder convention as [tray](tray.md).
+File-based application menu (the macOS menu bar / Windows + Linux menu). Same builder + id-path API as [tray](tray.md) and [context-menu](context-menu.md).
 
 ## Config
 
-```jsonc
-"menu": {
-  "enabled":    true,
-  "definition": "src/menu/index.js"
-}
-```
+No config block. Path is conventional: `src/integrations/menu/index.js`. To opt out, call `manager.menu.disable()` from your main entry.
 
 ## Definition file
 
 ```js
-// src/menu/index.js
+// src/integrations/menu/index.js
 module.exports = ({ manager, menu, defaults }) => {
   // Easiest: start from the platform-aware default template.
   menu.useDefaults();
 
-  // Add a Help menu pointing at the brand URL if one is configured.
-  const url = manager.config?.brand?.url;
-  if (url) {
-    menu.menu('Help', [
-      {
-        label: `Visit ${manager.config?.brand?.name || 'website'}`,
-        click: () => require('electron').shell.openExternal(url),
-      },
-    ]);
-  }
+  // Mutate by id-path:
+  menu.show('main/preferences');                // EM ships this hidden by default
+  menu.update('main/check-for-updates', { label: 'Get Latest Version' });
+  menu.insertAfter('main/check-for-updates', {
+    id: 'main/account', label: 'Account...', click: () => manager.windows.show('account'),
+  });
+  menu.remove('view/reload');
+  menu.hide('main/services');
+
+  // Or add a whole new top-level menu:
+  menu.menu('Tools', [{ id: 'tools/sync', label: 'Sync Now', click: () => {} }]);
 };
 ```
 
-## Builder API
+## Builder API (during definition)
 
 ```js
 menu.menu(label, items)        // add a top-level menu bar entry
@@ -41,42 +37,94 @@ menu.append(item)              // append a top-level descriptor (rare; prefer me
 menu.clear()                   // start over
 ```
 
-`defaults` (third arg to your fn) is the default template as an array — you can splice into it manually if `useDefaults()` isn't enough:
+## Id-path API
+
+Same shape across menu / tray / context-menu. Available **during definition** (on the `menu` builder arg) AND **at runtime** on `manager.menu`:
 
 ```js
-module.exports = ({ menu, defaults }) => {
-  // Splice a Tools menu before the Window menu.
-  const idx = defaults.findIndex((m) => m.label === 'Window');
-  defaults.splice(idx, 0, { label: 'Tools', submenu: [{ role: 'reload' }] });
-  defaults.forEach((entry) => menu.append(entry));
-};
+.find(idPath)                  // live descriptor or null
+.has(idPath)                   // bool
+.update(idPath, patch)         // Object.assign + re-render. returns true if found.
+.remove(idPath)                // splice + re-render. returns true if removed.
+.enable(idPath, bool = true)   // sugar over update({enabled})
+.show(idPath, bool = true)     // sugar over update({visible})
+.hide(idPath)                  // visible:false
+.insertBefore(idPath, item)    // splice in a sibling
+.insertAfter(idPath, item)     // splice in a sibling
+.appendTo(idPath, item)        // push into a submenu (creates submenu if absent)
 ```
 
-## Default template
+Menu ids are **paths** because menus actually nest (`main/check-for-updates`, `view/developer/toggle-devtools`). EM matches by full id field first; if that misses it walks the path treating each segment as the last component of an id.
 
-Platform-aware. On macOS: App menu (About / **Check for Updates...** / Hide / Quit) → File → Edit → View → Window. On win/linux: File → Edit → View → Window → **Help (Check for Updates...)**. Built from Electron's [standard roles](https://www.electronjs.org/docs/latest/api/menu-item#roles).
+## Default template ids
 
-The "Check for Updates..." item has id `em:check-for-updates` — see "Built-in items + IDs" below.
+Every item in EM's default template carries a stable id you can target.
 
-## Built-in items + IDs
+### macOS App menu (the one labeled with your app name)
 
-EM seeds the default template with a few items that the framework hooks into. Each is tagged with an `id` so consumers can find / patch / remove them:
-
-| ID | Where | Purpose |
+| ID | Item | Notes |
 |---|---|---|
-| `em:check-for-updates` | macOS app menu (after About) / win+linux Help menu | Wired to `manager.autoUpdater`. Label updates dynamically based on update status (Checking → Downloading → Restart to Update). Click triggers `checkNow()` or `installNow()` depending on state. |
+| `main/about` | About | |
+| `main/check-for-updates` | Check for Updates… | Auto-updater wired |
+| `main/preferences` | Preferences… | `visible:false` by default — use `menu.show('main/preferences')` |
+| `main/services` | Services submenu | |
+| `main/hide` | Hide | |
+| `main/hide-others` | Hide Others | |
+| `main/show-all` | Show All | |
+| `main/relaunch` | Relaunch | Restarts the app |
+| `main/quit` | Quit | |
 
-Modify or remove these in your `src/menu/index.js`:
+### File menu (win/linux equivalents of the App menu)
 
-```js
-module.exports = ({ manager, menu }) => {
-  menu.useDefaults();
-  // Move the updater item somewhere else, or change its label
-  menu.updateItem('em:check-for-updates', { label: 'Get Latest Version' });
-  // Or remove it entirely (consumer is responsible for triggering updates manually)
-  // menu.removeItem('em:check-for-updates');
-};
-```
+| ID | Item | Notes |
+|---|---|---|
+| `file/close` | Close (mac only) | |
+| `file/preferences` | Preferences… (win/linux) | `visible:false` by default |
+| `file/relaunch` | Relaunch (win/linux) | |
+| `file/quit` | Exit | |
+
+### Cross-platform
+
+| ID | Item |
+|---|---|
+| `edit/undo`, `edit/redo`, `edit/cut`, `edit/copy`, `edit/paste`, `edit/select-all`, `edit/delete` | Edit submenu |
+| `edit/paste-and-match-style` | mac only |
+| `view/reload`, `view/reset-zoom`, `view/zoom-in`, `view/zoom-out`, `view/toggle-fullscreen` | View submenu |
+| `view/developer` | Submenu (dev mode only) |
+| `view/developer/toggle-devtools` | Toggle Developer Tools |
+| `view/developer/inspect-elements` | Inspect Element |
+| `view/developer/force-reload` | Force Reload |
+| `window/minimize`, `window/zoom`, `window/front` | Window submenu (mac) |
+| `window/minimize`, `window/close` | Window submenu (win/linux) |
+
+### Help menu
+
+| ID | Item | Notes |
+|---|---|---|
+| `help/check-for-updates` | Check for Updates… (win/linux only) | Auto-updater wired |
+| `help/website` | "`<brandName>` Home" | Only when `brand.url` configured |
+
+### Development menu (dev mode only)
+
+Top-level, only visible when `manager.isDevelopment()`. Mirrors legacy electron-manager's developer utilities.
+
+| ID | Item | Action |
+|---|---|---|
+| `development/open-exe-folder` | Open exe folder | Reveals `app.getPath('exe')` |
+| `development/open-user-data` | Open user data folder | Reveals `app.getPath('userData')` |
+| `development/open-logs` | Open logs folder | Reveals `app.getPath('logs')` |
+| `development/open-app-config` | Open app config folder | Reveals `app.getPath('appData')` |
+| `development/test-error` | Throw test error | Throws an uncaught error (verifies sentry / error handling) |
+
+## Built-in framework items
+
+`main/check-for-updates` (mac) and `help/check-for-updates` (win/linux) are **wired to `manager.autoUpdater`**:
+- Label updates dynamically: *Checking…*, *Downloading 42%*, *Restart to Update v1.2.3*, *You're up to date*.
+- Click triggers `autoUpdater.checkNow()` or `autoUpdater.installNow()` depending on state.
+
+The same hook also patches the tray's `check-for-updates` item if present, so both UIs stay in lockstep.
+
+Patch or remove either as needed — the auto-updater hook is a no-op when the item is missing.
 
 ## Item descriptors
 
@@ -91,11 +139,13 @@ Same dynamic conveniences as tray:
 manager.menu.refresh()                         // re-evaluate dynamic state
 manager.menu.define(fn)                        // replace the whole definition at runtime
 manager.menu.destroy()                         // tear down (mostly for tests)
+manager.menu.disable()                         // turn the menu off entirely (idempotent)
 
-// By-ID lookup + mutation (works on items at any depth)
-manager.menu.findItem(id)                      // returns the live descriptor or null
-manager.menu.updateItem(id, patch)             // mutate fields (label/enabled/click/...) and re-render. returns true if found.
-manager.menu.removeItem(id)                    // delete from tree. returns true if removed.
+// Id-path API — same as listed above.
+manager.menu.find('main/check-for-updates')
+manager.menu.update('main/check-for-updates', { label: 'Updates...' })
+manager.menu.remove('view/reload')
+manager.menu.insertAfter('main/check-for-updates', { id: 'main/account', label: 'Account...' })
 
 // Inspection
 manager.menu.getItems()                        // top-level descriptors (shallow copy)
@@ -105,4 +155,4 @@ manager.menu.getMenu()                         // the underlying Electron Menu i
 
 ## Default scaffold
 
-`npx mgr setup` ships `src/menu/index.js` calling `useDefaults()` and adding a Help menu pointing at `brand.url`.
+`npx mgr setup` ships `src/integrations/menu/index.js` calling `menu.useDefaults()` plus commented-out examples (show preferences, insertAfter, update, remove, hide, add a Tools menu, appendTo).

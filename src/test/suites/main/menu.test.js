@@ -44,7 +44,10 @@ module.exports = {
         if (process.platform !== 'darwin') {
           ctx.skip('macOS-only behavior');
         }
-        const productName = ctx.manager.config?.app?.productName;
+        // Menu falls back to 'App' when no productName is configured (lib/menu.js).
+        // Match that fallback here so the test works regardless of which fixture
+        // config the test harness ends up loading.
+        const productName = ctx.manager.config?.app?.productName || 'App';
         const items = ctx.manager.menu.getItems();
         ctx.expect(items[0].label).toBe(productName);
       },
@@ -171,51 +174,65 @@ module.exports = {
       },
     },
     {
-      name: 'default template includes em:check-for-updates item',
+      name: 'default template includes platform-appropriate check-for-updates item',
       run: (ctx) => {
         ctx.manager.menu.define(({ menu: m }) => m.useDefaults());
-        const item = ctx.manager.menu.findItem('em:check-for-updates');
+        // Mac → main/check-for-updates; win/linux → help/check-for-updates.
+        const id = process.platform === 'darwin' ? 'main/check-for-updates' : 'help/check-for-updates';
+        const item = ctx.manager.menu.find(id);
         ctx.expect(item).toBeTruthy();
         ctx.expect(typeof item.label).toBe('string');
         ctx.expect(typeof item.click).toBe('function');
       },
     },
     {
-      name: 'findItem returns null for unknown id',
+      name: 'find returns null for unknown id',
       run: (ctx) => {
-        ctx.expect(ctx.manager.menu.findItem('does-not-exist')).toBe(null);
+        ctx.expect(ctx.manager.menu.find('does-not-exist')).toBe(null);
       },
     },
     {
-      name: 'updateItem patches label and re-renders',
+      name: 'update patches label and re-renders',
       run: (ctx) => {
         ctx.manager.menu.define(({ menu: m }) => m.useDefaults());
-        const ok = ctx.manager.menu.updateItem('em:check-for-updates', { label: 'PROBE LABEL' });
+        const id = process.platform === 'darwin' ? 'main/check-for-updates' : 'help/check-for-updates';
+        const ok = ctx.manager.menu.update(id, { label: 'PROBE LABEL' });
         ctx.expect(ok).toBe(true);
-        const item = ctx.manager.menu.findItem('em:check-for-updates');
+        const item = ctx.manager.menu.find(id);
         ctx.expect(item.label).toBe('PROBE LABEL');
       },
     },
     {
-      name: 'updateItem returns false for unknown id',
+      name: 'update returns false for unknown id',
       run: (ctx) => {
-        const ok = ctx.manager.menu.updateItem('nope', { label: 'nope' });
+        const ok = ctx.manager.menu.update('nope', { label: 'nope' });
         ctx.expect(ok).toBe(false);
       },
     },
     {
-      name: 'removeItem deletes item from tree',
+      name: 'remove deletes item from tree',
       run: (ctx) => {
         // Recreate the default template so we have the item to remove (previous test may have mutated).
         ctx.manager.menu.define(({ menu: m }) => m.useDefaults());
-        ctx.expect(ctx.manager.menu.findItem('em:check-for-updates')).toBeTruthy();
+        const id = process.platform === 'darwin' ? 'main/check-for-updates' : 'help/check-for-updates';
+        ctx.expect(ctx.manager.menu.find(id)).toBeTruthy();
 
-        const removed = ctx.manager.menu.removeItem('em:check-for-updates');
+        const removed = ctx.manager.menu.remove(id);
         ctx.expect(removed).toBe(true);
-        ctx.expect(ctx.manager.menu.findItem('em:check-for-updates')).toBe(null);
+        ctx.expect(ctx.manager.menu.find(id)).toBe(null);
 
         // Restore for subsequent tests.
         ctx.manager.menu.define(({ menu: m }) => m.useDefaults());
+      },
+    },
+    {
+      name: 'insertAfter splices in a new sibling by id-path',
+      run: (ctx) => {
+        ctx.manager.menu.define(({ menu: m }) => m.useDefaults());
+        const anchor = process.platform === 'darwin' ? 'main/check-for-updates' : 'help/check-for-updates';
+        const ok = ctx.manager.menu.insertAfter(anchor, { id: 'main/preferences', label: 'PREF PROBE' });
+        ctx.expect(ok).toBe(true);
+        ctx.expect(ctx.manager.menu.find('main/preferences')).toBeTruthy();
       },
     },
     {
@@ -229,7 +246,8 @@ module.exports = {
         };
         ctx.manager.autoUpdater._updateMenuItem();
 
-        const item = ctx.manager.menu.findItem('em:check-for-updates');
+        const id = process.platform === 'darwin' ? 'main/check-for-updates' : 'help/check-for-updates';
+        const item = ctx.manager.menu.find(id);
         ctx.expect(item.label).toContain('Restart to Update');
         ctx.expect(item.label).toContain('5.0.0');
         ctx.expect(item.enabled).toBe(true);
@@ -245,7 +263,8 @@ module.exports = {
         };
         ctx.manager.autoUpdater._updateMenuItem();
 
-        const item = ctx.manager.menu.findItem('em:check-for-updates');
+        const id = process.platform === 'darwin' ? 'main/check-for-updates' : 'help/check-for-updates';
+        const item = ctx.manager.menu.find(id);
         ctx.expect(item.label).toContain('42%');
         ctx.expect(item.enabled).toBe(false);
       },
@@ -263,7 +282,109 @@ module.exports = {
         ctx.expect(typeof received.menu.useDefaults).toBe('function');
         ctx.expect(typeof received.menu.clear).toBe('function');
         ctx.expect(typeof received.menu.append).toBe('function');
+        ctx.expect(typeof received.menu.find).toBe('function');
+        ctx.expect(typeof received.menu.has).toBe('function');
+        ctx.expect(typeof received.menu.insertBefore).toBe('function');
+        ctx.expect(typeof received.menu.appendTo).toBe('function');
         ctx.expect(Array.isArray(received.defaults)).toBe(true);
+      },
+    },
+    {
+      name: 'menu.has reports presence by id-path',
+      run: (ctx) => {
+        ctx.manager.menu.define(({ menu: m }) => m.useDefaults());
+        ctx.expect(ctx.manager.menu.has('edit/copy')).toBe(true);
+        ctx.expect(ctx.manager.menu.has('edit/does-not-exist')).toBe(false);
+      },
+    },
+    {
+      name: 'menu.hide / menu.show toggle visibility by id-path',
+      run: (ctx) => {
+        ctx.manager.menu.define(({ menu: m }) => m.useDefaults());
+        ctx.manager.menu.hide('edit/copy');
+        ctx.expect(ctx.manager.menu.find('edit/copy').visible).toBe(false);
+        ctx.manager.menu.show('edit/copy');
+        ctx.expect(ctx.manager.menu.find('edit/copy').visible).toBe(true);
+      },
+    },
+    {
+      name: 'menu.enable toggles enabled by id-path',
+      run: (ctx) => {
+        ctx.manager.menu.define(({ menu: m }) => m.useDefaults());
+        ctx.manager.menu.enable('edit/copy', false);
+        ctx.expect(ctx.manager.menu.find('edit/copy').enabled).toBe(false);
+        ctx.manager.menu.enable('edit/copy');
+        ctx.expect(ctx.manager.menu.find('edit/copy').enabled).toBe(true);
+      },
+    },
+    {
+      name: 'menu.insertBefore splices into a submenu by id-path',
+      run: (ctx) => {
+        ctx.manager.menu.define(({ menu: m }) => m.useDefaults());
+        const ok = ctx.manager.menu.insertBefore('edit/copy', { id: 'edit/probe', label: 'PROBE' });
+        ctx.expect(ok).toBe(true);
+        // Find the edit submenu and confirm probe is right before copy.
+        const edit = ctx.manager.menu.find('edit');
+        const sub  = edit.submenu;
+        const copyIdx  = sub.findIndex((i) => i.id === 'edit/copy');
+        const probeIdx = sub.findIndex((i) => i.id === 'edit/probe');
+        ctx.expect(probeIdx).toBe(copyIdx - 1);
+      },
+    },
+    {
+      name: 'menu.appendTo pushes into a submenu (creating it if absent)',
+      run: (ctx) => {
+        ctx.manager.menu.define(({ menu: m }) => {
+          m.menu('Tools', []);
+        });
+        const ok = ctx.manager.menu.appendTo('Tools', { id: 'tools/x', label: 'X' });
+        // 'Tools' was added with label='Tools' but no id field — appendTo lookups id-path,
+        // so this should miss. Use a different anchor that has an id.
+        ctx.expect(ok).toBe(false);
+
+        ctx.manager.menu.define(({ menu: m }) => {
+          m.append({ id: 'tools', label: 'Tools', submenu: [] });
+        });
+        const ok2 = ctx.manager.menu.appendTo('tools', { id: 'tools/x', label: 'X' });
+        ctx.expect(ok2).toBe(true);
+        ctx.expect(ctx.manager.menu.find('tools').submenu[0].id).toBe('tools/x');
+      },
+    },
+    {
+      name: 'menu deep-path lookup walks segments (view/developer/toggle-devtools)',
+      run: (ctx) => {
+        // Force isDevelopment() so the dev menu renders.
+        const orig = ctx.manager.isDevelopment;
+        ctx.manager.isDevelopment = () => true;
+        try {
+          ctx.manager.menu.define(({ menu: m }) => m.useDefaults());
+          ctx.expect(ctx.manager.menu.has('view/developer')).toBe(true);
+          ctx.expect(ctx.manager.menu.has('view/developer/toggle-devtools')).toBe(true);
+        } finally {
+          ctx.manager.isDevelopment = orig;
+        }
+      },
+    },
+    {
+      name: 'menu development top-level appears only in dev mode',
+      run: (ctx) => {
+        const orig = ctx.manager.isDevelopment;
+        ctx.manager.isDevelopment = () => true;
+        try {
+          ctx.manager.menu.define(({ menu: m }) => m.useDefaults());
+          ctx.expect(ctx.manager.menu.has('development')).toBe(true);
+          ctx.expect(ctx.manager.menu.has('development/open-logs')).toBe(true);
+        } finally {
+          ctx.manager.isDevelopment = orig;
+        }
+
+        ctx.manager.isDevelopment = () => false;
+        try {
+          ctx.manager.menu.define(({ menu: m }) => m.useDefaults());
+          ctx.expect(ctx.manager.menu.has('development')).toBe(false);
+        } finally {
+          ctx.manager.isDevelopment = orig;
+        }
       },
     },
   ],

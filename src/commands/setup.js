@@ -29,6 +29,20 @@ module.exports = async function (options) {
   options.checkLocality = force(options.checkLocality || true, 'boolean');
   options.pushSecrets = options.pushSecrets !== false; // default true
 
+  // Quick mode (mirrors UJM's UJ_QUICK pattern): skip every network-bound / GitHub-talking /
+  // cert-checking step. Keep only the local-only, idempotent, fast steps (scaffold, projectScripts,
+  // .nvmrc write, locality check). Used for inner-loop dev once a full setup has succeeded once.
+  // Triggered by `--quick` / `-q` CLI flag (or `EM_QUICK=true` env), plumbed via Manager.isQuickMode().
+  if (options.quick === true || options.q === true || Manager.isQuickMode()) {
+    logger.log('Quick mode: Skipping slow setup operations');
+    options.checkManager          = false;
+    options.checkNode             = false;
+    options.checkPeerDependencies = false;
+    options.validateCerts         = false;
+    options.provisionRepos        = false;
+    options.pushSecrets           = false;
+  }
+
   logger.log(`Welcome to ${package.name} v${package.version}!`);
   logger.log('options', options);
 
@@ -255,6 +269,15 @@ async function copyDefaults() {
   const { mergeLineBasedFiles } = require('../utils/merge-line-files.js');
   const MERGEABLE_BASENAMES = new Set(['.env', '.gitignore']);
 
+  // Template substitution context — `{{ versions.node }}` etc. resolved at scaffold time.
+  // Source of truth is EM's own package.json `engines` block. EM auto-syncs `engines.node`
+  // to whatever Electron's bundled Node version is via scripts/sync-nvmrc.js, so consumers'
+  // workflows + .nvmrc track Electron-Node automatically without manual bumps.
+  const templateContext = { versions: package.engines || {} };
+  // Files we run substitution on. Anything else copies byte-for-byte.
+  const TEMPLATABLE_EXTS = new Set(['.yml', '.yaml']);
+  const TEMPLATABLE_BASENAMES = new Set(['.nvmrc']);
+
   const files = jetpack.find(defaultsDir, { matching: '**/*', recursive: true, files: true, directories: false });
 
   for (const src of files) {
@@ -263,6 +286,8 @@ async function copyDefaults() {
     const target = rel.split(path.sep).map((part) => part.startsWith('_.') ? part.slice(1) : part).join(path.sep);
     const dest = path.join(rootPathProject, target);
     const basename = path.basename(target);
+    const ext      = path.extname(target).toLowerCase();
+    const templatable = TEMPLATABLE_EXTS.has(ext) || TEMPLATABLE_BASENAMES.has(basename);
 
     if (jetpack.exists(dest)) {
       // Line-based files (.env, .gitignore) merge instead of skipping so the framework's
@@ -270,7 +295,7 @@ async function copyDefaults() {
       if (MERGEABLE_BASENAMES.has(basename)) {
         try {
           const existing = jetpack.read(dest, 'utf8');
-          const incoming = jetpack.read(src,  'utf8');
+          const incoming = renderTemplate(jetpack.read(src, 'utf8'), templateContext);
           const merged   = mergeLineBasedFiles(existing, incoming, basename);
           if (merged !== existing) {
             jetpack.write(dest, merged);
@@ -279,13 +304,45 @@ async function copyDefaults() {
         } catch (e) {
           logger.warn(`Failed to merge ${target}: ${e.message}`);
         }
+        continue;
       }
+
+      // Templatable files (workflow YAMLs, .nvmrc) are EM-owned: always re-render so they
+      // track changes in EM's defaults (e.g. engines.node bumping when Electron updates).
+      // Skip the write if the rendered contents are byte-identical to what's already there.
+      if (templatable) {
+        const incoming = renderTemplate(jetpack.read(src, 'utf8'), templateContext);
+        const existing = jetpack.read(dest, 'utf8');
+        if (incoming !== existing) {
+          jetpack.write(dest, incoming);
+          logger.log(`Re-rendered template → ${target}`);
+        }
+        continue;
+      }
+
+      // Non-mergeable, non-templatable, already exists → preserve consumer's version.
       continue;
     }
 
-    jetpack.copy(src, dest);
+    if (templatable) {
+      const contents = renderTemplate(jetpack.read(src, 'utf8'), templateContext);
+      jetpack.write(dest, contents);
+    } else {
+      jetpack.copy(src, dest);
+    }
     logger.log(`Copied default → ${target}`);
   }
+}
+
+// Minimal `{{ key.path }}` substitution — same syntax as UJM, no dependencies.
+// Whitespace inside the braces is tolerated. Unknown keys render as the original
+// `{{ ... }}` string (no error) so non-template content with literal braces survives.
+function renderTemplate(content, context) {
+  if (typeof content !== 'string' || !content.includes('{{')) return content;
+  return content.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (full, keyPath) => {
+    const value = keyPath.split('.').reduce((acc, k) => (acc == null ? acc : acc[k]), context);
+    return (value === undefined || value === null) ? full : String(value);
+  });
 }
 
 function checkLocality() {

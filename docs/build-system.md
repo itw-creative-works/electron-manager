@@ -94,7 +94,7 @@ Environment variables (set by `npm run build` / `npm run release`):
 
 ## Windows code signing
 
-Strategy-pluggable via `EM_WIN_SIGN_STRATEGY` (or `signing.windows.strategy` in config):
+Strategy-pluggable via `signing.windows.strategy` (or `signing.windows.strategy` in config):
 
 | Strategy | Where signing runs | When to use |
 |---|---|---|
@@ -102,7 +102,7 @@ Strategy-pluggable via `EM_WIN_SIGN_STRATEGY` (or `signing.windows.strategy` in 
 | `cloud` | `windows-latest` runner shells out to a cloud signing CLI (Azure Trusted Signing / SSL.com / DigiCert KeyLocker) | Future migration target |
 | `local` | Developer's Windows machine after CI uploads unsigned artifact | Fallback when no runner is available |
 
-The `gulp/build-config` task and `electron-builder.yml`'s `win.sign` hook both honor `EM_WIN_SIGN_STRATEGY` so the same code path drives all three. Provider modules live in `src/lib/sign-providers/{ev,azure,sslcom,digicert}.js` (Pass 3).
+The `gulp/build-config` task and `electron-builder.yml`'s `win.sign` hook both honor `signing.windows.strategy` so the same code path drives all three. Provider modules live in `src/lib/sign-providers/{ev,azure,sslcom,digicert}.js` (Pass 3).
 
 ## GitHub Actions
 

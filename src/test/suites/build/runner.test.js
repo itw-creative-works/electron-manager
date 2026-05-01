@@ -263,5 +263,15 @@ module.exports = {
         ctx.expect(src).toContain('null (killed)');                       // surfaces kill status meaningfully
       },
     },
+    {
+      name: 'config.cmd invoked via cmd.exe /c (not shell:true) to avoid Node DEP0190',
+      run: (ctx) => {
+        const fs = require('fs');
+        const src = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'commands', 'runner.js'), 'utf8');
+        ctx.expect(src).toContain("spawnSync('cmd.exe', ['/c', configCmd");
+        // shell:true is gone from registerOrg's spawnSync (other places may still use it)
+        ctx.expect(src).not.toMatch(/spawnSync\(configCmd[^)]*shell:\s*true/s);
+      },
+    },
   ],
 };

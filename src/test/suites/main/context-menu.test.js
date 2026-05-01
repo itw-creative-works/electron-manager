@@ -20,11 +20,11 @@ module.exports = {
       },
     },
     {
-      name: 'definition presence reflects whether src/context-menu/index.js exists',
+      name: 'definition presence reflects whether src/integrations/context-menu/index.js exists',
       run: (ctx) => {
         const path = require('path');
         const fs   = require('fs');
-        const consumerFile = path.join(process.cwd(), 'src', 'context-menu', 'index.js');
+        const consumerFile = path.join(process.cwd(), 'src', 'integrations', 'context-menu', 'index.js');
         const hasConsumer = fs.existsSync(consumerFile);
         ctx.expect(ctx.manager.contextMenu.hasCustomDefinition()).toBe(hasConsumer);
       },
@@ -67,14 +67,16 @@ module.exports = {
       },
     },
     {
-      name: 'default fn: empty params → no items, popup suppressed',
+      name: 'default fn: empty params → only the always-on items (reload)',
       run: (ctx) => {
-        // Force isDevelopment false so the dev-only inspect items don't appear.
+        // Force isDevelopment false so dev-only items don't appear.
         const orig = ctx.manager.isDevelopment;
         ctx.manager.isDevelopment = () => false;
         try {
           const items = ctx.manager.contextMenu.buildItems({});
-          ctx.expect(items.length).toBe(0);
+          // With no editFlags, no selection, no link → only `reload` is always-on.
+          const ids = items.filter((i) => i.id).map((i) => i.id);
+          ctx.expect(ids).toEqual(['reload']);
         } finally {
           ctx.manager.isDevelopment = orig;
         }
@@ -177,6 +179,176 @@ module.exports = {
         ctx.manager.contextMenu.attach(mockWC); // second call should be a no-op
         ctx.expect(calls.length).toBe(1);
         ctx.expect(calls[0].evt).toBe('context-menu');
+      },
+    },
+    {
+      name: 'menu.useDefaults() ships id-tagged items (cut, copy, paste, ...)',
+      run: (ctx) => {
+        ctx.manager.contextMenu.define(({ menu }) => { menu.useDefaults(); });
+        const items = ctx.manager.contextMenu.buildItems({
+          isEditable: true,
+          editFlags: { canCut: true, canCopy: true, canPaste: true },
+        });
+        const ids = items.filter((i) => i.id).map((i) => i.id);
+        ctx.expect(ids).toContain('cut');
+        ctx.expect(ids).toContain('copy');
+        ctx.expect(ids).toContain('paste');
+      },
+    },
+    {
+      name: 'menu.remove() drops an item by id within the event',
+      run: (ctx) => {
+        ctx.manager.contextMenu.define(({ menu }) => {
+          menu.useDefaults();
+          menu.remove('paste');
+        });
+        const items = ctx.manager.contextMenu.buildItems({
+          isEditable: true,
+          editFlags: { canCut: true, canCopy: true, canPaste: true },
+        });
+        const ids = items.filter((i) => i.id).map((i) => i.id);
+        ctx.expect(ids).toContain('cut');
+        ctx.expect(ids).toContain('copy');
+        ctx.expect(ids).not.toContain('paste');
+      },
+    },
+    {
+      name: 'menu.insertAfter splices a new item by id',
+      run: (ctx) => {
+        ctx.manager.contextMenu.define(({ menu }) => {
+          menu.useDefaults();
+          menu.insertAfter('copy', { id: 'search', label: 'Search...' });
+        });
+        const items = ctx.manager.contextMenu.buildItems({
+          isEditable: false,
+          selectionText: 'foo',
+        });
+        const ids = items.filter((i) => i.id).map((i) => i.id);
+        const copyIdx   = ids.indexOf('copy');
+        const searchIdx = ids.indexOf('search');
+        ctx.expect(copyIdx >= 0).toBe(true);
+        ctx.expect(searchIdx).toBe(copyIdx + 1);
+      },
+    },
+    {
+      name: 'menu.update() patches a default item before popup',
+      run: (ctx) => {
+        ctx.manager.contextMenu.define(({ menu }) => {
+          menu.useDefaults();
+          menu.update('copy', { label: 'CUSTOM COPY' });
+        });
+        const items = ctx.manager.contextMenu.buildItems({
+          isEditable: false,
+          selectionText: 'foo',
+        });
+        const copy = items.find((i) => i.id === 'copy');
+        ctx.expect(copy).toBeTruthy();
+        ctx.expect(copy.label).toBe('CUSTOM COPY');
+      },
+    },
+    {
+      name: 'defaults: undo/redo appear when canUndo/canRedo flags set',
+      run: (ctx) => {
+        const items = ctx.manager.contextMenu.buildItems({
+          isEditable: true,
+          editFlags: { canUndo: true, canRedo: true, canCut: true, canCopy: true, canPaste: true },
+        });
+        const ids = items.filter((i) => i.id).map((i) => i.id);
+        ctx.expect(ids).toContain('undo');
+        ctx.expect(ids).toContain('redo');
+      },
+    },
+    {
+      name: 'defaults: paste-and-match-style appears in editable contexts',
+      run: (ctx) => {
+        const items = ctx.manager.contextMenu.buildItems({
+          isEditable: true,
+          editFlags: { canCut: true, canCopy: true, canPaste: true },
+        });
+        const ids = items.filter((i) => i.id).map((i) => i.id);
+        ctx.expect(ids).toContain('paste-and-match-style');
+      },
+    },
+    {
+      name: 'defaults: reload always present',
+      run: (ctx) => {
+        const orig = ctx.manager.isDevelopment;
+        ctx.manager.isDevelopment = () => false;
+        try {
+          const items = ctx.manager.contextMenu.buildItems({ selectionText: 'hi' });
+          const ids = items.filter((i) => i.id).map((i) => i.id);
+          ctx.expect(ids).toContain('reload');
+        } finally {
+          ctx.manager.isDevelopment = orig;
+        }
+      },
+    },
+    {
+      name: 'menu.find / menu.has work within event builder',
+      run: (ctx) => {
+        let foundCopy, hasCut, hasNope;
+        ctx.manager.contextMenu.define(({ menu }) => {
+          menu.useDefaults();
+          foundCopy = menu.find('copy');
+          hasCut    = menu.has('cut');
+          hasNope   = menu.has('does-not-exist');
+        });
+        ctx.manager.contextMenu.buildItems({
+          isEditable: true,
+          editFlags: { canCut: true, canCopy: true, canPaste: true },
+        });
+        ctx.expect(foundCopy).toBeTruthy();
+        ctx.expect(hasCut).toBe(true);
+        ctx.expect(hasNope).toBe(false);
+      },
+    },
+    {
+      name: 'menu.insertBefore splices a new item by id',
+      run: (ctx) => {
+        ctx.manager.contextMenu.define(({ menu }) => {
+          menu.useDefaults();
+          menu.insertBefore('copy', { id: 'pre-copy', label: 'BEFORE COPY' });
+        });
+        const items = ctx.manager.contextMenu.buildItems({
+          isEditable: false,
+          selectionText: 'foo',
+        });
+        const ids = items.filter((i) => i.id).map((i) => i.id);
+        const copyIdx    = ids.indexOf('copy');
+        const preCopyIdx = ids.indexOf('pre-copy');
+        ctx.expect(preCopyIdx).toBe(copyIdx - 1);
+      },
+    },
+    {
+      name: 'menu.hide / menu.enable / menu.show within event',
+      run: (ctx) => {
+        ctx.manager.contextMenu.define(({ menu }) => {
+          menu.useDefaults();
+          menu.hide('copy');
+          menu.enable('paste', false);
+        });
+        const items = ctx.manager.contextMenu.buildItems({
+          isEditable: true,
+          editFlags: { canCut: true, canCopy: true, canPaste: true },
+        });
+        const copy  = items.find((i) => i.id === 'copy');
+        const paste = items.find((i) => i.id === 'paste');
+        ctx.expect(copy.visible).toBe(false);
+        ctx.expect(paste.enabled).toBe(false);
+      },
+    },
+    {
+      name: 'menu.appendTo pushes into a submenu created via menu.submenu(...)',
+      run: (ctx) => {
+        ctx.manager.contextMenu.define(({ menu }) => {
+          // Build a parent submenu with an id.
+          menu.item({ id: 'more', label: 'More', submenu: [] });
+          menu.appendTo('more', { id: 'extra', label: 'Extra' });
+        });
+        const items = ctx.manager.contextMenu.buildItems({});
+        const more = items.find((i) => i.id === 'more');
+        ctx.expect(more).toBeTruthy();
+        ctx.expect(more.submenu[0].id).toBe('extra');
       },
     },
   ],

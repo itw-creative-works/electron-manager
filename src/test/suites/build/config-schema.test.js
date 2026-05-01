@@ -48,11 +48,15 @@ module.exports = {
       },
     },
     {
-      name: 'has app block with appId + productName',
+      name: 'has app block (appId + productName may be null — derived from brand)',
       run: (ctx) => {
+        // appId and productName are derived from brand.id / brand.name at config-load
+        // time (Manager.getConfig). The raw scaffold leaves them null on purpose so the
+        // user only sets brand.{id,name} once. The `app` block itself must exist for
+        // copyright + any future explicit overrides.
         ctx.expect(ctx.state.cfg.app).toBeTruthy();
-        ctx.expect(ctx.state.cfg.app.appId).toBeTruthy();
-        ctx.expect(ctx.state.cfg.app.productName).toBeTruthy();
+        ctx.expect('appId' in ctx.state.cfg.app).toBe(true);
+        ctx.expect('productName' in ctx.state.cfg.app).toBe(true);
       },
     },
     {
@@ -63,20 +67,15 @@ module.exports = {
       },
     },
     {
-      name: 'tray / menu / context-menu point to JS definition files',
+      name: 'tray / menu / context-menu have NO config block (paths are conventional)',
       run: (ctx) => {
-        // Tray, menu, and context-menu are defined in JS files for full power.
-        // Config only carries the enable knob and the path to the definition.
-        ctx.expect(ctx.state.cfg.tray).toBeTruthy();
-        ctx.expect(typeof ctx.state.cfg.tray.enabled).toBe('boolean');
-        ctx.expect(typeof ctx.state.cfg.tray.definition).toBe('string');
-        ctx.expect(ctx.state.cfg.tray.items).toBeUndefined();
-
-        ctx.expect(typeof ctx.state.cfg.menu.enabled).toBe('boolean');
-        ctx.expect(typeof ctx.state.cfg.menu.definition).toBe('string');
-
-        ctx.expect(typeof ctx.state.cfg.contextMenu.enabled).toBe('boolean');
-        ctx.expect(typeof ctx.state.cfg.contextMenu.definition).toBe('string');
+        // Tray, menu, and context-menu use fixed conventional paths
+        // (src/integrations/{tray,menu,context-menu}/index.js). Disabling is a runtime
+        // call (manager.tray.disable() etc.), not a config flag. Config carries no entry
+        // for these in v1 — guard against re-introducing one accidentally.
+        ctx.expect(ctx.state.cfg.tray).toBeUndefined();
+        ctx.expect(ctx.state.cfg.menu).toBeUndefined();
+        ctx.expect(ctx.state.cfg.contextMenu).toBeUndefined();
       },
     },
     {
@@ -96,17 +95,11 @@ module.exports = {
       },
     },
     {
-      name: 'has deepLinks.schemes array',
+      name: 'has NO deepLinks config block (scheme = brand.id, routes are runtime)',
       run: (ctx) => {
-        ctx.expect(ctx.state.cfg.deepLinks).toBeTruthy();
-        ctx.expect(Array.isArray(ctx.state.cfg.deepLinks.schemes)).toBeTruthy();
-      },
-    },
-    {
-      name: 'has em block with liveReloadPort',
-      run: (ctx) => {
-        ctx.expect(ctx.state.cfg.em).toBeTruthy();
-        ctx.expect(typeof ctx.state.cfg.em.liveReloadPort).toBe('number');
+        // deep-link scheme is auto-derived from brand.id; routes register at runtime via
+        // manager.deepLink.on(). Guard against re-introducing a config block.
+        ctx.expect(ctx.state.cfg.deepLinks).toBeUndefined();
       },
     },
   ],

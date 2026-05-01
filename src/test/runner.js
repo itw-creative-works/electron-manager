@@ -29,6 +29,7 @@ const chalk = require('chalk').default;
 
 const expect = require('./assert.js');
 const { runElectronTests } = require('./runners/electron.js');
+const { runBootTests }     = require('./runners/boot.js');
 
 class SkipError extends Error {
   constructor(reason) { super(reason); this.name = 'SkipError'; }
@@ -71,7 +72,7 @@ async function run(options = {}) {
 
 async function runSource(files, source, options, results) {
   // Partition by layer (peek at module.exports without invoking run functions).
-  const byLayer = { build: [], main: [], renderer: [] };
+  const byLayer = { build: [], main: [], renderer: [], boot: [] };
   for (const file of files) {
     const layer = peekLayer(file) || 'build';
     if (byLayer[layer]) byLayer[layer].push(file);
@@ -104,6 +105,69 @@ async function runSource(files, source, options, results) {
     results.failed  += counts.failed;
     results.skipped += counts.skipped;
   }
+
+  // Boot layer — spawn the consumer's actual built bundle and inspect the live manager.
+  // Skipped when running framework tests (no consumer to boot).
+  if ((options.layer === 'all' || options.layer === 'boot') && byLayer.boot.length > 0) {
+    if (source !== 'project') {
+      // Framework's own boot tests can run too, but only when there's a built bundle to test.
+      // Fall through and let the runner skip if dist/main.bundle.js is missing.
+    }
+    await runBootLayer(byLayer.boot, source, options, results);
+  }
+}
+
+async function runBootLayer(files, source, options, results) {
+  // Aggregate every boot test (whether standalone or inside a suite) into one flat list.
+  // The boot harness runs them sequentially in a single Electron process to keep startup
+  // cost amortized. State doesn't carry across boot tests — each runs against a single
+  // shared `manager` from the consumer's actual main bundle.
+  const tests = [];
+
+  for (const file of files) {
+    let mod;
+    try {
+      delete require.cache[require.resolve(file)];
+      mod = require(file);
+    } catch (e) {
+      const rel = relativizePath(file, source);
+      console.log(chalk.red(`    ✗ ${rel}`));
+      console.log(chalk.red(`      Failed to load: ${e.message}`));
+      results.failed += 1;
+      continue;
+    }
+
+    if (Array.isArray(mod))                      mod = { type: 'group', tests: mod };
+    if (Array.isArray(mod.tests))                {/* multi-test */ }
+    else if (typeof mod.inspect === 'function')  mod = { tests: [mod] };
+
+    const baseDescription = mod.description || relativizePath(file, source);
+
+    for (const t of (mod.tests || [])) {
+      if (typeof t.inspect !== 'function') continue;
+      if (options.filter && !(t.description || baseDescription).includes(options.filter)) continue;
+      tests.push({
+        description: t.description || baseDescription,
+        timeout:     t.timeout || mod.timeout || 15000,
+        inspect:     t.inspect,
+      });
+    }
+  }
+
+  if (tests.length === 0) return;
+
+  console.log(chalk.cyan('    ⤷ boot tests (consumer bundle)'));
+
+  const projectRoot = process.cwd();
+  const emDistRoot  = __dirname; // dist/test/runner.js → dist/test
+  const counts = await runBootTests({
+    tests,
+    projectRoot,
+    emDistRoot: path.resolve(emDistRoot, '..'),
+  });
+  results.passed  += counts.passed;
+  results.failed  += counts.failed;
+  results.skipped += counts.skipped;
 }
 
 function peekLayer(file) {

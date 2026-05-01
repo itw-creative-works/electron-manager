@@ -30,36 +30,47 @@ module.exports = {
       },
     },
     {
-      name: 'stableName: macOS dmg variants',
+      name: 'stableName: macOS dmg — x64 keeps legacy URL, arm64 gets suffix',
       run: (ctx) => {
         const { stableName } = require(path.join(__dirname, '..', '..', '..', 'gulp', 'tasks', 'mirror-downloads.js'));
-        ctx.expect(stableName('MyApp-1.0.1.dmg', 'MyApp')).toBe('MyApp-mac-x64.dmg');
-        ctx.expect(stableName('MyApp-1.0.1-arm64.dmg', 'MyApp')).toBe('MyApp-mac-arm64.dmg');
+        // Legacy URL for x64: `Somiibo.dmg` (no platform/arch in name).
+        ctx.expect(stableName('Somiibo-1.0.1.dmg', 'Somiibo')).toBe('Somiibo.dmg');
+        ctx.expect(stableName('Somiibo-1.0.1-arm64.dmg', 'Somiibo')).toBe('Somiibo-arm64.dmg');
       },
     },
     {
-      name: 'stableName: macOS zip variants',
+      name: 'stableName: macOS auto-updater zip',
       run: (ctx) => {
         const { stableName } = require(path.join(__dirname, '..', '..', '..', 'gulp', 'tasks', 'mirror-downloads.js'));
-        ctx.expect(stableName('MyApp-1.0.1-mac.zip', 'MyApp')).toBe('MyApp-mac-x64.zip');
-        ctx.expect(stableName('MyApp-1.0.1-arm64-mac.zip', 'MyApp')).toBe('MyApp-mac-arm64.zip');
+        // Always include `mac` in zip name (disambiguates from any future Windows zip target).
+        ctx.expect(stableName('Somiibo-1.0.1-mac.zip', 'Somiibo')).toBe('Somiibo-mac.zip');
+        ctx.expect(stableName('Somiibo-1.0.1-arm64-mac.zip', 'Somiibo')).toBe('Somiibo-mac-arm64.zip');
       },
     },
     {
-      name: 'stableName: windows installer',
+      name: 'stableName: windows installer keeps legacy `-Setup.exe` form',
       run: (ctx) => {
         const { stableName } = require(path.join(__dirname, '..', '..', '..', 'gulp', 'tasks', 'mirror-downloads.js'));
-        ctx.expect(stableName('MyApp-Setup-1.0.1.exe', 'MyApp')).toBe('MyApp-win-x64.exe');
-        ctx.expect(stableName('MyApp-1.0.1-arm64.exe', 'MyApp')).toBe('MyApp-win-arm64.exe');
+        // Legacy URL: Somiibo-Setup.exe.
+        ctx.expect(stableName('Somiibo-Setup-1.0.1.exe', 'Somiibo')).toBe('Somiibo-Setup.exe');
+        ctx.expect(stableName('Somiibo-1.0.1.exe', 'Somiibo')).toBe('Somiibo-Setup.exe');
+        ctx.expect(stableName('Somiibo-1.0.1-arm64.exe', 'Somiibo')).toBe('Somiibo-Setup-arm64.exe');
       },
     },
     {
-      name: 'stableName: linux variants',
+      name: 'stableName: linux deb uses legacy `lowercase_arch.deb` convention',
       run: (ctx) => {
         const { stableName } = require(path.join(__dirname, '..', '..', '..', 'gulp', 'tasks', 'mirror-downloads.js'));
-        ctx.expect(stableName('MyApp-1.0.1.AppImage', 'MyApp')).toBe('MyApp-linux-x64.appimage');
-        ctx.expect(stableName('MyApp-1.0.1-arm64.AppImage', 'MyApp')).toBe('MyApp-linux-arm64.appimage');
-        ctx.expect(stableName('MyApp_1.0.1_amd64.deb', 'MyApp')).toBe('MyApp-linux-x64.deb');
+        // Legacy URL: somiibo_amd64.deb (lowercase product, debian arch naming).
+        ctx.expect(stableName('Somiibo_1.0.1_amd64.deb', 'Somiibo')).toBe('somiibo_amd64.deb');
+      },
+    },
+    {
+      name: 'stableName: linux AppImage keeps `Product.AppImage` form (case preserved)',
+      run: (ctx) => {
+        const { stableName } = require(path.join(__dirname, '..', '..', '..', 'gulp', 'tasks', 'mirror-downloads.js'));
+        ctx.expect(stableName('Somiibo-1.0.1.AppImage', 'Somiibo')).toBe('Somiibo.AppImage');
+        ctx.expect(stableName('Somiibo-1.0.1-arm64.AppImage', 'Somiibo')).toBe('Somiibo-arm64.AppImage');
       },
     },
     {
@@ -74,7 +85,7 @@ module.exports = {
       name: 'stableName: sanitizes product name (spaces, weird chars)',
       run: (ctx) => {
         const { stableName } = require(path.join(__dirname, '..', '..', '..', 'gulp', 'tasks', 'mirror-downloads.js'));
-        ctx.expect(stableName('MyApp-1.0.1.dmg', 'My App!')).toBe('MyApp-mac-x64.dmg');
+        ctx.expect(stableName('MyApp-1.0.1.dmg', 'My App!')).toBe('MyApp.dmg');
       },
     },
   ],

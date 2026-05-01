@@ -6,10 +6,19 @@ Controls how the app launches: window-shown vs window-hidden vs tray-only backgr
 
 ```jsonc
 "startup": {
-  "mode":        "normal",     // 'normal' | 'hidden' | 'tray-only'
-  "openAtLogin": false
+  "mode": "normal",                // user-launch behavior: 'normal' | 'hidden' | 'tray-only'
+  "openAtLogin": {
+    "enabled": true,               // OS auto-launches the app at login
+    "mode":    "hidden"            // login-launch behavior (defaults to 'hidden')
+  }
 }
 ```
+
+`mode` is what happens when **the user launches the app directly** (clicks the dock icon / Start menu / etc.).
+
+`openAtLogin.mode` is what happens when **the OS auto-launches the app at login**. It applies *only* when the launch is detected as a login-launch (macOS: `wasOpenedAtLogin` flag; Windows/Linux: presence of the `--em-launched-at-login` arg EM passes when registering the login item).
+
+The default behavior — `mode: 'normal'` + `openAtLogin: { enabled: true, mode: 'hidden' }` — means: the app auto-starts at login but stays out of the way until the user opens it themselves. User-direct launches show the main window like any normal app.
 
 ## Modes
 
@@ -34,13 +43,16 @@ You can still show windows in `tray-only` mode — they appear, work normally, a
 ## Public API on `manager.startup`
 
 ```js
-manager.startup.getMode()           // 'normal' | 'hidden' | 'tray-only'
-manager.startup.isLaunchHidden()    // true for hidden + tray-only
-manager.startup.isTrayOnly()        // true only for tray-only
-manager.startup.applyEarly()        // calls app.dock.hide() if needed (called by main.js boot)
+manager.startup.getMode()                  // user-launch mode: 'normal' | 'hidden' | 'tray-only'
+manager.startup.isLaunchHidden()           // true if THIS launch should not auto-show a window
+                                           //   (combines user-launch mode + login-launch detection)
+manager.startup.isTrayOnly()               // true only when user-launch mode is 'tray-only'
+manager.startup.wasLaunchedAtLogin()       // true if the OS auto-launched us at login
+manager.startup.applyEarly()               // calls app.dock.hide() if needed (called by main.js boot)
 
-manager.startup.setOpenAtLogin(true)   // sync with OS login items
-manager.startup.isOpenAtLogin()        // read live OS state
+manager.startup.setOpenAtLogin(true)                            // back-compat boolean form
+manager.startup.setOpenAtLogin({ enabled: true, mode: 'hidden' }) // object form
+manager.startup.isOpenAtLogin()            // read live OS state
 ```
 
 ## Boot order

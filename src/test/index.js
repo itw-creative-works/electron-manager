@@ -4,7 +4,7 @@
 //
 // Standalone:
 //   module.exports = {
-//     layer: 'build',                  // 'build' | 'main' | 'renderer'
+//     layer: 'build',                  // 'build' | 'main' | 'renderer' | 'boot'
 //     description: 'config has brand.id',
 //     timeout: 5000,
 //     run: async (ctx) => {
@@ -12,6 +12,22 @@
 //       ctx.expect(cfg.brand.id).toBeTruthy();
 //     },
 //     cleanup: async (ctx) => { ... },
+//   };
+//
+// Boot layer — spawns the consumer's actual built main bundle (dist/main.bundle.js)
+// and runs `inspect` against the live manager. Replaces shell-level `npm start && sleep && kill`
+// smoke tests with deterministic, signal-driven pass/fail. Use this to verify the WHOLE
+// integration: consumer scaffolds, brand config, custom integrations, real boot order.
+//
+//   module.exports = {
+//     layer: 'boot',
+//     description: 'tray boots with default items',
+//     timeout: 15000,
+//     inspect: async ({ manager, expect, projectRoot }) => {
+//       expect(manager.tray.has('open')).toBe(true);
+//       expect(manager.tray.has('check-for-updates')).toBe(true);
+//       expect(manager.menu.isRendered()).toBe(true);
+//     },
 //   };
 //
 // Suite (sequential, shared state, stop on first failure):

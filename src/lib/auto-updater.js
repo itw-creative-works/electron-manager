@@ -218,17 +218,14 @@ const autoUpdater = {
       m.ipc.broadcast('em:auto-updater:status', autoUpdater.getStatus());
     }
     autoUpdater._updateMenuItem();
+    autoUpdater._updateTrayItem();
     logger.log(`status → ${autoUpdater._state.code}${autoUpdater._state.version ? ` v${autoUpdater._state.version}` : ''}${autoUpdater._state.percent ? ` (${autoUpdater._state.percent}%)` : ''}`);
   },
 
-  // Reflect updater state into the menu item with id 'em:check-for-updates'.
-  // Consumer can re-tag a different item with the same id, or remove the item entirely
-  // via menu.removeItem('em:check-for-updates') in their src/menu/index.js.
-  _updateMenuItem() {
-    const m = autoUpdater._manager;
-    if (!m || !m.menu || typeof m.menu.updateItem !== 'function') return;
+  // Compute the label + enabled fields for any "check for updates" UI item from current state.
+  // Used by both the menu and tray patchers so they stay in lockstep.
+  _menuItemFieldsForState() {
     const s = autoUpdater._state;
-
     let label, enabled = true;
     switch (s.code) {
       case 'checking':       label = 'Checking for Updates...';                       enabled = false; break;
@@ -240,8 +237,41 @@ const autoUpdater = {
       case 'idle':
       default:               label = 'Check for Updates...';                          enabled = true;  break;
     }
+    return { label, enabled };
+  },
 
-    try { m.menu.updateItem('em:check-for-updates', { label, enabled }); } catch (e) { /* menu not built yet */ }
+  // Reflect updater state into the EM Check-for-Updates item. The item lives under
+  // `main/check-for-updates` on macOS (App menu) and `help/check-for-updates` on win/linux —
+  // we just patch whichever one exists. Consumer can remove either via
+  // manager.menu.remove('main/check-for-updates') in their integrations/menu/index.js.
+  _updateMenuItem() {
+    const m = autoUpdater._manager;
+    if (!m || !m.menu || typeof m.menu.update !== 'function') return;
+    const { label, enabled } = autoUpdater._menuItemFieldsForState();
+
+    // Patch whichever id-path exists. .update() returns false (and warns) if missing,
+    // so try both without doubling up on warnings — silence by checking has() first.
+    try {
+      if (m.menu.has?.('main/check-for-updates')) {
+        m.menu.update('main/check-for-updates', { label, enabled });
+      } else if (m.menu.has?.('help/check-for-updates')) {
+        m.menu.update('help/check-for-updates', { label, enabled });
+      }
+    } catch (e) { /* menu not built yet */ }
+  },
+
+  // Reflect updater state into the tray's `check-for-updates` item, if present. Same
+  // label/enabled semantics as the menu item — keeps both UIs in lockstep.
+  _updateTrayItem() {
+    const m = autoUpdater._manager;
+    if (!m || !m.tray || typeof m.tray.update !== 'function') return;
+    const { label, enabled } = autoUpdater._menuItemFieldsForState();
+
+    try {
+      if (m.tray.has?.('check-for-updates')) {
+        m.tray.update('check-for-updates', { label, enabled });
+      }
+    } catch (e) { /* tray not built yet */ }
   },
 
   // 30-day gate ────────────────────────────────────────────────────────────────────

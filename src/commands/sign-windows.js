@@ -1,6 +1,6 @@
 // Strategy-aware Windows code signer.
 //
-// Reads strategy from EM_WIN_SIGN_STRATEGY env (or config.signing.windows.strategy):
+// Reads strategy from config.signing.windows.strategy:
 //   self-hosted — sign with signtool against an EV USB token (typically on a self-hosted runner)
 //   cloud       — shell out to a cloud signing provider's CLI (Azure / SSL.com / DigiCert)
 //   local       — no-op (developer signs manually on their own Windows box)
@@ -35,7 +35,7 @@ module.exports = async function (options) {
     return smokeTest();
   }
 
-  const strategy = process.env.EM_WIN_SIGN_STRATEGY || Manager.getWindowsSignStrategy();
+  const strategy = Manager.getWindowsSignStrategy();
   const config   = Manager.getConfig();
   const projectRoot = process.cwd();
 

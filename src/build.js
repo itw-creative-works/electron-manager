@@ -87,6 +87,24 @@ Manager.isServerMode = function () {
 };
 Manager.prototype.isServerMode = Manager.isServerMode;
 
+// Quick mode: skips slow / network-bound operations during setup, clean, and gulp tasks.
+// Mirrors UJM's UJ_QUICK pattern. Triggered by `--quick` / `-q` CLI flag OR `EM_QUICK=true` env.
+// CLI flag is preferred ergonomically; env var lets nested tools (gulp tasks, child processes)
+// still see the signal without re-parsing argv.
+Manager.isQuickMode = function () {
+  if (process.env.EM_QUICK === 'true') return true;
+  try {
+    const argv = getArgv() || {};
+    if (argv.quick === true || argv.q === true) {
+      // Propagate so child processes (gulp, electron, npm install shell-outs) inherit it.
+      process.env.EM_QUICK = 'true';
+      return true;
+    }
+  } catch (_) { /* yargs not available — fall through */ }
+  return false;
+};
+Manager.prototype.isQuickMode = Manager.isQuickMode;
+
 Manager.actLikeProduction = function () {
   return Boolean(Manager.isBuildMode() || process.env.EM_AUDIT_FORCE === 'true');
 };
@@ -109,7 +127,12 @@ Manager.getMode = function () {
 };
 Manager.prototype.getMode = Manager.getMode;
 
-// Config
+// Config — reads config/electron-manager.json (JSON5) and applies derived defaults.
+// Derivations:
+//   app.appId       ← `com.itwcreativeworks.${brand.id}` if not set
+//   app.productName ← brand.name if not set
+// These keep the consumer's config minimal: setting `brand: { id: 'foo', name: 'Foo' }` is
+// enough; appId/productName flow through automatically.
 Manager.getConfig = function () {
   const file = path.join(process.cwd(), 'config', 'electron-manager.json');
   const raw = jetpack.read(file);
@@ -118,16 +141,17 @@ Manager.getConfig = function () {
     return {};
   }
 
-  return JSON5.parse(raw);
+  const config = JSON5.parse(raw);
+
+  // Apply derived defaults.
+  config.brand = config.brand || {};
+  config.app   = config.app   || {};
+  if (!config.app.appId       && config.brand.id)   config.app.appId       = `com.itwcreativeworks.${config.brand.id}`;
+  if (!config.app.productName && config.brand.name) config.app.productName = config.brand.name;
+
+  return config;
 };
 Manager.prototype.getConfig = Manager.getConfig;
-
-// electron-builder.yml (returned as raw text — gulp tasks template it later)
-Manager.getElectronBuilderConfig = function () {
-  const file = path.join(process.cwd(), 'electron-builder.yml');
-  return jetpack.read(file) || '';
-};
-Manager.prototype.getElectronBuilderConfig = Manager.getElectronBuilderConfig;
 
 // package.json
 Manager.getPackage = function (type) {
@@ -161,12 +185,9 @@ Manager.getLiveReloadPort = function () {
 };
 Manager.prototype.getLiveReloadPort = Manager.getLiveReloadPort;
 
-// Windows signing strategy: env var > config > default
+// Windows signing strategy. Config-only — `signing.windows.strategy` in electron-manager.json.
+// Default 'self-hosted'.
 Manager.getWindowsSignStrategy = function () {
-  if (process.env.EM_WIN_SIGN_STRATEGY) {
-    return process.env.EM_WIN_SIGN_STRATEGY;
-  }
-
   const config = Manager.getConfig();
   return config?.signing?.windows?.strategy || 'self-hosted';
 };

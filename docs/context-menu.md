@@ -4,26 +4,20 @@ File-based context menu. Unlike tray and application menu (called once at boot),
 
 ## Config
 
-```jsonc
-"contextMenu": {
-  "enabled":    true,
-  "definition": "src/context-menu/index.js"
-}
-```
+No config block. Path is conventional: `src/integrations/context-menu/index.js`. To opt out, call `manager.contextMenu.disable()` from your main entry — after that, right-click events are silently swallowed.
 
 ## Definition file
 
 ```js
-// src/context-menu/index.js
+// src/integrations/context-menu/index.js
 module.exports = ({ manager, menu, params, webContents }) => {
-  // Editable fields → full edit menu.
-  if (params.isEditable) {
-    menu.item({ role: 'cut',   enabled: params.editFlags?.canCut !== false });
-    menu.item({ role: 'copy',  enabled: params.editFlags?.canCopy !== false });
-    menu.item({ role: 'paste', enabled: params.editFlags?.canPaste !== false });
-  } else if (params.selectionText) {
-    menu.item({ role: 'copy' });
-    menu.item({
+  // Easiest: start from EM's defaults, then customize per event.
+  menu.useDefaults();
+
+  // Add a "Search Google" entry when text is selected:
+  if (params.selectionText) {
+    menu.insertAfter('copy', {
+      id: 'search-google',
       label: `Search "${params.selectionText.slice(0, 20)}"`,
       click: () => require('electron').shell.openExternal(
         `https://google.com/search?q=${encodeURIComponent(params.selectionText)}`,
@@ -31,40 +25,63 @@ module.exports = ({ manager, menu, params, webContents }) => {
     });
   }
 
-  // Links — open in browser, copy address.
-  if (params.linkURL) {
-    menu.separator();
-    menu.item({
-      label: 'Open Link in Browser',
-      click: () => require('electron').shell.openExternal(params.linkURL),
-    });
-  }
-
-  // Dev-only: Inspect.
-  if (manager.isDevelopment()) {
-    menu.separator();
-    menu.item({ role: 'inspectElement' });
-    menu.item({ role: 'toggleDevTools' });
-  }
+  // Hide the dev-tools entries even in development:
+  menu.remove('toggle-devtools');
 };
 ```
 
-Returning no items (calling no `menu.*` methods) **suppresses the popup** entirely.
+Calling no `menu.*` methods (or `menu.clear()` after `useDefaults()` with nothing added) **suppresses the popup** entirely.
 
-## Builder API
+## Builder API (per event)
 
 ```js
 menu.item(descriptor)
 menu.separator()
 menu.submenu(label, items)
+menu.useDefaults()             // populate with EM's defaults based on params
+menu.clear()                   // wipe items added so far this event
 ```
+
+## Id-path API (per event)
+
+Same shape across menu / tray / context-menu. Available **inside the definition fn** on the `menu` builder. Operates on the items being built for the current right-click event:
+
+```js
+.find(idPath)
+.has(idPath)
+.update(idPath, patch)
+.remove(idPath)
+.enable(idPath, bool = true)
+.show(idPath, bool = true)
+.hide(idPath)
+.insertBefore(idPath, item)
+.insertAfter(idPath, item)
+.appendTo(idPath, item)
+```
+
+Context-menu ids are **flat** — no `context/` prefix needed (the lib namespace is implicit). Submenus you build with `menu.submenu(...)` are addressable as `parent/child` paths via the resolver.
+
+(Runtime-on-`manager.contextMenu` mutators don't apply here — items are rebuilt every event. Mutate inside the definition fn instead.)
+
+## Default template ids
+
+EM's `useDefaults()` populates items based on `params`. Every default item carries an id you can target:
+
+| ID | When it appears |
+|---|---|
+| `undo`, `redo` | `params.editFlags.canUndo` / `canRedo` |
+| `cut`, `copy`, `paste`, `paste-and-match-style`, `select-all` | `params.isEditable` |
+| `copy` | `params.selectionText` (read-only) |
+| `open-link`, `copy-link` | `params.linkURL` |
+| `reload` | always |
+| `inspect`, `toggle-devtools` | `manager.isDevelopment()` only |
 
 ## Definition fn arguments
 
 | Arg | Description |
 |---|---|
 | `manager` | The running EM Manager |
-| `menu` | Builder API for this popup |
+| `menu` | Per-event builder + id-path API |
 | `params` | Electron's [`ContextMenuParams`](https://www.electronjs.org/docs/latest/api/web-contents#event-context-menu) — `selectionText`, `isEditable`, `linkURL`, `srcURL`, `mediaType`, `editFlags`, `x`, `y`, etc. |
 | `webContents` | The `webContents` that fired the event |
 
@@ -80,6 +97,7 @@ manager.contextMenu.attach(win.webContents);
 
 ```js
 manager.contextMenu.define(fn)              // replace the definition at runtime
+manager.contextMenu.disable()               // ignore future right-click events (idempotent)
 manager.contextMenu.attach(webContents)     // manual attach
 manager.contextMenu.buildItems(params, wc)  // run the definition without popping a menu (useful for tests)
 manager.contextMenu.hasCustomDefinition()   // false → using the built-in default fn
@@ -87,8 +105,8 @@ manager.contextMenu.hasCustomDefinition()   // false → using the built-in defa
 
 ## Default fn
 
-Without a consumer file, EM uses a built-in fallback that handles the most common cases: cut/copy/paste in editable fields, copy in text selection, Open/Copy on links, and a dev-only Inspect Element. Same behavior as the default `src/context-menu/index.js` scaffold — provided there for easy editing.
+Without a consumer file, EM uses a built-in fallback that just calls `useDefaults()` — sensible undo/redo/cut/copy/paste/link/reload/inspect baseline. Same behavior as the default scaffold.
 
 ## Default scaffold
 
-`npx mgr setup` ships `src/context-menu/index.js` mirroring the built-in default fn so consumers have something to read and modify.
+`npx mgr setup` ships `src/integrations/context-menu/index.js` calling `menu.useDefaults()` plus commented-out examples covering insertAfter, remove, hide, enable, and building from scratch.

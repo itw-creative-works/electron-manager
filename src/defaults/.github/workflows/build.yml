@@ -6,7 +6,7 @@ on:
     branches: [main, master]
 
 env:
-  NODE_VERSION: '22'
+  NODE_VERSION: '{{ versions.node }}'
   EM_BUILD_MODE: 'true'
   EM_IS_PUBLISH: 'true'
   EM_IS_SERVER:  'true'
@@ -99,18 +99,34 @@ jobs:
           name: windows-unsigned
           path: release/*.exe
 
+  # Resolve the signing strategy from config/electron-manager.json. We do this in a tiny job
+  # (just runs node + reads the JSON5) so downstream jobs can gate on the result. Single
+  # source of truth = the consumer's config file; workflow doesn't duplicate the value.
+  windows-strategy:
+    name: Resolve Windows signing strategy
+    needs: build
+    runs-on: ubuntu-latest
+    outputs:
+      strategy: ${{ steps.resolve.outputs.strategy }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: resolve
+        run: |
+          STRATEGY=$(node -e "const fs=require('fs'),JSON5=require('json5');const c=JSON5.parse(fs.readFileSync('config/electron-manager.json','utf8'));console.log(c?.signing?.windows?.strategy || 'self-hosted');")
+          echo "strategy=$STRATEGY" >> "$GITHUB_OUTPUT"
+          echo "Resolved Windows signing strategy: $STRATEGY"
+
   windows-sign:
     name: Sign Windows
-    needs: build
-    # Strategy is config-driven. Set EM_WIN_SIGN_STRATEGY repo variable to:
+    needs: [build, windows-strategy]
+    # Strategy comes from config.signing.windows.strategy (read by windows-strategy job).
     #   self-hosted (default) — runs on a self-hosted runner with EV USB token attached
     #   cloud                 — runs on hosted windows-latest, calls cloud signing provider
     #   local                 — skip this job; sign locally via `npx mgr sign-windows`
-    if: ${{ vars.EM_WIN_SIGN_STRATEGY != 'local' }}
-    runs-on: ${{ vars.EM_WIN_SIGN_STRATEGY == 'cloud' && fromJSON('["windows-latest"]') || fromJSON('["self-hosted","windows","ev-token"]') }}
+    if: ${{ needs.windows-strategy.outputs.strategy != 'local' }}
+    runs-on: ${{ needs.windows-strategy.outputs.strategy == 'cloud' && fromJSON('["windows-latest"]') || fromJSON('["self-hosted","windows","ev-token"]') }}
     env:
-      EM_WIN_SIGN_STRATEGY: ${{ vars.EM_WIN_SIGN_STRATEGY || 'self-hosted' }}
-      # Cloud-provider env vars — only one set is consumed depending on `windows.signing.cloud.provider` in config:
+      # Cloud-provider env vars — only one set is consumed depending on `signing.windows.cloud.provider` in config:
       AZURE_TENANT_ID:                  ${{ secrets.AZURE_TENANT_ID }}
       AZURE_CLIENT_ID:                  ${{ secrets.AZURE_CLIENT_ID }}
       AZURE_CLIENT_SECRET:              ${{ secrets.AZURE_CLIENT_SECRET }}

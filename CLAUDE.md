@@ -9,7 +9,7 @@ Electron Manager (EM) is a comprehensive framework for building modern Electron 
 ### For Consuming Projects
 
 1. `npm install electron-manager --save-dev`
-2. `npx mgr setup` — scaffolds the project (writes default config, builder yml, src/main.js, per-process entries, tray/menu/context-menu definition files)
+2. `npx mgr setup` — scaffolds the project (writes `config/electron-manager.json`, `src/main.js`, `src/preload.js`, per-window renderer entries, and integrations skeletons in `src/integrations/{tray,menu,context-menu}/index.js`). `electron-builder.yml` and `entitlements.mac.plist` are NOT scaffolded — they're generated into `dist/build/` at build time.
 3. `npm start` — dev (gulp → webpack → electron .)
 4. `npm run build` — local production build
 5. `npm run release` — signed + published release (requires certs)
@@ -50,7 +50,7 @@ Boot sequence (main process — `manager.initialize()`):
 7. **`appState`** — first-launch / launch-count / crash-sentinel / version-change.
 8. `await app.whenReady()`.
 9. **`autoUpdater`** — electron-updater, never blocks.
-10. **`tray`**, **`menu`**, **`contextMenu`** — file-based definitions from `src/<feature>/index.js`.
+10. **`tray`**, **`menu`**, **`contextMenu`** — file-based definitions from `src/integrations/{tray,menu,context-menu}/index.js`. Disable any of them at runtime via `manager.<name>.disable()` (no config flag).
 11. **`startup.initialize`** — applies `setLoginItemSettings`.
 12. **`webManager`** — relay renderer auth state.
 13. **`windows.initialize`** + conditional `createNamed('main')` (skipped when `startup.isLaunchHidden()` — i.e. `mode === 'hidden'` or `mode === 'tray-only'`).
@@ -78,32 +78,69 @@ Boot sequence (main process — `manager.initialize()`):
 
 ### File-based feature definitions
 
-Trays, menus, and context-menus are NOT defined in config — they're defined in JS files the consumer authors. Config only holds `enabled` + `definition` path. This was a deliberate decision: config-only would force a DSL for conditional items, dynamic labels, and click handlers.
+Trays, menus, and context-menus are NOT defined in config — they're defined in JS files the consumer authors at fixed conventional paths (`src/integrations/{tray,menu,context-menu}/index.js`). To opt out, call `manager.{tray,menu,contextMenu}.disable()` at runtime. There's no config flag because config-only would force a DSL for conditional items, dynamic labels, and click handlers — and a runtime API is more flexible anyway.
+
+All three ship sensible **default templates** with id-tagged items so consumers can target them. The default scaffold for each lib calls `useDefaults()` and includes commented-out examples covering the full id-path API:
 
 ```js
-// src/tray/index.js
+// src/integrations/tray/index.js
 module.exports = ({ manager, tray }) => {
   tray.icon('src/assets/icons/tray-Template.png');
   tray.tooltip(manager.config?.app?.productName);
-  tray.item({ label: 'Open', click: () => manager.windows.show('main') });
-  tray.separator();
-  tray.item({ label: 'Quit', click: () => require('electron').app.quit() });
+  tray.useDefaults();                                    // ship EM's default items
+  tray.insertAfter('open', { id: 'dashboard', label: 'Dashboard', click: ... });
 };
 ```
 
-Same builder pattern in `src/menu/index.js` and `src/context-menu/index.js`. Items support function `label`/`enabled`/`visible`/`checked` evaluated on `refresh()`. Click handlers wrapped to swallow errors.
+**Unified id-path API across all three libs** (`manager.{tray,menu,contextMenu}.*` and the per-event/per-definition `menu` builder arg):
+
+```
+.find(id) / .has(id)
+.update(id, patch)              — Object.assign + re-render
+.remove(id)                     — splice + re-render
+.enable(id, bool=true)          — sugar over update({enabled})
+.show(id, bool=true) / .hide(id) — sugar over update({visible})
+.insertBefore(id, item) / .insertAfter(id, item)
+.appendTo(id, item)             — push into a submenu (creates submenu if absent)
+```
+
+Implemented once in `src/lib/_menu-mixin.js` and mixed into all three. The resolver matches by full id field first, then walks slash-separated path segments.
+
+**Naming convention for default items:**
+- **Tray** ids are flat: `title`, `open`, `check-for-updates`, `website`, `quit` (no `tray/` prefix — the namespace is implicit).
+- **Context-menu** ids are flat: `cut`, `copy`, `paste`, `select-all`, `undo`, `redo`, `paste-and-match-style`, `open-link`, `copy-link`, `reload`, `inspect`, `toggle-devtools`.
+- **Menu** ids are paths because menus actually nest: `main/check-for-updates`, `view/developer/toggle-devtools`, `help/website`, `development/open-logs`. The path roots (`main`, `file`, `edit`, `view`, `window`, `help`, `development`) are the literal menu labels — not arbitrary prefixes.
+
+**Default item sets are informed by legacy electron-manager**:
+- Menu: about, check-for-updates, preferences (hidden), services, hide/hide-others/show-all, relaunch, quit (App menu); preferences/relaunch/quit (File on win/linux); standard edit/view/window submenus; **`view/developer/*` submenu in dev mode** (toggle-devtools, inspect-elements, force-reload); **`development/*` top-level menu in dev mode** (open exe folder, user data, logs, app config, throw test error); help with check-for-updates (win/linux) + website link (when `brand.url`).
+- Tray: title (disabled label), open, check-for-updates, website (when configured), quit.
+- Context-menu: undo/redo (gated on canUndo/canRedo), cut/copy/paste/paste-and-match-style/select-all (when editable), copy (when text selected), open-link/copy-link (when on link), reload (always), inspect/toggle-devtools (dev only).
+
+Items support function `label`/`enabled`/`visible`/`checked` evaluated on `refresh()`. Click handlers wrapped to swallow errors. Auto-updater hook patches both `main/check-for-updates`/`help/check-for-updates` (menu) AND `check-for-updates` (tray) in lockstep.
 
 ### Build system
 
 - **prepare-package** copies framework `src/` → `dist/` (BXM-style).
 - **Gulp** auto-loads tasks from `src/gulp/tasks/`.
 - **Webpack** — three targets (electron-main / electron-preload / electron-renderer), all bundled in production for source protection. DefinePlugin + BannerPlugin inject `EM_BUILD_JSON` into bundles.
-- **electron-builder** packages + publishes. `gulp/build-config` materializes `dist/electron-builder.yml` from the source `electron-builder.yml` with mode-dependent injections (e.g. `LSUIElement` for tray-only).
-- **Strategy-pluggable Windows signing** — `EM_WIN_SIGN_STRATEGY` selects `self-hosted` (EV USB token) | `cloud` | `local`.
+- **electron-builder** packages + publishes. `gulp/build-config` GENERATES `dist/electron-builder.yml` from EM defaults + `config/electron-manager.json` (no consumer-shipped `electron-builder.yml`). It also writes `dist/build/entitlements.mac.plist` (defaults + consumer overrides via `entitlements.mac` config) and resolves icons via a 3-tier waterfall (config → `<consumer>/config/icons/<platform>/<slot>.png` → EM bundled defaults) into `dist/build/icons/`.
+- **Strategy-pluggable Windows signing** — `signing.windows.strategy` config key (no env var) selects `self-hosted` (EV USB token) | `cloud` | `local`. The GH Actions workflow has a `windows-strategy` job that reads the JSON5 config to drive runner selection + job gating.
 
 ### Config flow
 
-`config/electron-manager.json` (JSON5, in consumer) → `Manager.getConfig()` at build time → injected into renderer + preload bundles via webpack DefinePlugin as `EM_BUILD_JSON` → `require()`-able JSON in main.
+`config/electron-manager.json` (JSON5, in consumer) → `Manager.getConfig()` (applies derived defaults: `app.appId` ← `com.itwcreativeworks.<brand.id>`, `app.productName` ← `brand.name`) → injected into renderer + preload bundles via webpack DefinePlugin as `EM_BUILD_JSON` → `require()`-able JSON in main.
+
+Required fields: `brand.id` + `brand.name`. Everything else has defaults. Audit (`gulp/audit`) validates `brand.id` matches URL-scheme grammar (since it's also the deep-link scheme).
+
+Notable defaults / behaviors:
+- **appId**: `com.itwcreativeworks.<brand.id>` (set explicitly only if you must)
+- **productName**: same as `brand.name`
+- **Deep-link scheme**: always `<brand.id>://...` (no config). Built-in routes: `auth/token`, `app/show`, `app/quit`. Custom routes: `manager.deepLink.on('pattern', fn)` at runtime.
+- **Tray / menu / context-menu**: paths are conventional (`src/integrations/{name}/index.js`) — no config block. Disable: `manager.<name>.disable()`.
+- **`startup.openAtLogin`**: object form `{ enabled: true, mode: 'hidden' }`. The mode applies ONLY when the OS auto-launches at login; user-direct launches always use `startup.mode`. Force-OFF in dev (uses `app.isPackaged`) to prevent dev runs from polluting login items — set `EM_FORCE_LOGIN_ITEM=1` to override.
+- **Icons**: 3-tier waterfall per slot/platform (config → `config/icons/<platform>/<slot>.png` → EM bundled). `@2x` retina auto-paired from `@1x`. Linux follows Windows resolution; Windows tray falls back to Windows app icon.
+- **Entitlements**: `entitlements.mac` is an object map (key→bool/string/array). Consumer overrides EM's defaults; `null` removes a default. Plist generated to `dist/build/entitlements.mac.plist`.
+- **Stable download names** (`gulp/mirror-downloads`): `Somiibo.dmg`, `Somiibo-Setup.exe`, `somiibo_amd64.deb`, `Somiibo.AppImage` — preserves legacy URLs. Apple Silicon gets `-arm64` suffix.
 
 ### Build modes
 
@@ -117,12 +154,13 @@ Same builder pattern in `src/menu/index.js` and `src/context-menu/index.js`. Ite
 - `<EM>/dist/test/suites/**/*.js` — framework defaults
 - `<cwd>/test/**/*.js` — consumer suites
 
-Three layers:
+Four layers:
 - **build** — plain Node, fast.
-- **main** — spawns Electron via `runners/electron.js`, JSON-line stdout protocol.
-- **renderer** — hidden BrowserWindow (Pass 2.3c, not yet built).
+- **main** — spawns Electron via `runners/electron.js`, JSON-line stdout protocol. Tests EM lib code in isolation.
+- **renderer** — hidden BrowserWindow.
+- **boot** — spawns Electron with the consumer's actual built `dist/main.bundle.js` (the production main entry). Waits for `manager.initialize()` to resolve, then runs each test's `inspect(manager)` callback against the live runtime. Replaces shell-level `npm start && sleep && kill` smoke tests with deterministic, signal-driven pass/fail. Uses a single Electron process for all boot tests (~1s after build). **Always rebuilds the bundle** before running so tests never see stale code (~10s build cost; opt out with `EM_TEST_SKIP_BUILD=1` for CI where build ran in a separate step). Plumbing: `EM_TEST_BOOT`/`EM_TEST_BOOT_HARNESS`/`EM_TEST_BOOT_SPEC` env vars, harness in `src/test/harness/boot-entry.js`, runner in `src/test/runners/boot.js`. Strips `ELECTRON_RUN_AS_NODE` from the child env (matches `gulp/serve`) so electron starts in main-process mode regardless of the surrounding shell. See `docs/test-boot-layer.md`.
 
-Test files export `{ type, layer, description, tests, cleanup }`. See `docs/test-framework.md`.
+Test files export `{ type, layer, description, tests, cleanup }`. Boot tests use `inspect: async ({ manager, expect, projectRoot }) => { ... }` instead of `run`. See `docs/test-framework.md` and `docs/test-boot-layer.md`.
 
 ### Dev logs
 
@@ -183,6 +221,7 @@ API references for each subsystem live in `docs/`:
 - [docs/releasing.md](docs/releasing.md) — end-to-end release walkthrough (`.env` → GitHub Release)
 - [docs/runner.md](docs/runner.md) — Windows EV-token signing runner, `npx mgr runner install`
 - [docs/test-framework.md](docs/test-framework.md) — writing tests, running them, layers
+- [docs/test-boot-layer.md](docs/test-boot-layer.md) — boot test layer (spawns the consumer's actual built bundle for end-to-end smoke tests)
 - [docs/build-system.md](docs/build-system.md) — gulp, webpack, electron-builder pipeline
 
 `PROGRESS.md` tracks pass-by-pass progress and decisions.

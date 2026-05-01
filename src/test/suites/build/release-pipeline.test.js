@@ -6,6 +6,19 @@ const path    = require('path');
 const fs      = require('fs');
 const os      = require('os');
 
+// Helper: stage a consumer dir with config/electron-manager.json containing the given
+// signing.windows.strategy. Returns the abs path to the temp dir; caller is responsible
+// for chdir'ing into it and cleaning up.
+function stageStrategyConfig({ strategy }) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'em-sign-'));
+  fs.mkdirSync(path.join(tmp, 'config'), { recursive: true });
+  fs.writeFileSync(
+    path.join(tmp, 'config', 'electron-manager.json'),
+    JSON.stringify({ signing: { windows: { strategy } } }),
+  );
+  return tmp;
+}
+
 module.exports = {
   type: 'suite',
   layer: 'build',
@@ -82,14 +95,14 @@ module.exports = {
       name: 'sign-windows: cloud strategy with unknown provider throws a clear error',
       run: async (ctx) => {
         const signWindows = require(path.join(__dirname, '..', '..', '..', 'commands', 'sign-windows.js'));
-        // Set up a temp input dir with a fake .exe so we get past the file-discovery check.
-        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'em-sign-'));
+        // Stage a consumer dir with strategy='cloud' in electron-manager.json, chdir there.
+        const tmp = stageStrategyConfig({ strategy: 'cloud' });
         fs.writeFileSync(path.join(tmp, 'fake.exe'), 'fake');
 
-        const origStrategy = process.env.EM_WIN_SIGN_STRATEGY;
+        const origCwd      = process.cwd();
         const origProvider = process.env.WIN_CLOUD_SIGN_PROVIDER;
-        process.env.EM_WIN_SIGN_STRATEGY = 'cloud';
         process.env.WIN_CLOUD_SIGN_PROVIDER = 'imaginary-provider-xyz';
+        process.chdir(tmp);
 
         try {
           let threw;
@@ -101,8 +114,7 @@ module.exports = {
           ctx.expect(threw).toBeDefined();
           ctx.expect(threw.message).toMatch(/imaginary-provider-xyz|not yet implemented/);
         } finally {
-          if (origStrategy !== undefined) process.env.EM_WIN_SIGN_STRATEGY = origStrategy;
-          else delete process.env.EM_WIN_SIGN_STRATEGY;
+          process.chdir(origCwd);
           if (origProvider !== undefined) process.env.WIN_CLOUD_SIGN_PROVIDER = origProvider;
           else delete process.env.WIN_CLOUD_SIGN_PROVIDER;
           fs.rmSync(tmp, { recursive: true, force: true });
@@ -113,13 +125,13 @@ module.exports = {
       name: 'sign-windows: cloud strategy without provider throws',
       run: async (ctx) => {
         const signWindows = require(path.join(__dirname, '..', '..', '..', 'commands', 'sign-windows.js'));
-        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'em-sign-'));
+        const tmp = stageStrategyConfig({ strategy: 'cloud' });
         fs.writeFileSync(path.join(tmp, 'fake.exe'), 'fake');
 
-        const origStrategy = process.env.EM_WIN_SIGN_STRATEGY;
+        const origCwd      = process.cwd();
         const origProvider = process.env.WIN_CLOUD_SIGN_PROVIDER;
-        process.env.EM_WIN_SIGN_STRATEGY = 'cloud';
         delete process.env.WIN_CLOUD_SIGN_PROVIDER;
+        process.chdir(tmp);
 
         try {
           let threw;
@@ -131,8 +143,7 @@ module.exports = {
           ctx.expect(threw).toBeDefined();
           ctx.expect(threw.message).toMatch(/no provider set/);
         } finally {
-          if (origStrategy !== undefined) process.env.EM_WIN_SIGN_STRATEGY = origStrategy;
-          else delete process.env.EM_WIN_SIGN_STRATEGY;
+          process.chdir(origCwd);
           if (origProvider !== undefined) process.env.WIN_CLOUD_SIGN_PROVIDER = origProvider;
           fs.rmSync(tmp, { recursive: true, force: true });
         }
@@ -142,11 +153,11 @@ module.exports = {
       name: 'sign-windows: unknown strategy throws',
       run: async (ctx) => {
         const signWindows = require(path.join(__dirname, '..', '..', '..', 'commands', 'sign-windows.js'));
-        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'em-sign-'));
+        const tmp = stageStrategyConfig({ strategy: 'banana' });
         fs.writeFileSync(path.join(tmp, 'fake.exe'), 'fake');
 
-        const origStrategy = process.env.EM_WIN_SIGN_STRATEGY;
-        process.env.EM_WIN_SIGN_STRATEGY = 'banana';
+        const origCwd = process.cwd();
+        process.chdir(tmp);
 
         try {
           let threw;
@@ -158,8 +169,7 @@ module.exports = {
           ctx.expect(threw).toBeDefined();
           ctx.expect(threw.message).toMatch(/Unknown Windows signing strategy/);
         } finally {
-          if (origStrategy !== undefined) process.env.EM_WIN_SIGN_STRATEGY = origStrategy;
-          else delete process.env.EM_WIN_SIGN_STRATEGY;
+          process.chdir(origCwd);
           fs.rmSync(tmp, { recursive: true, force: true });
         }
       },

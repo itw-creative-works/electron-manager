@@ -127,7 +127,7 @@ CI handles the cross-platform matrix. The default workflow (`.github/workflows/b
 ```
 build (matrix: macos-latest, windows-latest, ubuntu-latest)
   └─ npm ci → npx mgr setup → platform-specific signing
-windows-sign (only if EM_WIN_SIGN_STRATEGY != 'local')
+windows-sign (only if signing.windows.strategy != "local")
   └─ runs on a self-hosted runner with EV USB token (or hosted windows-latest for cloud strategy)
   └─ signs + uploads release artifacts
 ```
@@ -149,7 +149,7 @@ The workflow's `softprops/action-gh-release@v2` step uploads to the matching tag
 
 ## Windows signing strategies
 
-Set `EM_WIN_SIGN_STRATEGY` in `.env` (and as a GitHub repo variable for CI):
+Set `signing.windows.strategy` in `.env` (and as a GitHub repo variable for CI):
 
 | Strategy | What runs | When to use |
 |---|---|---|
@@ -174,8 +174,8 @@ For details see [`docs/signing.md`](signing.md#windows-setup).
 - Check the App Store Connect notarization history at https://appstoreconnect.apple.com/apps for status / errors.
 
 ### "Hardened runtime requires entitlements"
-- `build/entitlements.mac.plist` is shipped by EM with the right defaults.
-- If your app uses additional capabilities (camera, mic, etc.), add the matching entitlement keys.
+- EM generates `dist/build/entitlements.mac.plist` at build time from defaults + your `entitlements.mac` overrides in `config/electron-manager.json`.
+- For extra capabilities (camera, mic, etc.), add keys to `entitlements.mac`. See `docs/signing.md` for the override syntax.
 
 ### CI: GitHub Releases upload fails
 - Verify `GH_TOKEN` secret is set. The auto-injected `GITHUB_TOKEN` won't work for cross-repo writes.

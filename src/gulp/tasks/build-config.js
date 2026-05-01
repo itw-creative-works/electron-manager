@@ -1,40 +1,56 @@
-// Materialize the consumer's `electron-builder.yml` into `dist/electron-builder.yml`
-// with mode-dependent fields injected (e.g. LSUIElement=true for tray-only).
+// Generate dist/electron-builder.yml entirely from EM defaults + the consumer's
+// config/electron-manager.json. The consumer NEVER ships an electron-builder.yml.
 //
-// We never mutate the consumer's source file. The output file is what
-// `electron-builder` actually reads (the package task points at it explicitly).
+// Why:
+//   - Single source of truth: consumer config (electron-manager.json) drives everything.
+//   - Stops consumers from drifting into electron-builder-config-fork-of-our-defaults hell.
+//   - Lets EM evolve packaging defaults centrally (e.g. switch from NSIS to MSIX someday)
+//     without per-consumer migrations.
+//
+// Consumer overrides:
+//   `electronBuilder` block in electron-manager.json gets shallow-merged onto our defaults
+//   for genuine special cases. Most apps will never set this.
 
 const path    = require('path');
 const jetpack = require('fs-jetpack');
+const yaml    = require('js-yaml');
 const Manager = new (require('../../build.js'));
+
+const { writeMacEntitlements } = require('../../lib/sign-helpers/entitlements.js');
+const { resolveAndCopy }       = require('../../lib/sign-helpers/resolve-icons.js');
 
 const logger = Manager.logger('build-config');
 
 module.exports = function buildConfig(done) {
   Promise.resolve().then(async () => {
     const projectRoot = process.cwd();
-    const srcPath  = path.join(projectRoot, 'electron-builder.yml');
-    const distPath = path.join(projectRoot, 'dist', 'electron-builder.yml');
+    const distRoot    = path.join(projectRoot, 'dist');
+    const distPath    = path.join(distRoot, 'electron-builder.yml');
 
-    if (!jetpack.exists(srcPath)) {
-      logger.warn(`No electron-builder.yml in ${projectRoot} — skipping build-config.`);
-      return;
-    }
-
-    const config = Manager.getConfig() || {};
+    const config      = Manager.getConfig() || {};
     const startupMode = config?.startup?.mode || 'normal';
 
-    // Read the source as text so we can preserve comments and ordering.
-    let yml = jetpack.read(srcPath);
+    // 1. Generate entitlements.mac.plist into dist/build/.
+    const entitlementsPath = writeMacEntitlements(distRoot, config?.entitlements?.mac);
+    logger.log(`wrote ${entitlementsPath}`);
+
+    // 2. Resolve + copy icons (3-tier waterfall) into dist/build/icons/.
+    const emDefaultsRoot = path.join(__dirname, '..', '..', 'defaults', 'build');
+    const icons = resolveAndCopy({ config, projectRoot, distRoot, emDefaultsRoot });
+    logger.log(`resolved icons: mac=${Object.keys(icons.macos).length}, win=${Object.keys(icons.windows).length}, linux=${Object.keys(icons.linux).length}`);
+
+    // Build the full config object from EM defaults + consumer overrides.
+    let builderConfig = baseConfig(config, { entitlementsPath, icons, distRoot });
 
     // Mode-dependent injections.
     if (startupMode === 'tray-only') {
-      yml = injectMacExtendInfo(yml, { LSUIElement: true });
+      builderConfig.mac = builderConfig.mac || {};
+      builderConfig.mac.extendInfo = builderConfig.mac.extendInfo || {};
+      builderConfig.mac.extendInfo.LSUIElement = true;
       logger.log('startup.mode=tray-only → injected mac.extendInfo.LSUIElement=true');
     }
 
-    // Inject `publish` block from `releases` config knob.
-    // Owner falls back to the app repo's owner so consumers usually only set `repo`.
+    // Inject `publish` from `releases` config.
     if (config?.releases?.enabled !== false) {
       const releases = config?.releases || {};
       let releaseOwner = releases.owner;
@@ -44,160 +60,134 @@ module.exports = function buildConfig(done) {
           const discovered = await discoverRepo(projectRoot);
           releaseOwner = discovered.owner;
         } catch (e) {
-          logger.warn(`Could not discover repo owner; leaving publish block to electron-builder defaults. (${e.message})`);
+          logger.warn(`Could not discover repo owner; leaving publish block off. (${e.message})`);
         }
       }
       const releaseRepo = releases.repo || 'update-server';
       if (releaseOwner) {
-        yml = injectPublish(yml, { provider: 'github', owner: releaseOwner, repo: releaseRepo });
+        builderConfig.publish = {
+          provider:    'github',
+          owner:       releaseOwner,
+          repo:        releaseRepo,
+          releaseType: 'release',
+        };
         logger.log(`releases → publish block: github ${releaseOwner}/${releaseRepo}`);
       }
     }
 
-    // Inject `afterSign` to point at EM's built-in notarize hook (resolved by Node from the
-    // installed electron-manager package, NOT from the consumer's hooks/ dir). The consumer's
-    // hooks/notarize/post.js is never the entrypoint — it's an optional extension point that
-    // EM's real notarize calls into after notarization completes.
-    const emNotarizePath = require.resolve('electron-manager/hooks/notarize');
-    yml = injectAfterSign(yml, emNotarizePath);
-    logger.log(`afterSign → ${emNotarizePath}`);
+    // Inject afterSign → EM's built-in notarize hook.
+    builderConfig.afterSign = require.resolve('electron-manager/hooks/notarize');
+    logger.log(`afterSign → ${builderConfig.afterSign}`);
 
+    // Apply consumer overrides last so they win.
+    if (config?.electronBuilder && typeof config.electronBuilder === 'object') {
+      builderConfig = deepMerge(builderConfig, config.electronBuilder);
+      logger.log('Applied electronBuilder overrides from electron-manager.json');
+    }
+
+    // Serialize to YAML and write.
+    const yml = yaml.dump(builderConfig, { lineWidth: -1, noRefs: true });
     jetpack.write(distPath, yml);
     logger.log(`wrote ${distPath} (mode=${startupMode})`);
   }).then(() => done(), done);
 };
 
-// Inject keys under `mac.extendInfo` in a YAML string. Idempotent — re-running with the
-// same keys yields the same output. We do a minimal text edit rather than a YAML round-trip
-// to preserve the consumer's formatting/comments.
-function injectMacExtendInfo(yml, keys) {
-  const lines = yml.split('\n');
-  const macIdx = findTopLevelKey(lines, 'mac');
+// EM's canonical electron-builder config. Driven by the consumer's electron-manager.json
+// where it makes sense (appId, productName, copyright); everything else (signing, target
+// archs, file globs) is EM's opinionated default.
+//
+// Optional `extras` argument carries resolved icon paths + entitlements path from the
+// build-config task. When called from tests with no extras, the bare config is returned
+// (paths are left as project-relative defaults that may not exist on disk — fine for
+// test assertions).
+function baseConfig(config, extras = {}) {
+  const appId       = config?.app?.appId       || 'com.itwcreativeworks.app';
+  const productName = config?.app?.productName || 'App';
+  const copyright   = config?.app?.copyright   || '© ITW Creative Works';
 
-  if (macIdx === -1) {
-    // No `mac:` block — append a complete one.
-    const block = ['', 'mac:', '  extendInfo:'];
-    Object.keys(keys).forEach((k) => block.push(`    ${k}: ${formatValue(keys[k])}`));
-    return yml + block.join('\n') + '\n';
+  const { entitlementsPath, icons, distRoot } = extras;
+  const rel = (abs) => abs && distRoot ? path.relative(distRoot, abs) : abs;
+
+  const out = {
+    appId,
+    productName,
+    copyright,
+
+    directories: {
+      output:         'release',
+      buildResources: 'build',         // dist/build/ (relative to dist/electron-builder.yml)
+    },
+
+    files: [
+      '**/*',
+      '!**/*.map',
+      '!.env',
+      '!.env.*',
+      '!**/*.env',
+    ],
+
+    asar: true,
+
+    mac: {
+      category: 'public.app-category.utilities',
+      target: [
+        { target: 'dmg', arch: ['x64', 'arm64'] },
+        { target: 'zip', arch: ['x64', 'arm64'] },
+      ],
+      hardenedRuntime:    true,
+      gatekeeperAssess:   false,
+      notarize: false,   // notarization runs via afterSign hook
+    },
+
+    dmg: {},
+
+    win: {
+      target: [
+        { target: 'nsis', arch: ['x64'] },
+      ],
+      signtoolOptions: {
+        signingHashAlgorithms: ['sha256'],
+      },
+    },
+
+    linux: {
+      target: [
+        { target: 'deb',      arch: ['x64'] },   // Ubuntu/Debian/Mint. (i386 dropped — extinct on modern distros.)
+        { target: 'AppImage', arch: ['x64'] },   // Fedora/Arch/openSUSE — distro-agnostic.
+      ],
+      category: 'Utility',
+    },
+  };
+
+  // Wire entitlements.
+  if (entitlementsPath) {
+    out.mac.entitlements        = rel(entitlementsPath);
+    out.mac.entitlementsInherit = rel(entitlementsPath);
   }
 
-  // Find or create `extendInfo:` inside the mac block.
-  const macBlockEnd = findBlockEnd(lines, macIdx);
-  let extendInfoIdx = -1;
-  for (let i = macIdx + 1; i < macBlockEnd; i += 1) {
-    if (/^\s{2}extendInfo\s*:/.test(lines[i])) {
-      extendInfoIdx = i;
-      break;
+  // Wire icons. electron-builder resolves these as paths relative to the config file (dist/electron-builder.yml).
+  if (icons?.macos?.app)  out.mac.icon   = rel(icons.macos.app);
+  if (icons?.macos?.dmg)  out.dmg.background = rel(icons.macos.dmg);
+  if (icons?.windows?.app) out.win.icon  = rel(icons.windows.app);
+  if (icons?.linux?.app)   out.linux.icon = rel(icons.linux.app);
+
+  return out;
+}
+
+// Shallow object merge with arrays replaced (not concatenated) so consumer overrides like
+// `mac.target: [...]` fully replace ours rather than appending to defaults.
+function deepMerge(a, b) {
+  if (Array.isArray(b)) return b;
+  if (b && typeof b === 'object' && !Array.isArray(a)) {
+    const out = { ...a };
+    for (const k of Object.keys(b)) {
+      out[k] = (a && k in a) ? deepMerge(a[k], b[k]) : b[k];
     }
-  }
-
-  if (extendInfoIdx === -1) {
-    // Insert at the top of the mac block.
-    const insert = ['  extendInfo:'];
-    Object.keys(keys).forEach((k) => insert.push(`    ${k}: ${formatValue(keys[k])}`));
-    lines.splice(macIdx + 1, 0, ...insert);
-    return lines.join('\n');
-  }
-
-  // Merge keys into the existing extendInfo block.
-  const extendInfoEnd = findBlockEnd(lines, extendInfoIdx);
-  Object.keys(keys).forEach((k) => {
-    const re = new RegExp(`^\\s{4}${k}\\s*:`);
-    let exists = false;
-    for (let i = extendInfoIdx + 1; i < extendInfoEnd; i += 1) {
-      if (re.test(lines[i])) {
-        lines[i] = `    ${k}: ${formatValue(keys[k])}`;
-        exists = true;
-        break;
-      }
-    }
-    if (!exists) {
-      lines.splice(extendInfoIdx + 1, 0, `    ${k}: ${formatValue(keys[k])}`);
-    }
-  });
-
-  return lines.join('\n');
-}
-
-function findTopLevelKey(lines, key) {
-  const re = new RegExp(`^${key}\\s*:`);
-  for (let i = 0; i < lines.length; i += 1) {
-    if (re.test(lines[i])) return i;
-  }
-  return -1;
-}
-
-// Returns the index AFTER the last line of the block starting at startIdx.
-function findBlockEnd(lines, startIdx) {
-  const startIndent = lines[startIdx].match(/^(\s*)/)[1].length;
-  for (let i = startIdx + 1; i < lines.length; i += 1) {
-    if (lines[i].trim() === '') continue;
-    const indent = lines[i].match(/^(\s*)/)[1].length;
-    if (indent <= startIndent) return i;
-  }
-  return lines.length;
-}
-
-function formatValue(v) {
-  if (typeof v === 'boolean') return v ? 'true' : 'false';
-  if (typeof v === 'number')  return String(v);
-  // Quote strings that contain anything spicy, otherwise plain.
-  if (typeof v === 'string') {
-    return /[:#"'\n]/.test(v) ? JSON.stringify(v) : v;
-  }
-  return JSON.stringify(v);
-}
-
-// Replace (or append) the top-level `publish:` block in a YAML string with our { provider, owner, repo }.
-// We always overwrite — the consumer's source yml may have had a placeholder publish block that
-// we'll respect-but-replace from config.releases.
-function injectPublish(yml, publish) {
-  const lines = yml.split('\n');
-  const pubIdx = findTopLevelKey(lines, 'publish');
-
-  const block = [
-    'publish:',
-    `  provider: ${publish.provider}`,
-    `  owner: ${publish.owner}`,
-    `  repo: ${publish.repo}`,
-    `  releaseType: ${publish.releaseType || 'release'}`,
-  ];
-
-  if (pubIdx === -1) {
-    // No existing publish block — append.
-    let out = yml;
-    if (!out.endsWith('\n')) out += '\n';
-    out += '\n' + block.join('\n') + '\n';
     return out;
   }
-
-  // Replace the existing block (handles both inline `publish:` and indented children).
-  const blockEnd = findBlockEnd(lines, pubIdx);
-  lines.splice(pubIdx, blockEnd - pubIdx, ...block);
-  return lines.join('\n');
-}
-
-// Replace (or append) the top-level `afterSign:` line in a YAML string. We always overwrite —
-// EM's notarize is the source of truth; consumer's hooks/notarize/post.js is an extension
-// point that EM's notarize itself invokes.
-function injectAfterSign(yml, hookPath) {
-  const lines = yml.split('\n');
-  const idx = findTopLevelKey(lines, 'afterSign');
-  // YAML strings get JSON-stringified to handle absolute paths with special chars.
-  const newLine = `afterSign: ${JSON.stringify(hookPath)}`;
-
-  if (idx === -1) {
-    let out = yml;
-    if (!out.endsWith('\n')) out += '\n';
-    out += '\n' + newLine + '\n';
-    return out;
-  }
-
-  lines[idx] = newLine;
-  return lines.join('\n');
+  return b;
 }
 
 // Exported for tests.
-module.exports.injectMacExtendInfo = injectMacExtendInfo;
-module.exports.injectPublish = injectPublish;
-module.exports.injectAfterSign = injectAfterSign;
+module.exports.baseConfig = baseConfig;
+module.exports.deepMerge  = deepMerge;

@@ -125,7 +125,41 @@ Manager.prototype.initialize = async function (consumerConfig, options) {
     await self.windows.createNamed('main', self);
   }
 
+  self._initialized = true;
   self.logger.log('electron-manager (main) initialized.');
+
+  // Boot test harness — runs against the live manager AFTER all libs are up. Test runner
+  // sets EM_TEST_BOOT=1 + EM_TEST_BOOT_HARNESS=<absolute path> + EM_TEST_BOOT_SPEC=<path>
+  // before spawning electron. The harness emits __EM_TEST__ JSON lines on stdout (parsed
+  // by runners/boot.js) then app.exit()s.
+  //
+  // We use a runtime env-var path (not a static `require('./test/harness/...')`) because
+  // EM is webpacked into the consumer's bundle, and a static require would either get
+  // inlined (bundling test code into production) or dead-code-eliminated. An env-var
+  // path stays external and can only resolve when the runner sets it.
+  if (process.env.EM_TEST_BOOT === '1') {
+    global.__em_manager = self;
+    const harnessPath = process.env.EM_TEST_BOOT_HARNESS;
+    if (harnessPath) {
+      try {
+        // __non_webpack_require__ is webpack's magic escape hatch — preserves a runtime
+        // require() that webpack won't try to inline. In plain Node it's undefined, so
+        // `typeof` gates the branch without ReferenceError.
+        // eslint-disable-next-line import/no-dynamic-require, global-require, no-undef
+        const realRequire = (typeof __non_webpack_require__ !== 'undefined') ? __non_webpack_require__ : require;
+        const harness = realRequire(harnessPath);
+        harness.run(self);
+      } catch (e) {
+        const { app } = require('electron');
+        process.stdout.write(`__EM_TEST__${JSON.stringify({ event: 'fatal', message: `boot harness failed to load: ${e.message}` })}\n`);
+        app.exit(1);
+      }
+    } else {
+      const { app } = require('electron');
+      process.stdout.write(`__EM_TEST__${JSON.stringify({ event: 'fatal', message: 'EM_TEST_BOOT=1 but EM_TEST_BOOT_HARNESS not set' })}\n`);
+      app.exit(1);
+    }
+  }
 
   return self;
 };
