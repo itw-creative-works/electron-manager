@@ -1,10 +1,49 @@
 # Changelog
 
-## 1.2.16 — document WIN_RUNNER_LOGON_* in .env.example
+## 1.2.16 — runner switched to Logon Task; workflow `platforms` input; draft-on-missing release
 
-Missed adding the new `WIN_RUNNER_LOGON_ACCOUNT` and `WIN_RUNNER_LOGON_PASSWORD`
-env vars to `.env.example` in v1.2.15. Documenting them now under a "Windows
-runner service logon" section so it's discoverable for new runner-host setups.
+### Self-hosted runner: Windows Service → Logon Task
+
+EV-token signing was the blocker for v1.2.13/14/15 — Windows Services run in
+Session 0 (no desktop) and can't see the user's `CurrentUser\My` cert store
+where SafeNet/eToken EV certs live, even when the service is configured to
+run as the user account. The SafeNet "Token Logon" PIN dialog also requires
+an interactive desktop to be typed into.
+
+Fix: register each per-org runner as a **Scheduled Task running at logon in
+the user's interactive Session 1**, instead of a Windows Service. Same EM
+subcommands (`install`/`status`/`start`/`stop`/`uninstall`) — the underlying
+mechanism is now Task Scheduler, not the Service Control Manager.
+
+`runnerTaskName(org)` returns `em-runner-<host>-<org>`, matching the
+GitHub-side runner name so log/debug correlation stays sane.
+
+The legacy "service" terminology in user-facing strings is preserved where
+it doesn't lie (still describes startup/shutdown/restart correctly), but
+internals call them tasks.
+
+### Workflow: `platforms` input for partial builds
+
+`workflow_dispatch` now accepts a `platforms` input — comma-separated:
+`all` (default), `mac`, `windows`, `linux`, or any combo. New `setup` job
+resolves it into a JSON matrix consumed by `build` and per-platform booleans
+consumed by `windows-strategy`/`windows-sign`. Lets you re-run JUST the
+windows-sign half against an existing release without re-building mac/linux.
+
+### `mgr release` adds `--platforms` flag
+
+`npx mgr release --platforms windows` (or `--platform windows`) forwards
+the value as a workflow input. Omitted = default = all platforms. Older
+consumer workflows without the input declared continue to work unchanged.
+
+### `finalize-release` creates a draft release if none exists
+
+Previously failed with "Update-server release v1.0.0 not found" when a
+partial-platform run kicked off windows-sign before mac/linux had created
+the release. Now creates an empty draft if missing, so partial runs can
+attach signed Windows assets and the next run fills in the rest. Draft
+flips to published only by the `finalize` job once all expected platforms
+have built.
 
 ## 1.2.15 — runner service runs AS the user (so signtool sees their cert store)
 
