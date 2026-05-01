@@ -13,6 +13,8 @@
 //   stop                 Stop them.
 //   status               Show service status, registered orgs, watcher state.
 //   uninstall            Remove everything.
+//   set-credentials      Save Windows account credentials for the runner service.
+//                        Encrypted via DPAPI, only the current user can decrypt.
 //   self-update          Force an immediate self-update of EM (npm i -g electron-manager@latest).
 //
 // All commands except `install` and `register-org` are no-ops on non-Windows platforms.
@@ -43,13 +45,14 @@ module.exports = async function (options) {
   const sub = (options._ && options._[1]) || 'status';
 
   switch (sub) {
-    case 'install':      return install(options);
-    case 'register-org': return registerOrg(options);
-    case 'start':        return startServices(options);
-    case 'stop':          return stopServices(options);
-    case 'status':       return statusServices(options);
-    case 'uninstall':    return uninstall(options);
-    case 'self-update':  return selfUpdate(options);
+    case 'install':         return install(options);
+    case 'register-org':    return registerOrg(options);
+    case 'start':           return startServices(options);
+    case 'stop':            return stopServices(options);
+    case 'status':          return statusServices(options);
+    case 'uninstall':       return uninstall(options);
+    case 'set-credentials': return setCredentials(options);
+    case 'self-update':     return selfUpdate(options);
     default:
       logger.error(`Unknown subcommand: "${sub}". Try one of: install, register-org, start, stop, status, uninstall, self-update.`);
       throw new Error(`Unknown runner subcommand: ${sub}`);
@@ -101,12 +104,23 @@ async function install(options) {
     logger.log(`Detected ${orgs.length} admin org(s) (set EM_RUNNER_ORGS in .env to install against a subset): ${orgs.join(', ')}`);
   }
 
-  // 3. For each org: copy the template dir, run config.cmd inside it, register as service.
+  // 3a. Fetch logon credentials ONCE (env > DPAPI file > prompt). Reused across all
+  //     orgs below so the user isn't prompted N times.
+  const logonCreds = await getLogonCredentials();
+  if (logonCreds) {
+    logger.log(`Runner services will run as ${logonCreds.account} (creds source: ${logonCreds.source}).`);
+  } else {
+    logger.warn('No logon credentials configured — services will run as NT AUTHORITY\\NETWORK SERVICE.');
+    logger.warn('That account cannot see your CurrentUser cert store, so EV-token signing will fail.');
+    logger.warn('Run `npx mgr runner set-credentials` (or set WIN_RUNNER_LOGON_ACCOUNT/PASSWORD) to fix.');
+  }
+
+  // 3b. For each org: copy the template dir, run config.cmd inside it, register as service.
   const succeeded = [];
   const failedByReason = new Map();
   for (const org of orgs) {
     try {
-      await registerOrg({ ...options, _: ['runner', 'register-org', org], _templateDir: templateDir });
+      await registerOrg({ ...options, _: ['runner', 'register-org', org], _templateDir: templateDir, logonCreds });
       succeeded.push(org);
     } catch (e) {
       const reason = e.message || String(e);
@@ -149,6 +163,15 @@ async function install(options) {
 
   logger.log('Install complete. The watcher will auto-register new orgs as they become available.');
   logger.log(`Run 'npx mgr runner status' any time to check service health.`);
+}
+
+// ─── set-credentials ────────────────────────────────────────────────────────────
+async function setCredentials(options) {
+  ensureWindows();
+  const creds = await promptForLogonCredentials();
+  saveLogonCredentials(creds);
+  logger.log(`✓ Credentials saved (encrypted via DPAPI) for ${creds.account}.`);
+  logger.log('Re-run `npx mgr runner install` to apply them to the runner services.');
 }
 
 // ─── register-org ───────────────────────────────────────────────────────────────
@@ -252,6 +275,21 @@ async function registerOrg(options) {
     '--runasservice',
     '--replace',
   ];
+
+  // Optional: run the service as a specific Windows user (instead of the default
+  // NT AUTHORITY\NETWORK SERVICE) so it can see the user's cert store for EV signing.
+  // Creds are pre-fetched by install() and passed through options.logonCreds; for
+  // single-org register-org calls we fetch them here.
+  const logonCreds = options.logonCreds !== undefined
+    ? options.logonCreds
+    : await getLogonCredentials();
+  if (logonCreds) {
+    args.push('--windowslogonaccount',  logonCreds.account);
+    args.push('--windowslogonpassword', logonCreds.password);
+    logger.log(`  Service will run as ${logonCreds.account} (creds source: ${logonCreds.source})`);
+  } else {
+    logger.log(`  Service will run as NT AUTHORITY\\NETWORK SERVICE (default — no logon creds configured)`);
+  }
 
   // Run via `cmd.exe /c` instead of `shell: true`. .cmd files can't be spawned directly
   // by Node's CreateProcess on Windows, so we need cmd.exe as the shell — but `shell: true`
@@ -663,6 +701,156 @@ function scState(name) {
 
 function escapeRegExp(s) {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// ─── runner service logon credentials ───────────────────────────────────────
+//
+// The runner service runs as NT AUTHORITY\NETWORK SERVICE by default, but that
+// account has its own (empty) Windows cert store, so signtool can't see EV-
+// token certs imported under the user's CurrentUser\My. Solution: install the
+// service to run AS the user instead. config.cmd accepts:
+//   --windowslogonaccount <user> --windowslogonpassword <pass>
+//
+// To avoid making the user re-enter their password every install, EM stores
+// the password encrypted via Windows DPAPI (only the current user can decrypt
+// it; even another admin on the same box can't). Stored at
+// %APPDATA%\electron-manager\runner-logon.json
+//
+// Three ways to supply credentials, in priority order:
+//   1. WIN_RUNNER_LOGON_ACCOUNT + WIN_RUNNER_LOGON_PASSWORD env vars (CI/.env)
+//   2. The DPAPI-encrypted file at %APPDATA%\electron-manager\runner-logon.json
+//   3. Interactive prompt (only when neither of the above exist + stdin is a TTY)
+//
+// If we end up with nothing, fall back to NETWORK SERVICE (current behavior).
+
+const LOGON_FILE = process.platform === 'win32'
+  ? path.join(process.env.APPDATA || os.homedir(), 'electron-manager', 'runner-logon.json')
+  : path.join(os.homedir(), '.electron-manager', 'runner-logon.json');
+
+async function getLogonCredentials() {
+  // 1. Env vars take precedence (CI / .env-driven automation).
+  const envAcct = process.env.WIN_RUNNER_LOGON_ACCOUNT;
+  const envPass = process.env.WIN_RUNNER_LOGON_PASSWORD;
+  if (envAcct && envPass) {
+    return { account: envAcct, password: envPass, source: 'env' };
+  }
+
+  // 2. DPAPI-encrypted file from a prior `set-credentials` or `install` run.
+  if (jetpack.exists(LOGON_FILE)) {
+    try {
+      const decrypted = readEncryptedLogonFile();
+      if (decrypted && decrypted.account && decrypted.password) {
+        return { ...decrypted, source: 'dpapi' };
+      }
+    } catch (e) {
+      logger.warn(`Could not read saved logon credentials: ${e.message}`);
+    }
+  }
+
+  // 3. Interactive prompt (only if stdin is a real TTY — never in CI / piped contexts).
+  if (process.stdin.isTTY) {
+    const creds = await promptForLogonCredentials();
+    saveLogonCredentials(creds);
+    return { ...creds, source: 'prompt' };
+  }
+
+  return null;
+}
+
+async function promptForLogonCredentials() {
+  const readline = require('readline');
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const ask = (q) => new Promise((resolve) => rl.question(q, resolve));
+
+  logger.log('');
+  logger.log('Runner service logon credentials needed (so signtool can access your CurrentUser cert store).');
+  logger.log(`Use your Windows username (e.g. ${os.userInfo().username} or DOMAIN\\${os.userInfo().username}).`);
+
+  const account = (await ask(`Account [${os.userInfo().username}]: `)).trim() || os.userInfo().username;
+
+  // Hide password input by manually managing readline output.
+  process.stdout.write('Password: ');
+  rl.history = rl.history || [];
+  const password = await new Promise((resolve) => {
+    let buf = '';
+    const onData = (ch) => {
+      const code = ch.toString();
+      if (code === '\r' || code === '\n' || code === '\r\n') {
+        process.stdin.removeListener('data', onData);
+        process.stdin.setRawMode(false);
+        process.stdout.write('\n');
+        resolve(buf);
+      } else if (code === '') { // Ctrl+C
+        process.stdin.setRawMode(false);
+        process.exit(130);
+      } else if (code === '' || code === '\b') { // backspace
+        if (buf.length > 0) {
+          buf = buf.slice(0, -1);
+          process.stdout.write('\b \b');
+        }
+      } else {
+        buf += code;
+        process.stdout.write('*');
+      }
+    };
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.on('data', onData);
+  });
+
+  rl.close();
+  return { account, password };
+}
+
+function saveLogonCredentials({ account, password }) {
+  jetpack.dir(path.dirname(LOGON_FILE));
+  const encryptedPassword = dpapiProtect(password);
+  jetpack.write(LOGON_FILE, {
+    account,
+    encryptedPassword,
+    savedAt: new Date().toISOString(),
+  });
+}
+
+function readEncryptedLogonFile() {
+  const data = jetpack.read(LOGON_FILE, 'json');
+  if (!data || !data.account || !data.encryptedPassword) return null;
+  return { account: data.account, password: dpapiUnprotect(data.encryptedPassword) };
+}
+
+// DPAPI via PowerShell. ConvertFrom-SecureString without -Key uses the current
+// user's DPAPI scope by default — encrypted blob can only be decrypted by the
+// same user on the same machine.
+function dpapiProtect(plaintext) {
+  if (process.platform !== 'win32') return Buffer.from(plaintext, 'utf8').toString('base64');
+  const { spawnSync } = require('child_process');
+  const r = spawnSync('powershell', [
+    '-NoProfile', '-NonInteractive', '-Command',
+    `$s = ConvertTo-SecureString -String $env:EM_DPAPI_INPUT -AsPlainText -Force; ConvertFrom-SecureString -SecureString $s`,
+  ], {
+    encoding: 'utf8',
+    env: { ...process.env, EM_DPAPI_INPUT: plaintext },
+  });
+  if (r.status !== 0) {
+    throw new Error(`DPAPI encrypt failed: ${(r.stderr || '').trim()}`);
+  }
+  return (r.stdout || '').trim();
+}
+
+function dpapiUnprotect(encryptedBlob) {
+  if (process.platform !== 'win32') return Buffer.from(encryptedBlob, 'base64').toString('utf8');
+  const { spawnSync } = require('child_process');
+  const r = spawnSync('powershell', [
+    '-NoProfile', '-NonInteractive', '-Command',
+    `$s = ConvertTo-SecureString -String $env:EM_DPAPI_INPUT; [System.Net.NetworkCredential]::new('', $s).Password`,
+  ], {
+    encoding: 'utf8',
+    env: { ...process.env, EM_DPAPI_INPUT: encryptedBlob },
+  });
+  if (r.status !== 0) {
+    throw new Error(`DPAPI decrypt failed: ${(r.stderr || '').trim()}`);
+  }
+  return (r.stdout || '').replace(/\r?\n$/, '');
 }
 
 // Grant NT AUTHORITY\NETWORK SERVICE read+execute on `targetDir` recursively.

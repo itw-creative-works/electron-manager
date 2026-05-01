@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.2.15 — runner service runs AS the user (so signtool sees their cert store)
+
+The runner service installed as `NT AUTHORITY\NETWORK SERVICE` by default, which
+has its own (empty) Windows cert store. Signtool running under that identity
+couldn't see EV USB-token certs imported under `CurrentUser\My`, so signing
+failed with "No certificates were found that met all the given criteria"
+even when WIN_EV_TOKEN_PATH was set correctly.
+
+Fix: install the runner service to run as a specified Windows user account
+via `config.cmd --windowslogonaccount <user> --windowslogonpassword <pass>`.
+
+Three ways to supply credentials, priority order:
+1. `WIN_RUNNER_LOGON_ACCOUNT` + `WIN_RUNNER_LOGON_PASSWORD` env vars (CI / .env)
+2. DPAPI-encrypted file at `%APPDATA%\electron-manager\runner-logon.json`
+3. Interactive prompt during `mgr runner install` (saves to DPAPI file for re-use)
+
+If none of the above, falls back to NETWORK SERVICE (existing behavior).
+
+New subcommand `mgr runner set-credentials` to update saved creds without
+re-running install.
+
+Note on security: the DPAPI-encrypted blob can only be decrypted by the same
+user on the same machine. Even another admin on the box can't read it.
+
 ## 1.2.14 — _.env scaffold: actually include EV signing + EM test keys in Default
 
 v1.2.13 claimed to add `WIN_EV_TOKEN_PATH` / `WIN_CSC_KEY_PASSWORD` / `SIGNTOOL_PATH`
