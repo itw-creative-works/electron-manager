@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.16 — document WIN_RUNNER_LOGON_* in .env.example
+
+Missed adding the new `WIN_RUNNER_LOGON_ACCOUNT` and `WIN_RUNNER_LOGON_PASSWORD`
+env vars to `.env.example` in v1.2.15. Documenting them now under a "Windows
+runner service logon" section so it's discoverable for new runner-host setups.
+
 ## 1.2.15 — runner service runs AS the user (so signtool sees their cert store)
 
 The runner service installed as `NT AUTHORITY\NETWORK SERVICE` by default, which
