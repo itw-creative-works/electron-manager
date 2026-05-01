@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.14 — _.env scaffold: actually include EV signing + EM test keys in Default
+
+v1.2.13 claimed to add `WIN_EV_TOKEN_PATH` / `WIN_CSC_KEY_PASSWORD` / `SIGNTOOL_PATH`
+to the default `.env` scaffold but the edit didn't land in `src/defaults/_.env`
+(only in the changelog). v1.2.14 actually adds them.
+
+Also moved `EM_TEST_FIREBASE_ADMIN_KEY` and `EM_TEST_USER_UID` from where they
+ended up (Custom section, by accident) to Default — they're EM test framework
+keys, not user-custom values. Custom section is now empty for new projects.
+
 ## 1.2.13 — windows EV signing: wire WIN_EV_TOKEN_PATH / WIN_CSC_KEY_PASSWORD / SIGNTOOL_PATH
 
 Self-hosted Windows EV-token signing was broken end-to-end: the consumer's `.env`
