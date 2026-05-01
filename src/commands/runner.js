@@ -184,16 +184,28 @@ async function registerOrg(options) {
   const configCmd = path.join(orgRunnerDir, 'config.cmd');
   const svcCmd    = path.join(orgRunnerDir, 'svc.cmd');
   const runnerName = `em-runner-${os.hostname().toLowerCase()}-${org.toLowerCase()}`.slice(0, 64);   // GH max 64 chars
-  // Note: NOT passing --runasservice. That flag is silently ignored when --windowslogonaccount
-  // and --windowslogonpassword aren't provided too, leaving the runner registered with GH but
-  // with no Windows service to actually run it. We use the explicit two-step flow below
-  // (config.cmd to register, then svc.cmd install + start) which is the supported path.
+
+  // Two-phase flow:
+  //
+  // 1. config.cmd registers the runner with GitHub AND (because of --runasservice)
+  //    drops svc.cmd into the runner dir. Without --runasservice, svc.cmd is never
+  //    generated and step 2 fails with "command not recognized."
+  // 2. svc.cmd install + svc.cmd start actually create + start the Windows service.
+  //
+  // Why both? actions/runner's --runasservice docs claim it installs the service
+  // unattended, but in practice when --windowslogonaccount/--windowslogonpassword
+  // aren't passed too, the install step is silently skipped — runner registers with
+  // GH but no service exists locally. The SUPPORTED reliable path (per actions/runner
+  // README) is to use --runasservice purely as the "drop svc.cmd files" trigger, then
+  // explicitly call `svc.cmd install` ourselves. That defaults the service identity
+  // to NT AUTHORITY\NETWORK SERVICE (no creds needed) and surfaces real errors.
   const args = [
     '--unattended',
-    '--url',    `https://github.com/${org}`,
-    '--token',  regToken,
-    '--name',   runnerName,
-    '--labels', RUNNER_LABELS.join(','),
+    '--url',          `https://github.com/${org}`,
+    '--token',        regToken,
+    '--name',         runnerName,
+    '--labels',       RUNNER_LABELS.join(','),
+    '--runasservice', // drops svc.cmd; service install/start happens below
     '--replace',
   ];
 
@@ -223,10 +235,16 @@ async function registerOrg(options) {
     throw new Error(`config.cmd exited ${r.status === null ? 'null (killed)' : r.status} for ${org}.\n${detail || '(no output captured)'}`);
   }
 
-  // Install + start the Windows service that actually RUNS the runner agent. config.cmd
-  // only registers the runner with GitHub; without this step the runner shows online in
-  // GH's UI for ~30s then goes offline and jobs queue forever. svc.cmd is the bundled
-  // helper from actions/runner that wraps `sc.exe create` with the right binary path.
+  // svc.cmd should now exist (config --runasservice drops it). If it doesn't, that means
+  // config silently skipped the service-install path — surface a clear error rather than
+  // leaving the user with a registered-but-orphaned runner.
+  if (!jetpack.exists(svcCmd)) {
+    throw new Error(`svc.cmd was not created at ${svcCmd}. config.cmd's --runasservice step likely failed silently — re-run with admin privileges (Run as Administrator).`);
+  }
+
+  // Install + start the Windows service that actually RUNS the runner agent.
+  // svc.cmd defaults to running as NT AUTHORITY\NETWORK SERVICE — no creds required.
+  // Requires admin (the install step calls sc.exe create, which needs admin).
   const svcInstall = spawnSync('cmd.exe', ['/c', svcCmd, 'install'], {
     cwd:      orgRunnerDir,
     stdio:    ['ignore', 'pipe', 'pipe'],
