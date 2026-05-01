@@ -182,14 +182,18 @@ async function registerOrg(options) {
   }
 
   const configCmd = path.join(orgRunnerDir, 'config.cmd');
+  const svcCmd    = path.join(orgRunnerDir, 'svc.cmd');
   const runnerName = `em-runner-${os.hostname().toLowerCase()}-${org.toLowerCase()}`.slice(0, 64);   // GH max 64 chars
+  // Note: NOT passing --runasservice. That flag is silently ignored when --windowslogonaccount
+  // and --windowslogonpassword aren't provided too, leaving the runner registered with GH but
+  // with no Windows service to actually run it. We use the explicit two-step flow below
+  // (config.cmd to register, then svc.cmd install + start) which is the supported path.
   const args = [
     '--unattended',
     '--url',    `https://github.com/${org}`,
     '--token',  regToken,
     '--name',   runnerName,
     '--labels', RUNNER_LABELS.join(','),
-    '--runasservice',
     '--replace',
   ];
 
@@ -219,25 +223,65 @@ async function registerOrg(options) {
     throw new Error(`config.cmd exited ${r.status === null ? 'null (killed)' : r.status} for ${org}.\n${detail || '(no output captured)'}`);
   }
 
+  // Install + start the Windows service that actually RUNS the runner agent. config.cmd
+  // only registers the runner with GitHub; without this step the runner shows online in
+  // GH's UI for ~30s then goes offline and jobs queue forever. svc.cmd is the bundled
+  // helper from actions/runner that wraps `sc.exe create` with the right binary path.
+  const svcInstall = spawnSync('cmd.exe', ['/c', svcCmd, 'install'], {
+    cwd:      orgRunnerDir,
+    stdio:    ['ignore', 'pipe', 'pipe'],
+    encoding: 'utf8',
+    timeout:  60000,
+  });
+  if (svcInstall.status !== 0) {
+    const tail = ((svcInstall.stdout || '') + (svcInstall.stderr || '')).trim().split('\n').slice(-8).join('\n');
+    throw new Error(`svc.cmd install failed for ${org} (exit ${svcInstall.status}):\n${tail}`);
+  }
+
+  const svcStart = spawnSync('cmd.exe', ['/c', svcCmd, 'start'], {
+    cwd:      orgRunnerDir,
+    stdio:    ['ignore', 'pipe', 'pipe'],
+    encoding: 'utf8',
+    timeout:  60000,
+  });
+  if (svcStart.status !== 0) {
+    const tail = ((svcStart.stdout || '') + (svcStart.stderr || '')).trim().split('\n').slice(-8).join('\n');
+    // Don't fail hard — the service is installed, user can start it manually if start failed.
+    logger.warn(`svc.cmd start failed for ${org} (exit ${svcStart.status}): ${tail}`);
+  }
+
   // Track in our config.
   const cfg = readConfig();
   cfg.registeredOrgs = Array.from(new Set([...(cfg.registeredOrgs || []), org]));
   saveConfig(cfg);
 
-  logger.log(`✓ Registered runner against ${org}`);
+  logger.log(`✓ Registered + service installed for ${org}`);
 }
 
 // ─── start / stop / status ──────────────────────────────────────────────────────
 async function startServices() {
   ensureWindows();
-  await runScCommand('start', actionsRunnerServiceName());
-  await runScCommand('start', WATCHER_SERVICE_NAME);
+  const services = listActionsRunnerServices();
+  if (services.length === 0) {
+    logger.warn('No actions.runner.* services installed. Run `npx mgr runner install` first.');
+  }
+  for (const name of services) {
+    const r = scControl('start', name);
+    logger.log(`${r.ok ? '✓' : '✗'} start ${name}${r.ok ? '' : ` — ${r.message}`}`);
+  }
+  const watcher = scControl('start', WATCHER_SERVICE_NAME);
+  logger.log(`${watcher.ok ? '✓' : '✗'} start ${WATCHER_SERVICE_NAME}${watcher.ok ? '' : ` — ${watcher.message}`}`);
 }
 
 async function stopServices() {
   ensureWindows();
-  await runScCommand('stop', actionsRunnerServiceName());
-  await runScCommand('stop', WATCHER_SERVICE_NAME);
+  const services = listActionsRunnerServices();
+  for (const name of services) {
+    const r = scControl('stop', name);
+    logger.log(`${r.ok ? '✓' : '✗'} stop ${name}${r.ok ? '' : ` — ${r.message}`}`);
+  }
+  const watcher = scControl('stop', WATCHER_SERVICE_NAME);
+  logger.log(`${watcher.ok ? '✓' : '✗'} stop ${WATCHER_SERVICE_NAME}${watcher.ok ? '' : ` — ${watcher.message}`}`);
 }
 
 async function statusServices() {
@@ -248,9 +292,27 @@ async function statusServices() {
   logger.log(`Labels: ${(cfg.labels || RUNNER_LABELS).join(', ')}`);
   logger.log(`Registered orgs: ${(cfg.registeredOrgs || []).join(', ') || '(none)'}`);
   logger.log('');
-  logger.log('Service states:');
-  await runScCommand('query', actionsRunnerServiceName());
-  await runScCommand('query', WATCHER_SERVICE_NAME);
+
+  // Per-org runner services.
+  const services = listActionsRunnerServices();
+  if (services.length === 0) {
+    logger.warn('No actions.runner.* services installed.');
+    logger.warn('Run `npx mgr runner install` to create them — registration alone is not enough.');
+  } else {
+    logger.log(`Runner services (${services.length}):`);
+    for (const name of services) {
+      const state = scState(name);
+      const symbol = state === 'RUNNING' ? '✓' : state === 'STOPPED' ? '·' : '?';
+      logger.log(`  ${symbol} ${name} — ${state}`);
+    }
+  }
+
+  // Watcher service.
+  const watcherState = scState(WATCHER_SERVICE_NAME);
+  const watcherSymbol = watcherState === 'RUNNING' ? '✓' : watcherState === 'STOPPED' ? '·' : '?';
+  logger.log('');
+  logger.log(`Watcher service:`);
+  logger.log(`  ${watcherSymbol} ${WATCHER_SERVICE_NAME} — ${watcherState}`);
 }
 
 // ─── uninstall ──────────────────────────────────────────────────────────────────
@@ -392,13 +454,6 @@ async function selfUpdate() {
 
 const WATCHER_SERVICE_NAME = 'em-runner-watcher';
 
-function actionsRunnerServiceName() {
-  // actions/runner installs as `actions.runner.<owner>.<runner-name>` per registration.
-  // For status we just match the prefix; sc query supports wildcards via `sc query type= service`
-  // but we'll just return the canonical prefix and let runScCommand do its best.
-  return 'actions.runner';
-}
-
 function ensureWindows() {
   if (process.platform !== 'win32' && !process.env.EM_RUNNER_FORCE) {
     throw new Error('This command only runs on Windows. Set EM_RUNNER_FORCE=1 to override (testing only).');
@@ -518,13 +573,49 @@ async function installWatcherService() {
   });
 }
 
-async function runScCommand(action, name) {
-  const { spawn } = require('child_process');
-  return new Promise((resolve) => {
-    const child = spawn('sc', [action, name], { stdio: 'inherit' });
-    child.on('close', () => resolve());
-    child.on('error', () => resolve());
-  });
+// Enumerate all `actions.runner.*` services on this machine (one per registered org).
+// Uses `sc query state= all` (note the space — that's the documented form) to get every
+// service including stopped ones, then filters by SERVICE_NAME prefix.
+function listActionsRunnerServices() {
+  if (process.platform !== 'win32') return [];
+  const { spawnSync } = require('child_process');
+  const r = spawnSync('sc', ['query', 'state=', 'all'], { encoding: 'utf8' });
+  if (r.status !== 0) return [];
+  const out = r.stdout || '';
+  const names = [];
+  for (const line of out.split(/\r?\n/)) {
+    const m = /^SERVICE_NAME:\s*(actions\.runner\..+)$/.exec(line.trim());
+    if (m) names.push(m[1]);
+  }
+  return names.sort();
+}
+
+// Run `sc <action> <name>`. Returns { ok, message }. Doesn't print — caller decides format.
+// Used by start/stop. `query` is a separate path because we want to parse the state.
+function scControl(action, name) {
+  const { spawnSync } = require('child_process');
+  const r = spawnSync('sc', [action, name], { encoding: 'utf8' });
+  // sc exit codes are weird:
+  //   0      — success (started/stopped/queried)
+  //   1056   — service already running (start)
+  //   1062   — service not started (stop on already-stopped)
+  //   1060   — service not found
+  // Treat 0/1056/1062 as success.
+  const ok = r.status === 0 || r.status === 1056 || r.status === 1062;
+  const message = (r.stderr || r.stdout || '').trim().split('\n').slice(-2).join(' ').trim() || `exit ${r.status}`;
+  return { ok, message, exitCode: r.status };
+}
+
+// Parse the current STATE from `sc query <name>`. Returns 'RUNNING' | 'STOPPED' | 'NOT_INSTALLED' | 'UNKNOWN'.
+function scState(name) {
+  if (process.platform !== 'win32') return 'UNKNOWN';
+  const { spawnSync } = require('child_process');
+  const r = spawnSync('sc', ['query', name], { encoding: 'utf8' });
+  if (r.status === 1060) return 'NOT_INSTALLED';
+  if (r.status !== 0) return 'UNKNOWN';
+  const out = r.stdout || '';
+  const m = /STATE\s*:\s*\d+\s+(\w+)/.exec(out);
+  return m ? m[1].toUpperCase() : 'UNKNOWN';
 }
 
 function readConfig() {

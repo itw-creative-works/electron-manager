@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.2.5 — runner service install fix, status output overhaul, release spinner
+
+### Critical fix: `npx mgr runner install` now actually installs the Windows services
+
+The previous install flow registered each org's runner with GitHub via `config.cmd
+--runasservice` — but `--runasservice` is silently ignored by actions/runner
+unless `--windowslogonaccount` and `--windowslogonpassword` are also provided.
+Result: every install since v1.0.0 created the registrations on GitHub's side
+but **left zero Windows services** to actually run them. The runner showed up
+in GH for ~30s then went offline because nothing was running it locally.
+
+Switched to the explicit two-step flow:
+1. `config.cmd --unattended --url ... --token ...` (without `--runasservice`)
+2. `svc.cmd install` — creates the Windows service for that registration
+3. `svc.cmd start` — starts it
+
+After v1.2.5, `Get-Service actions.runner.*` should show one running service per
+registered org. Before v1.2.5, that command returned nothing.
+
+**Action required on Windows runner host**: re-run `npx mgr runner install` to
+pick up the fix. Existing registrations will be uninstalled and re-created with
+the missing service install step now included.
+
+### `npx mgr runner status` output overhaul
+
+Was uninformative — called `sc query actions.runner` (not a real service) and
+just dumped 1060 errors. Now enumerates all `actions.runner.*` services on the
+machine, prints each with state (RUNNING / STOPPED / NOT_INSTALLED) + a status
+icon, and clearly tells you to run `install` if no services exist.
+
+`start` and `stop` were similarly broken — now iterate over the discovered
+services and emit one line per service with success/failure.
+
+### `npx mgr release` spinner + elapsed + poll counter
+
+Was static between log dumps (poll every 5s, terminal looked frozen for minutes
+at a time when no new logs were emitting). Added an animated spinner line at
+the bottom that tick at 250ms with: spinner frame, current run status, elapsed
+time, poll count, and per-job symbols. Spinner clears before any real log line
+prints, then re-renders. TTY-only — falls back to silent in non-TTY contexts
+(CI logs, file output).
+
 ## 1.2.4 — silent octokit during release stream
 
 `getOctokit({ silent: true })` passes a no-op logger to octokit so transient

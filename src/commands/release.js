@@ -80,83 +80,140 @@ module.exports = async function release(options = {}) {
   fs.writeFileSync(buildLogPath, `# release run ${run.html_url}\n# started ${new Date().toISOString()}\n\n`);
   const logFile = fs.createWriteStream(buildLogPath, { flags: 'a' });
 
-  function emit(line) {
+  // Spinner state. We tick every 250ms even between polls so the terminal feels alive.
+  // The spinner line uses \r to overwrite itself; before printing real content we clear
+  // the line, write content, then re-render the spinner. File output is unaffected.
+  const startedAt   = Date.now();
+  const isTty       = process.stdout.isTTY === true;
+  const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+  let spinnerFrame = 0;
+  let pollCount    = 0;
+  let latestState  = null;
+  let latestJobs   = [];
+
+  function clearSpinner() {
+    if (!isTty) return;
+    process.stdout.write('\r\x1b[2K');
+  }
+
+  function renderSpinner() {
+    if (!isTty || !latestState) return;
+    const frame   = SPINNER_FRAMES[spinnerFrame % SPINNER_FRAMES.length];
+    const elapsed = formatElapsed(Date.now() - startedAt);
+    const status  = `${latestState.status}${latestState.conclusion ? ` (${latestState.conclusion})` : ''}`;
+    const jobBits = latestJobs.map((j) => `${jobSymbol(j)} ${j.name}`).join(' ');
+    const line    = `${frame}  ${status} · ${elapsed} · ${pollCount} polls · ${jobBits}`;
+    // Truncate so we never wrap (which breaks the \r overwrite).
+    const cols    = process.stdout.columns || 120;
+    const safe    = line.length > cols - 1 ? line.slice(0, cols - 2) + '…' : line;
+    process.stdout.write(`\r${safe}`);
+  }
+
+  // Print line(s) to stdout AND tee to file. Clears spinner first; spinner re-renders next tick.
+  function print(line) {
+    clearSpinner();
     process.stdout.write(line);
-    // Strip ANSI for the file so it's easy to read/grep.
     logFile.write(stripAnsi(line));
   }
+
+  // Tick the spinner ~4 times/sec so it animates between polls.
+  const spinnerTimer = isTty ? setInterval(() => {
+    spinnerFrame += 1;
+    renderSpinner();
+  }, 250) : null;
 
   // 5. Poll until completion. Track byte offsets per job so we only print new lines.
   const printedByJob = new Map(); // jobId -> chars printed so far
   let lastStatusLine = '';
 
-  while (true) {
-    const { data: state } = await octokit.rest.actions.getWorkflowRun({
-      owner, repo, run_id: run.id,
-    });
+  try {
+    while (true) {
+      pollCount += 1;
+      const { data: state } = await octokit.rest.actions.getWorkflowRun({
+        owner, repo, run_id: run.id,
+      });
 
-    // Pull all jobs. Each job has steps; each step has a step-level status.
-    const { data: jobsResp } = await octokit.rest.actions.listJobsForWorkflowRun({
-      owner, repo, run_id: run.id, per_page: 100,
-    });
-    const jobs = jobsResp.jobs || [];
+      // Pull all jobs. Each job has steps; each step has a step-level status.
+      const { data: jobsResp } = await octokit.rest.actions.listJobsForWorkflowRun({
+        owner, repo, run_id: run.id, per_page: 100,
+      });
+      const jobs = jobsResp.jobs || [];
+      latestState = state;
+      latestJobs  = jobs;
 
-    // For each job, fetch its logs (only available once steps complete; for in-progress
-    // jobs, GH returns 404 or partial — we tolerate both).
-    for (const job of jobs) {
-      // Skip queued jobs entirely (no logs yet).
-      if (job.status === 'queued') continue;
+      // For each job, fetch its logs (only available once steps complete; for in-progress
+      // jobs, GH returns 404 or partial — we tolerate both).
+      for (const job of jobs) {
+        // Skip queued jobs entirely (no logs yet).
+        if (job.status === 'queued') continue;
 
-      let logsText = '';
-      try {
-        const { data } = await octokit.request('GET /repos/{owner}/{repo}/actions/jobs/{job_id}/logs', {
-          owner, repo, job_id: job.id,
-        });
-        // Octokit returns the raw text content here.
-        logsText = typeof data === 'string' ? data : Buffer.from(data || '').toString('utf8');
-      } catch (e) {
-        // 404 = logs not ready yet. Other errors we just skip until next tick.
-        continue;
-      }
-
-      const printed = printedByJob.get(job.id) || 0;
-      if (logsText.length > printed) {
-        const fresh = logsText.slice(printed);
-        // Prefix each line with the job name so interleaved output is readable.
-        const prefix = `[${job.name}] `;
-        for (const rawLine of fresh.split('\n')) {
-          if (!rawLine) continue;
-          // GH log lines start with an ISO timestamp + space — we strip just the date
-          // for terminal readability but keep it in the file via stripAnsi pass-through.
-          emit(`${prefix}${rawLine}\n`);
+        let logsText = '';
+        try {
+          const { data } = await octokit.request('GET /repos/{owner}/{repo}/actions/jobs/{job_id}/logs', {
+            owner, repo, job_id: job.id,
+          });
+          // Octokit returns the raw text content here.
+          logsText = typeof data === 'string' ? data : Buffer.from(data || '').toString('utf8');
+        } catch (e) {
+          // 404 = logs not ready yet. Other errors we just skip until next tick.
+          continue;
         }
-        printedByJob.set(job.id, logsText.length);
+
+        const printed = printedByJob.get(job.id) || 0;
+        if (logsText.length > printed) {
+          const fresh = logsText.slice(printed);
+          // Prefix each line with the job name so interleaved output is readable.
+          const prefix = `[${job.name}] `;
+          for (const rawLine of fresh.split('\n')) {
+            if (!rawLine) continue;
+            print(`${prefix}${rawLine}\n`);
+          }
+          printedByJob.set(job.id, logsText.length);
+        }
       }
-    }
 
-    // Print a one-line status banner if it changed (no spam — only on transition).
-    const banner = formatStatusBanner(state, jobs);
-    if (banner !== lastStatusLine) {
-      emit(`\n${banner}\n`);
-      lastStatusLine = banner;
-    }
-
-    if (state.status === 'completed') {
-      logFile.end();
-      const success = state.conclusion === 'success';
-      const symbol  = success ? '✓' : '✗';
-      logger.log(`${symbol} Run ${state.conclusion} — ${state.html_url}`);
-      logger.log(`Logs: ${path.relative(projectRoot, buildLogPath)}`);
-      if (!success) {
-        process.exitCode = 1;
-        throw new Error(`Release run failed (conclusion=${state.conclusion}). See ${buildLogPath} or ${state.html_url}.`);
+      // Print a one-line status banner if it changed (no spam — only on transition).
+      const banner = formatStatusBanner(state, jobs);
+      if (banner !== lastStatusLine) {
+        print(`\n${banner}\n`);
+        lastStatusLine = banner;
       }
-      return;
-    }
 
-    await sleep(POLL_INTERVAL_MS);
+      if (state.status === 'completed') {
+        clearSpinner();
+        logFile.end();
+        const success = state.conclusion === 'success';
+        const symbol  = success ? '✓' : '✗';
+        logger.log(`${symbol} Run ${state.conclusion} — ${state.html_url}`);
+        logger.log(`Logs: ${path.relative(projectRoot, buildLogPath)}`);
+        if (!success) {
+          process.exitCode = 1;
+          throw new Error(`Release run failed (conclusion=${state.conclusion}). See ${buildLogPath} or ${state.html_url}.`);
+        }
+        return;
+      }
+
+      await sleep(POLL_INTERVAL_MS);
+    }
+  } finally {
+    if (spinnerTimer) clearInterval(spinnerTimer);
+    clearSpinner();
   }
 };
+
+function formatElapsed(ms) {
+  const totalSec = Math.floor(ms / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return m > 0 ? `${m}m ${String(s).padStart(2, '0')}s` : `${s}s`;
+}
+
+function jobSymbol(j) {
+  if (j.status === 'completed') return j.conclusion === 'success' ? '✓' : '✗';
+  if (j.status === 'in_progress') return '…';
+  if (j.status === 'queued') return '·';
+  return '?';
+}
 
 async function waitForNewRun({ octokit, owner, repo, after, workflowFile }) {
   const deadline = Date.now() + 60_000;
@@ -174,13 +231,7 @@ async function waitForNewRun({ octokit, owner, repo, after, workflowFile }) {
 }
 
 function formatStatusBanner(run, jobs) {
-  const parts = jobs.map((j) => {
-    const symbol = j.status === 'completed' ? (j.conclusion === 'success' ? '✓' : '✗')
-                : j.status === 'in_progress' ? '…'
-                : j.status === 'queued' ? '·'
-                : '?';
-    return `${symbol} ${j.name}`;
-  });
+  const parts = jobs.map((j) => `${jobSymbol(j)} ${j.name}`);
   return `── ${run.status}${run.conclusion ? ` (${run.conclusion})` : ''} ── ${parts.join('  |  ')}`;
 }
 
