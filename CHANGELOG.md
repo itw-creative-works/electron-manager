@@ -1,5 +1,54 @@
 # Changelog
 
+## 1.2.1 — release pipeline finalize, manual-trigger workflow, CI test fixes
+
+### Release pipeline — closes the v1.2.0 gap
+
+- **Manual-trigger only** — `src/defaults/.github/workflows/build.yml` now uses
+  `on: workflow_dispatch` only. Was triggering on every push to `main` which
+  burned self-hosted Windows runner cycles for no reason.
+- **Signed Windows binaries now reach the update-server release.** Previously
+  `windows-sign` job uploaded via `softprops/action-gh-release@v2` gated on
+  `startsWith(github.ref, 'refs/tags/')` — a gate that never fired since the
+  workflow doesn't trigger on tag push. Replaced with a deterministic
+  `npx mgr finalize-release --signed-dir release/signed` step that finds the
+  release by `v${version}` and uploads via Octokit. Idempotent (clobbers
+  existing assets with the same name).
+- **Windows binaries also mirror to download-server.** Same finalize step
+  uploads signed `.exe` to the consumer's `download-server@installer` tag with
+  stable filenames (e.g. `Deployment-Playground-Setup.exe`) so marketing
+  links never change. Mac/linux already mirrored via `gulp mirror-downloads`
+  in their `npm run release` step; windows now matches.
+- **Auto-updater feeds (latest.yml / latest-mac.yml / latest-linux.yml) and
+  blockmaps are uploaded too** — windows-sign now signs + re-uploads the
+  feed metadata so electron-updater can serve it from the same release.
+- **Final "ensure published" job** flips the update-server release from
+  Draft→Published via `npx mgr finalize-release --publish`. Also sanity-checks
+  that all 3 auto-updater feeds are present and prints the release URL.
+
+### `mgr finalize-release` command
+
+New CLI command, two modes:
+
+- `--signed-dir <path>` — upload signed Windows artifacts to update-server
+  release (matched by `v${pkg.version}`), then mirror to download-server.
+- `--publish` — flip update-server release Draft→Published, sanity-check
+  auto-updater feeds.
+
+Reads `config.releases.{owner,repo}` and `config.downloads.{owner,repo,tag}` —
+falls back to the consumer's own GitHub owner if not set.
+
+### CI test fixes
+
+- **Audit suite no longer leaks publish-mode env into minimal scaffolds.**
+  Workflow sets `EM_BUILD_MODE=true EM_IS_PUBLISH=true` globally — audit
+  tests now explicitly clear those before running so they don't fail
+  `brand.images.icon` file-existence checks against synthetic configs.
+- **`tar can extract zip` test skips on Linux.** GNU tar doesn't support
+  zip extraction; the production code path (Windows runner install) only
+  ever runs on Windows where bsdtar handles zip natively. macOS also runs
+  the test as smoke (bsdtar there too).
+
 ## 1.2.0 — windows rewrite, inset titlebar, hide-on-close, boot harness fixes
 
 ### Windows — lazy creation + inset titlebar + Discord-style hide-on-close

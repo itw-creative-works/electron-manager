@@ -146,6 +146,15 @@ module.exports = {
         // Validates the tar approach works against an actual zip with the layout
         // actions/runner ships. We don't pull from GH on every test (slow + flaky);
         // instead build a tiny fixture zip on disk via Node, then extract via tar.
+        //
+        // The runner install script only ever executes on Windows (where tar is bsdtar
+        // and supports zip). macOS also ships bsdtar so it's a valid local check too.
+        // GNU tar on Linux does NOT support zip extraction — skip there since the
+        // production code path never runs on linux anyway.
+        if (process.platform === 'linux') {
+          ctx.skip('GNU tar on Linux does not support zip — production code only runs on windows');
+        }
+
         const fs = require('fs');
         const os = require('os');
         const { spawnSync } = require('child_process');

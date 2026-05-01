@@ -18,6 +18,7 @@ const ALIASES = {
   'validate-certs': ['certs', '--validate-certs'],
   'sign-windows':   ['--sign-windows'],
   'push-secrets':   ['secrets', '--push-secrets'],
+  'finalize-release': ['finalize', '--finalize-release'],
   runner:           ['--runner'],
 };
 

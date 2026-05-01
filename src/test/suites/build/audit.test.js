@@ -36,10 +36,14 @@ function stageConsumer(overrides = {}) {
 function runAudit(cwd, env = {}) {
   return new Promise((resolve) => {
     const origCwd = process.cwd();
+    // Force build/publish env off — minimal scaffolds don't include icons/cert files.
+    // Tests that want to exercise publish-mode checks pass env explicitly.
+    const baseEnv = { EM_BUILD_MODE: '', EM_IS_PUBLISH: '', EM_IS_SERVER: '' };
+    const allEnv  = { ...baseEnv, ...env };
     const origEnv = {};
-    for (const k of Object.keys(env)) {
+    for (const k of Object.keys(allEnv)) {
       origEnv[k] = process.env[k];
-      process.env[k] = env[k];
+      process.env[k] = allEnv[k];
     }
     process.chdir(cwd);
     try {
@@ -49,6 +53,7 @@ function runAudit(cwd, env = {}) {
       process.chdir(origCwd);
       for (const [k, v] of Object.entries(origEnv)) {
         if (v === undefined) delete process.env[k];
+        else if (v === '') delete process.env[k];
         else process.env[k] = v;
       }
     }
