@@ -1,5 +1,48 @@
 # Changelog
 
+## 1.2.3 — `npm run release` now triggers CI + streams logs locally
+
+### `npm run release` redefined: trigger CI, stream logs, exit on success
+
+Inspired by browser-extension-manager's local-feels-cloud release flow. Running
+`npm run release` (or `npx mgr release`) in a consumer project now:
+
+1. Discovers `owner/repo` from `package.json#repository.url` (falls back to
+   `git remote get-url origin`).
+2. POSTs `workflow_dispatch` to `<owner>/<repo>` workflow `build.yml` on the
+   current git branch (override via `--ref`).
+3. Polls every 5s for the new run, then for each job's logs as soon as they
+   become fetchable (GH only exposes logs after each step completes — so the
+   "stream" is a polite fiction, but a useful one).
+4. Prints job-prefixed log lines as they arrive AND tees the full log
+   (ANSI-stripped) to `logs/build.log`.
+5. Exits 0 on success, 1 on any job failure.
+
+The OLD `npm run release` behavior (local sign + notarize + publish from the
+dev's own machine) is preserved as `npm run release:local` for the rare case
+you actually want it.
+
+`projectScripts` updated:
+- `release` → `npx mgr release` (NEW — triggers CI)
+- `release:local` → the old in-process release (signs + publishes locally)
+- `package` → `npx cross-env EM_BUILD_MODE=true npm run gulp -- packageBuild`
+  (build + electron-builder package, NO publish — used by Windows CI runner)
+
+### CI workflow fixes (uncovered by run #2 in deployment-playground)
+
+- **Windows job now runs `npm run package`** instead of `npm run build`.
+  `gulp build` only compiles bundles — it doesn't run `electron-builder`, so
+  the previous workflow produced no `release/*.exe` to upload as artifact.
+  Switched to `gulp packageBuild` (build + package, no publish).
+- **`windows-strategy` job now runs `npm ci`** before requiring `json5` to
+  parse the consumer config. Previously it called `node -e "require('json5')"`
+  on a freshly-checked-out repo with no node_modules, which crashed with
+  MODULE_NOT_FOUND. The job needs full deps to read the JSON5 config without
+  resorting to regex.
+- **Mac/linux jobs now run `npm run release:local`** instead of
+  `npm run release` (the new `release` script triggers CI — using it inside
+  CI would be infinite recursion).
+
 ## 1.2.2 — fix mac entitlements path + windows env syntax
 
 ### Bugfixes uncovered by first end-to-end CI run

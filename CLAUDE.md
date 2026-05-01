@@ -216,6 +216,7 @@ Implementation: `src/utils/attach-log-file.js` wraps `process.stdout.write` and 
 | `push-secrets` | real | read `.env` Default section, encrypt via libsodium, push to GH Actions secrets. Auto-base64s file paths. **Auto-runs at end of `setup`** when `GH_TOKEN` is set. |
 | `sign-windows` | real | strategy-aware EV/cloud/local signer. Self-hosted runs `signtool` against EV token; cloud dispatches to provider CLI; local is a no-op with a clear message. |
 | `finalize-release` | real | `--signed-dir <path>` uploads signed Windows installers to the update-server release (created by mac/linux's electron-builder publish) AND mirrors them to download-server's installer tag with stable filenames. `--publish` flips the update-server release Draft→Published so electron-updater feeds work. CI workflow runs both modes (windows-sign job calls `--signed-dir`, finalize job calls `--publish`). |
+| `release` | real | Trigger the consumer's GH Actions Build & Release workflow via `workflow_dispatch`, then poll-stream every job's logs to the local terminal AND tee them to `logs/build.log`. Exits 0 on workflow success, 1 on failure. This is the canonical "ship a release" UX — `npm run release` in any consumer maps to this. The legacy "sign + publish from my own laptop" flow is preserved as `npm run release:local`. |
 
 ## File Conventions
 

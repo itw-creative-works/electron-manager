@@ -1,0 +1,202 @@
+// release — trigger the GitHub Actions Build & Release workflow + stream logs locally.
+//
+// Replaces the old "do it from my laptop" release flow with "let CI do it, but make it
+// feel local." User runs `npm run release` (or `npx mgr release`) and gets:
+//   1. A workflow_dispatch POST to GH Actions on the consumer's repo (owner/repo derived
+//      from package.json#repository.url, falling back to git remote origin).
+//   2. A few seconds of waiting while GH spins up the run.
+//   3. Live polling of every job's logs at 5s intervals, printing NEW lines as they
+//      arrive (job-prefixed) so it looks like streaming.
+//   4. Everything teed to <root>/logs/build.log with ANSI codes preserved on stdout
+//      and stripped from the file (matches the dev/start log convention).
+//   5. Exit 0 on success, 1 on any job failure.
+//
+// Why poll instead of stream? GH Actions doesn't expose live stdout — logs are only
+// fetchable AFTER each STEP completes. So "streaming" is a polite fiction: every 5s
+// we re-fetch each job's logs and diff against what we already printed.
+
+const path     = require('path');
+const fs       = require('fs');
+const jetpack  = require('fs-jetpack');
+
+const { discoverRepo, getOctokit } = require('../utils/github.js');
+const Manager = new (require('../build.js'));
+
+const logger = Manager.logger('release');
+
+const POLL_INTERVAL_MS = 5000;
+const WORKFLOW_FILE    = 'build.yml';
+
+module.exports = async function release(options = {}) {
+  const projectRoot = process.cwd();
+
+  if (!process.env.GH_TOKEN) {
+    throw new Error('GH_TOKEN not set in env. Set it in .env (or shell) so we can dispatch the workflow.');
+  }
+
+  const octokit = getOctokit();
+  if (!octokit) {
+    throw new Error('Failed to create octokit (missing GH_TOKEN?).');
+  }
+
+  // Discover repo from package.json#repository.url (falls back to git remote).
+  let owner, repo;
+  try {
+    ({ owner, repo } = await discoverRepo(projectRoot));
+  } catch (e) {
+    throw new Error(`Could not determine GitHub repo: ${e.message}`);
+  }
+
+  // Discover ref (current branch or override via --ref).
+  const ref = options.ref || (await currentBranch(projectRoot)) || 'main';
+
+  logger.log(`Triggering ${owner}/${repo} workflow ${WORKFLOW_FILE} on ref=${ref}...`);
+
+  // 1. Mark a "before" timestamp so we can identify the new run we just dispatched.
+  const before = new Date();
+
+  // 2. Dispatch.
+  await octokit.rest.actions.createWorkflowDispatch({
+    owner, repo,
+    workflow_id: WORKFLOW_FILE,
+    ref,
+  });
+
+  // 3. Wait for the new run to appear (GH Actions takes a few seconds to register it).
+  const run = await waitForNewRun({ octokit, owner, repo, after: before, workflowFile: WORKFLOW_FILE });
+  if (!run) {
+    throw new Error('Workflow dispatch succeeded but no new run appeared after 60s. Check GitHub Actions UI.');
+  }
+
+  logger.log(`Run started: ${run.html_url}`);
+
+  // 4. Set up the build log tee.
+  const logsDir = path.join(projectRoot, 'logs');
+  jetpack.dir(logsDir);
+  const buildLogPath = path.join(logsDir, 'build.log');
+  // Truncate so each release run starts fresh.
+  fs.writeFileSync(buildLogPath, `# release run ${run.html_url}\n# started ${new Date().toISOString()}\n\n`);
+  const logFile = fs.createWriteStream(buildLogPath, { flags: 'a' });
+
+  function emit(line) {
+    process.stdout.write(line);
+    // Strip ANSI for the file so it's easy to read/grep.
+    logFile.write(stripAnsi(line));
+  }
+
+  // 5. Poll until completion. Track byte offsets per job so we only print new lines.
+  const printedByJob = new Map(); // jobId -> chars printed so far
+  let lastStatusLine = '';
+
+  while (true) {
+    const { data: state } = await octokit.rest.actions.getWorkflowRun({
+      owner, repo, run_id: run.id,
+    });
+
+    // Pull all jobs. Each job has steps; each step has a step-level status.
+    const { data: jobsResp } = await octokit.rest.actions.listJobsForWorkflowRun({
+      owner, repo, run_id: run.id, per_page: 100,
+    });
+    const jobs = jobsResp.jobs || [];
+
+    // For each job, fetch its logs (only available once steps complete; for in-progress
+    // jobs, GH returns 404 or partial — we tolerate both).
+    for (const job of jobs) {
+      // Skip queued jobs entirely (no logs yet).
+      if (job.status === 'queued') continue;
+
+      let logsText = '';
+      try {
+        const { data } = await octokit.request('GET /repos/{owner}/{repo}/actions/jobs/{job_id}/logs', {
+          owner, repo, job_id: job.id,
+        });
+        // Octokit returns the raw text content here.
+        logsText = typeof data === 'string' ? data : Buffer.from(data || '').toString('utf8');
+      } catch (e) {
+        // 404 = logs not ready yet. Other errors we just skip until next tick.
+        continue;
+      }
+
+      const printed = printedByJob.get(job.id) || 0;
+      if (logsText.length > printed) {
+        const fresh = logsText.slice(printed);
+        // Prefix each line with the job name so interleaved output is readable.
+        const prefix = `[${job.name}] `;
+        for (const rawLine of fresh.split('\n')) {
+          if (!rawLine) continue;
+          // GH log lines start with an ISO timestamp + space — we strip just the date
+          // for terminal readability but keep it in the file via stripAnsi pass-through.
+          emit(`${prefix}${rawLine}\n`);
+        }
+        printedByJob.set(job.id, logsText.length);
+      }
+    }
+
+    // Print a one-line status banner if it changed (no spam — only on transition).
+    const banner = formatStatusBanner(state, jobs);
+    if (banner !== lastStatusLine) {
+      emit(`\n${banner}\n`);
+      lastStatusLine = banner;
+    }
+
+    if (state.status === 'completed') {
+      logFile.end();
+      const success = state.conclusion === 'success';
+      const symbol  = success ? '✓' : '✗';
+      logger.log(`${symbol} Run ${state.conclusion} — ${state.html_url}`);
+      logger.log(`Logs: ${path.relative(projectRoot, buildLogPath)}`);
+      if (!success) {
+        process.exitCode = 1;
+        throw new Error(`Release run failed (conclusion=${state.conclusion}). See ${buildLogPath} or ${state.html_url}.`);
+      }
+      return;
+    }
+
+    await sleep(POLL_INTERVAL_MS);
+  }
+};
+
+async function waitForNewRun({ octokit, owner, repo, after, workflowFile }) {
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    const { data } = await octokit.rest.actions.listWorkflowRuns({
+      owner, repo, workflow_id: workflowFile, per_page: 5, event: 'workflow_dispatch',
+    });
+    const runs = data.workflow_runs || [];
+    // The newest run created strictly after our dispatch timestamp.
+    const fresh = runs.find((r) => new Date(r.created_at).getTime() >= after.getTime() - 1000);
+    if (fresh) return fresh;
+    await sleep(2000);
+  }
+  return null;
+}
+
+function formatStatusBanner(run, jobs) {
+  const parts = jobs.map((j) => {
+    const symbol = j.status === 'completed' ? (j.conclusion === 'success' ? '✓' : '✗')
+                : j.status === 'in_progress' ? '…'
+                : j.status === 'queued' ? '·'
+                : '?';
+    return `${symbol} ${j.name}`;
+  });
+  return `── ${run.status}${run.conclusion ? ` (${run.conclusion})` : ''} ── ${parts.join('  |  ')}`;
+}
+
+async function currentBranch(projectRoot) {
+  try {
+    const { execute } = require('node-powertools');
+    const out = await execute('git rev-parse --abbrev-ref HEAD', { cwd: projectRoot, log: false });
+    return String(out || '').trim();
+  } catch (e) {
+    return null;
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function stripAnsi(s) {
+  // Minimal ANSI stripper — handles CSI sequences (colors, cursor moves).
+  return String(s).replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+}

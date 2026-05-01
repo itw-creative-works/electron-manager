@@ -85,19 +85,19 @@ jobs:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_TEAM_ID:    ${{ secrets.APPLE_TEAM_ID }}
-        run: npm run release
+        run: npm run release:local
 
       # Linux — no signing
       - if: matrix.os == 'ubuntu-latest'
-        run: npm run release
+        run: npm run release:local
 
-      # Windows — build unsigned; signing happens in the windows-sign job below.
-      # We DO NOT publish here. Mac/linux's `npm run release` already created the GH Release
-      # via electron-builder; windows-sign will upload the signed .exe to that same release.
+      # Windows — package (build + electron-builder package) unsigned. We do NOT publish
+      # here. Mac/linux's `npm run release:local` step already created the GH Release via
+      # electron-builder publish; windows-sign uploads signed .exe to that same release.
       - if: matrix.os == 'windows-latest'
         env:
           EM_SKIP_WIN_SIGN: 'true'
-        run: npm run build
+        run: npm run package
 
       - if: matrix.os == 'windows-latest'
         uses: actions/upload-artifact@v4
@@ -120,6 +120,11 @@ jobs:
       strategy: ${{ steps.resolve.outputs.strategy }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
       - id: resolve
         run: |
           STRATEGY=$(node -e "const fs=require('fs'),JSON5=require('json5');const c=JSON5.parse(fs.readFileSync('config/electron-manager.json','utf8'));console.log(c?.signing?.windows?.strategy || 'self-hosted');")
