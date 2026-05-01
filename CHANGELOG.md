@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.2.17 — `runner install` auto-starts the Logon Task
+
+Follow-up to 1.2.16. After registering each per-org Logon Task, `register-org`
+now also fires the task immediately via `schtasks /Run`, so the runner is
+`online` on GitHub the moment install finishes — no need to log out and back
+in to trigger the ONLOGON event. Previously every fresh install left runners
+in `Ready, not Running` state and any queued workflow waited until the user
+manually re-logged in or ran `npx mgr runner start`. Auto-start is best-effort:
+if `/Run` fails (e.g. perms), we log a warning and leave registration intact;
+the user can recover with `schtasks /Run /TN <name>` or by logging out + in.
+
+Applies to both `mgr runner install` (multi-org) and `mgr runner register-org
+<org>` (single-org), since the auto-start lives inside `registerOrg`.
+
 ## 1.2.16 — runner switched to Logon Task; workflow `platforms` input; draft-on-missing release
 
 ### Self-hosted runner: Windows Service → Logon Task

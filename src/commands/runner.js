@@ -331,12 +331,28 @@ async function registerOrg(options) {
     password:  (logonCreds && logonCreds.password) || null,
   });
 
+  // Fire the task immediately so the runner is online RIGHT NOW. Without this,
+  // ONLOGON tasks stay in "Ready, not Running" state until the user logs out
+  // and back in — which means every fresh `mgr runner install` leaves the
+  // runner offline on GH for hours. schtasks /Run uses the same elevation we
+  // already verified via ensureWindowsAdmin() in the install() entry point, so
+  // no extra prompts. We log a warning (not throw) on failure: registration is
+  // still valid; the user can recover with `schtasks /Run /TN <name>` or by
+  // logging out and back in.
+  const startResult = runTask(taskName);
+  if (startResult.ok) {
+    logger.log(`  ✓ Started Logon Task: ${taskName}`);
+  } else {
+    logger.warn(`  ✗ Could not start Logon Task ${taskName} (exit ${startResult.exitCode}): ${startResult.message}`);
+    logger.warn(`    Run 'schtasks /Run /TN ${taskName}' manually from an elevated cmd, or log out and back in.`);
+  }
+
   // Track in our config.
   const cfg = readConfig();
   cfg.registeredOrgs = Array.from(new Set([...(cfg.registeredOrgs || []), org]));
   saveConfig(cfg);
 
-  logger.log(`✓ Registered runner + Logon Task '${taskName}' created for ${org}`);
+  logger.log(`✓ Registered runner + Logon Task '${taskName}' created and started for ${org}`);
 }
 
 // ─── start / stop / status ──────────────────────────────────────────────────────
