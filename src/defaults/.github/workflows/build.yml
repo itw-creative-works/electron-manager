@@ -140,6 +140,13 @@ jobs:
     #   local                 — skip this job; sign locally via `npx mgr sign-windows`
     if: ${{ needs.windows-strategy.outputs.strategy != 'local' }}
     runs-on: ${{ needs.windows-strategy.outputs.strategy == 'cloud' && fromJSON('["windows-latest"]') || fromJSON('["self-hosted","windows","ev-token"]') }}
+    # Use cmd.exe (not PowerShell) on Windows. Self-hosted runners often have PowerShell
+    # ExecutionPolicy set to Restricted, which blocks the Actions-generated wrapper .ps1
+    # scripts that GH spits out for every `run:` step. cmd.exe has no such restriction
+    # and runs the same `npm ci` / `npx ...` commands fine.
+    defaults:
+      run:
+        shell: cmd
     env:
       # Cloud-provider env vars — only one set is consumed depending on `signing.windows.cloud.provider` in config:
       AZURE_TENANT_ID:                  ${{ secrets.AZURE_TENANT_ID }}

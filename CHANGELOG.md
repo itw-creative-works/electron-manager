@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.2.12 — workflow: windows-sign job uses cmd.exe (not PowerShell)
+
+Self-hosted Windows runners commonly have PowerShell ExecutionPolicy set to
+Restricted, which blocks the wrapper `.ps1` scripts GitHub Actions auto-
+generates for every `run:` step:
+
+> File ...c89a6a95-758b-4457-85e9-29bff742cffe.ps1 cannot be loaded because
+> running scripts is disabled on this system.
+
+Fix: pin `defaults.run.shell: cmd` for the windows-sign job. cmd.exe has no
+ExecutionPolicy and runs the same `npm ci` / `npx ...` commands fine.
+
+The hosted-runner jobs (build matrix) keep PowerShell as their default
+because hosted runners ship with `RemoteSigned` policy already configured.
+
 ## 1.2.11 — runner: install to C:\actions-runners (escape user profile entirely)
 
 v1.2.10 tried to fix the NETWORK SERVICE permission issue by walking up
