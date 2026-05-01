@@ -54,6 +54,37 @@ Service is configured to run as the local user. signtool searches `CurrentUser\M
 
 **Suspect token-driver behavior**: the EV-token vendor's driver registers the cert via the CSP / KSP (Cryptographic Service Provider). On non-interactive sessions, the driver may not auto-load the token. The hardware EV token might require active user interaction or polling to be visible.
 
+## Iterate locally, NOT through CI
+
+Don't push consumer version bumps + trigger workflow runs to test signing fixes.
+Each round trip is ~12 minutes. Instead reproduce the exact failure locally on
+the Windows host and iterate against it.
+
+**Reproduce the sign failure locally** (paste in cmd as the same user the runner
+service runs as, or as a different identity using `runas /user:<user>`):
+
+```cmd
+cd C:\actions-runners\actions-runner-<org>
+:: Need an unsigned .exe to sign — easiest: download the latest "windows-unsigned"
+:: artifact from a recent workflow run, or run electron-builder locally on the dp
+:: project to produce one.
+
+:: Then run the same command the workflow runs:
+set WIN_EV_TOKEN_PATH=<thumbprint>
+set WIN_CSC_KEY_PASSWORD=<token-pin>
+set SIGNTOOL_PATH=C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64\signtool.exe
+npx mgr sign-windows --in <dir-with-unsigned-exe> --out <output-dir>
+```
+
+If that fails the same way, you've reproduced the issue locally — iterate
+without CI. Once it succeeds locally as the service user, push the EM fix and
+trigger a real release run as the final verification.
+
+To reproduce the **service-context** specifically (vs. interactive shell), use
+`PsExec.exe -i 0 -s cmd.exe` (Sysinternals) to launch a cmd in Session 0 as
+LocalSystem, or `runas /user:<user> /noprofile cmd` to launch without loading
+the user profile (closer to what a service sees).
+
 ## What to test on Windows directly
 
 **Test 1 — confirm service identity**:
