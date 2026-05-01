@@ -135,11 +135,11 @@ module.exports = {
         // Pre-seed bounds that SHOULD be ignored when persistBounds: false.
         ctx.manager.storage.set('windows.about.bounds', { x: 50, y: 60, width: 999, height: 888 });
 
-        const origConfig = ctx.manager.config.windows.about;
-        ctx.manager.config.windows.about = { ...origConfig, persistBounds: false };
-
+        // The `windows` config block is no longer required — pass persistBounds via the
+        // call-site overrides arg instead. (The merge order is defaults < JSON config <
+        // overrides, so this works whether or not config.windows.about is set.)
         try {
-          const win = await ctx.manager.windows.createNamed('about');
+          const win = await ctx.manager.windows.createNamed('about', undefined, { persistBounds: false });
 
           // Saved 999x888 must NOT have been restored — should fall back to config defaults.
           const got = win.getBounds();
@@ -159,7 +159,7 @@ module.exports = {
           // close also must NOT have written under persistBounds:false.
           ctx.expect(ctx.manager.storage.get('windows.about.bounds')).toBeUndefined();
         } finally {
-          ctx.manager.config.windows.about = origConfig;
+          ctx.manager.storage.delete('windows.about.bounds');
         }
       },
     },

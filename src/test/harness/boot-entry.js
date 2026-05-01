@@ -19,6 +19,14 @@ async function run(manager) {
   const { app } = require('electron');
   const path = require('path');
 
+  // Give the consumer's `manager.initialize().then(() => { ... })` callback time
+  // to surface windows / wire up handlers / etc. The harness runs from setImmediate
+  // already (which flushes microtasks once), but `windows.create()` is async, so
+  // we additionally poll for the main window for up to 3s. Apps that intentionally
+  // launch hidden never create a main window — those tests should `if (!win) return`
+  // when inspecting window state.
+  await waitForMainWindow(manager, 3000);
+
   const specPath = process.env.EM_TEST_BOOT_SPEC;
   if (!specPath) {
     emit({ event: 'fatal', message: 'boot-entry.js: EM_TEST_BOOT_SPEC env var not set' });
@@ -38,11 +46,17 @@ async function run(manager) {
   const projectRoot = spec.projectRoot;
   const tests       = spec.tests || [];
 
-  // Reconstitute each `inspect` from its serialized body string.
+  // Reconstitute each `inspect` from its serialized body string. We expose Node's
+  // `require` + `process` + `Buffer` to the inspect body so tests can require('fs'),
+  // require('electron'), etc. — `new Function(...)` creates a no-closure function so
+  // these globals must be passed in explicitly. (Module-level `require` is the harness's
+  // own; renaming it `require` inside the body restores the natural ergonomic.)
   const inspectors = tests.map((t) => ({
     description:  t.description,
     timeout:      t.timeout || 15000,
-    inspect:      new Function('args', `return (async function ({ manager, expect, projectRoot }) {\n${t.inspectSource}\n})(args)`),
+    inspect:      new Function('args', 'require', 'process', 'Buffer',
+      `return (async function ({ manager, expect, projectRoot }) {\n${t.inspectSource}\n})(args)`,
+    ),
   }));
 
   // Bring in EM's expect (assert.js) — same path conventions as main-entry.js uses.
@@ -54,7 +68,7 @@ async function run(manager) {
     const start = Date.now();
     try {
       await Promise.race([
-        t.inspect({ manager, expect, projectRoot }),
+        t.inspect({ manager, expect, projectRoot }, require, process, Buffer),
         new Promise((_, reject) => setTimeout(() => reject(new Error('Boot test timeout')), t.timeout)),
       ]);
       const duration = Date.now() - start;
@@ -69,6 +83,16 @@ async function run(manager) {
 
   emit({ event: 'end', passed, failed, skipped });
   app.exit(failed > 0 ? 1 : 0);
+}
+
+// Poll for the main window for up to `timeoutMs`. Resolves when it shows up, or after
+// the timeout (no error — agent/hidden apps never create one and that's fine).
+async function waitForMainWindow(manager, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (manager?.windows?.get?.('main')) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
 }
 
 module.exports = { run };

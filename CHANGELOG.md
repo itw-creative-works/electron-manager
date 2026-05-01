@@ -1,5 +1,130 @@
 # Changelog
 
+## 1.2.0 — windows rewrite, inset titlebar, hide-on-close, boot harness fixes
+
+### Windows — lazy creation + inset titlebar + Discord-style hide-on-close
+
+- **EM no longer auto-creates the main window.** Boot sequence step 13 (the old
+  `createNamed('main')`) is gone. The consumer's `main.js` calls
+  `manager.windows.create('main')` from inside `manager.initialize().then(() => { ... })`
+  — typically gated on `if (!startup.isLaunchHidden())` so the same `main.js`
+  works for both `'normal'` and `'hidden'` launch modes.
+- **`manager.windows.create(name, overrides?)`** is the canonical entry point.
+  Defaults baked in (no JSON config required):
+  - `main` → `{ width: 1024, height: 720, hideOnClose: true,  view: 'main' }`
+  - any other → `{ width: 800,  height: 600, hideOnClose: false, view: name   }`
+  - merge order: framework defaults < `config.windows.<name>` < call-site overrides
+- **Inset titlebar by default**:
+  - macOS: `titleBarStyle: 'hiddenInset'` — OS-drawn traffic lights inset into
+    the chrome region.
+  - Windows: `titleBarStyle: 'hidden'` + `titleBarOverlay: { color, symbolColor,
+    height: 36 }` — OS-drawn min/max/close buttons in the corner.
+  - Linux: native frame.
+  - Override per-window via `config.windows.<name>.titleBar = 'inset' | 'native'`
+    or pass a custom `titleBarOverlay` object.
+- **Page template moved to EM-internal** (`src/config/page-template.html`,
+  copied to `dist/config/page-template.html` by prepare-package). Consumer's
+  `<consumer>/config/page-template.html` is no longer read.
+- **Draggable topbar in template** — `<div class="em-titlebar"><div
+  class="em-titlebar__drag"></div></div>` with `-webkit-app-region: drag`.
+  Sized per-platform via `themes/classy/css/components/_titlebar.scss` keyed off
+  `html[data-platform]` (set by web-manager): mac → `padding-left: 70px`
+  (clear traffic lights), windows → `padding-right: 140px` (clear native
+  overlay), linux → `display: none` (native frame draws title bar).
+- **Discord-style hide-on-close.** `main` window's X button hides instead of
+  closes. Real quit only via Cmd+Q / role:'quit' menu / tray Quit / auto-updater
+  install / programmatic `manager.quit({ force: true })`. Three escape hatches
+  in the close handler:
+  - `manager._allowQuit` — set by `manager.quit({ force: true })` and by
+    `autoUpdater.installNow()` before `quitAndInstall()`.
+  - `manager._isQuitting` — set by `app.on('before-quit')`, so any quit path
+    Electron knows about (Cmd+Q, role:'quit' menu, programmatic `app.quit()`,
+    OS shutdown) flows through naturally.
+  - `win._emForceClose` — per-window override for one-off "close this for real"
+    scenarios.
+- **`manager.quit({ force })`** and **`manager.relaunch({ force })`** exposed on
+  the live manager. `relaunch()` calls `autoUpdater.installNow()` if an update
+  is downloaded, otherwise `app.relaunch() + app.quit()`.
+
+### Auto-update background install (legacy parity)
+
+- When a download finishes (`code: 'downloaded'`) AND the check was NOT
+  user-initiated (background poll), `_setState` schedules `installNow()` after
+  5s. User-initiated checks skip this so the consumer's UI can prompt instead.
+  Apps update overnight without bothering the user — Discord-style.
+
+### macOS dock auto-show
+
+- `manager.windows.create()` and `manager.windows.show()` call `app.dock.show()`
+  if the dock is hidden (LSUIElement parity). Apps with `startup.mode = 'hidden'`
+  launch completely invisible (no dock icon, no Cmd+Tab, no taskbar) — the dock
+  icon appears the moment UI is requested.
+
+### Startup mode simplified
+
+- **Removed `'tray-only'`** — was always identical to `'hidden'` (the same
+  LSUIElement Info.plist flag). Now folded into `'hidden'`. `getMode()`
+  validation rejects `'tray-only'` as unknown and falls back to `'normal'`.
+- LSUIElement injection in `gulp/build-config` now keys off `startup.mode === 'hidden'`.
+- `startup.isTrayOnly()` removed.
+
+### Default config simplification
+
+- **Removed `windows: {}` block** from defaults config. Windows are now driven
+  entirely from `main.js`. Consumer adds the block back only to override
+  defaults persistently.
+- **Removed `<consumer>/config/page-template.html`** — replaced by
+  EM-internal template at `<em>/dist/config/page-template.html`.
+
+### Bug fixes
+
+- **`createNamed` listener-attach order**: all event listeners (`close` /
+  `closed` / `resize` / `move` / `ready-to-show` / etc.) now attach BEFORE
+  `await loadFile()`. Previously the window could land in the registry but be
+  missing listeners during the ms-window between BrowserWindow construction
+  and load completion — boot tests + race-prone code would see inconsistent
+  state.
+- **`config.x` / `config.y` from overrides** now actually flow through to
+  BrowserWindow opts. Was silently dropped.
+
+### Boot harness improvements
+
+- Harness defers via `setImmediate` so the consumer's `manager.initialize().then(...)`
+  callback runs first (giving `windows.create('main')` time to fire).
+- Polls for the main window for up to 3s before starting tests (handles the
+  async portion of `windows.create()`).
+- Exposes `require` / `process` / `Buffer` to inspect-fn bodies via
+  `new Function` arg list (closures don't survive serialization).
+
+### Tests
+
+- **397 framework + 26 consumer boot tests** (was 397 + 25). New tests:
+  X-button close behavior, manager.quit/relaunch, autoUpdater installNow flag,
+  background install scheduling, page-template EM-internal verification, lazy
+  windows.create, defaults-merge-overrides ordering, dock-show wired, startup
+  mode validation rejecting tray-only, x/y flowing through overrides.
+
+### Default scaffold polish
+
+- `src/defaults/src/main.js` — three labeled sections with full `windows.create()`
+  options reference inline (every supported opt commented with default value)
+  + custom-logic examples (deep links, IPC handlers, `manager.<name>.disable()`,
+  auto-update onStatus, app-state).
+- `src/defaults/src/views/main/index.html` — bootstrap container + lead text +
+  two action buttons (replaced the bare `<h1>` placeholder).
+
+### Docs
+
+- **CLAUDE.md** — boot sequence rewritten (added `before-quit` hook, removed
+  auto-create), new "Windows (lazy creation, inset titlebar, Discord-style
+  hide-on-close)" section, "Notable defaults" updates for windows/startup/titlebar.
+- **README.md** — new bullets covering lazy windows + Discord-style hide-on-close,
+  zero-bounce hidden launch, auto-update background install. Docs index updated.
+- **docs/windows.md** — full rewrite with defaults, merge order, inset titlebar,
+  hide-on-close escape hatches, dock auto-show, listener-attach guarantee.
+- **docs/startup.md** — full rewrite with `'normal' | 'hidden'` only, typical
+  main.js pattern, agent-app pairing.
+
 ## 1.1.0 — integrations rewrite, boot test layer, scaffold simplification
 
 ### Integrations (tray / menu / context-menu) — unified API

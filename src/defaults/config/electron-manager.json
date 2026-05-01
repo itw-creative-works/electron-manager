@@ -61,20 +61,22 @@
 
   // Startup behavior — two independent knobs.
   //
-  // `mode` controls what happens when THE USER launches the app directly:
-  //   normal     — main window shows immediately, dock icon visible (typical app)
-  //   hidden     — no window auto-shown; consumer calls manager.windows.show() later. Dock icon
-  //                still bounces briefly on macOS launch (unavoidable without LSUIElement).
-  //   tray-only  — true agent app: no dock icon, no taskbar, no cmd-tab. Production builds bake
-  //                LSUIElement=true into Info.plist for ZERO dock bounce on launch.
+  // `mode` controls how the app launches when THE USER opens it directly:
+  //   normal — main window appears, dock icon visible (typical app).
+  //   hidden — packaged builds bake LSUIElement=true into Info.plist on macOS:
+  //            zero dock bounce, no dock icon, not in Cmd+Tab. Tray + notifications
+  //            + networking still work. Your main.js skips windows.create() at boot
+  //            and surfaces UI later (typically from a tray click). When you do call
+  //            windows.create('main'), EM auto-runs app.dock.show() so the dock icon
+  //            appears alongside the window.
   //
   // `openAtLogin` controls auto-launch on OS login:
-  //   enabled — register the app with the OS to auto-launch (default true)
-  //   mode    — `hidden` (default) means at-login launches start without showing a window;
-  //             `normal` means show the main window even on auto-launch.
-  //   Login-launch mode applies ONLY when the OS launches the app. User-direct launches
-  //   always use `startup.mode` above. So a "normal" app can still start hidden at login
-  //   and surface only when the user explicitly opens it.
+  //   enabled — register the app with the OS to auto-launch (default true).
+  //   mode    — `hidden` (default) means at-login launches behave like `mode: 'hidden'`;
+  //             `normal` means the at-login launch shows UI like a normal launch.
+  //   The login-launch mode applies ONLY when the OS launches the app. User-direct
+  //   launches always use `startup.mode` above. So a "normal" app can still start
+  //   hidden at login and surface only when the user explicitly opens it.
   startup: {
     mode: 'normal',
     openAtLogin: {
@@ -82,11 +84,12 @@
       mode:    'hidden',
     },
   },
-  windows: {
-    main:     { view: 'main',     width: 1024, height: 720, show: true,  hideOnClose: false },
-    settings: { view: 'settings', width: 600,  height: 480, show: false, hideOnClose: true  },
-    about:    { view: 'about',    width: 480,  height: 360, show: false, hideOnClose: true  },
-  },
+  // No `windows` block needed — EM no longer auto-creates windows. Your main.js
+  // calls `manager.windows.create('main', { width: 1280, height: 800, ... })` when
+  // you want UI to surface. Defaults baked in:
+  //   main      → { width: 1024, height: 720, hideOnClose: true,  view: 'main' }
+  //   any other → { width: 800,  height: 600, hideOnClose: false, view: name   }
+  // Add a `windows: {}` block here only if you want to override defaults persistently.
   signing: {
     windows: {
       strategy: 'self-hosted',

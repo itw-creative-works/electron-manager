@@ -24,6 +24,14 @@ function Manager() {
   self.config = null;
   self.logger = new LoggerLite('main');
 
+  // Quit-vs-hide gating. The window-manager `close` handler checks `_allowQuit` /
+  // `_isQuitting` before deciding whether to actually close (=quit) or to swallow
+  // the event and just hide the window. Set true via `manager.quit({ force: true })`,
+  // by `app.on('before-quit')` (any user-initiated quit), and by the auto-updater
+  // when it's about to call `quitAndInstall()`.
+  self._allowQuit  = false;
+  self._isQuitting = false;
+
   // Public lib references (consumer code can call them by name)
   self.storage     = storage;
   self.sentry      = sentry;
@@ -41,6 +49,51 @@ function Manager() {
 
   return self;
 }
+
+// Force a real quit, bypassing per-window `hideOnClose`. Use this anywhere the
+// app legitimately wants to exit (tray Quit, Cmd+Q from menu role:'quit',
+// auto-updater install). Without `{ force: true }`, the close events still get
+// trapped by hide-on-close handlers and the app stays running.
+Manager.prototype.quit = function (options) {
+  const self = this;
+  options = options || {};
+
+  if (options.force) {
+    self._allowQuit = true;
+  }
+
+  try {
+    require('electron').app.quit();
+  } catch (e) { /* electron not available — no-op in test/headless */ }
+};
+
+// Force a relaunch — same gating as quit, but tells electron to start back up
+// after exit. If an update has been downloaded, prefers `quitAndInstall()` so
+// the user lands on the new version instead of the old one.
+Manager.prototype.relaunch = function (options) {
+  const self = this;
+  options = options || {};
+
+  if (options.force) {
+    self._allowQuit = true;
+  }
+
+  let electron;
+  try { electron = require('electron'); } catch (e) { return; }
+
+  // If updater downloaded a fresh build, install + relaunch via electron-updater
+  // (which calls `app.quit()` internally with the right post-quit script). Falls
+  // back to plain relaunch if updater hasn't downloaded anything.
+  try {
+    const updaterStatus = self.autoUpdater?.getStatus?.();
+    if (updaterStatus?.code === 'downloaded' && self.autoUpdater?.installNow) {
+      return self.autoUpdater.installNow();
+    }
+  } catch (_) { /* fall through */ }
+
+  electron.app.relaunch();
+  electron.app.quit();
+};
 
 Manager.prototype.initialize = async function (consumerConfig, options) {
   const self = this;
@@ -67,9 +120,20 @@ Manager.prototype.initialize = async function (consumerConfig, options) {
     self.logger.warn('electron not available — main Manager running in test/scaffold mode.');
   }
 
-  // 1. Apply early startup-mode hide. For hidden/tray-only we call app.dock.hide() *before* anything
-  //    else so macOS spends as little time animating the dock entry as possible. In packaged tray-only
-  //    builds the Info.plist's LSUIElement (injected by gulp/build-config) prevents the bounce entirely.
+  // Mark that the app is on its way out. `before-quit` fires for every quit path
+  // — Cmd+Q, the role:'quit' menu item, app.quit() programmatic, OS shutdown —
+  // so this is the canonical "the app is actually trying to die" signal. The
+  // window-manager's close handler reads this to skip hide-on-close. We do NOT
+  // set _allowQuit here (it has different semantics — a permission to die);
+  // _isQuitting is the live "we're in the act of dying" flag.
+  if (electron?.app?.on) {
+    electron.app.on('before-quit', () => { self._isQuitting = true; });
+  }
+
+  // 1. Apply early startup-mode hide. For `mode: 'hidden'` we call app.dock.hide() *before*
+  //    anything else so macOS spends as little time animating the dock entry as possible.
+  //    In packaged builds the Info.plist's LSUIElement (injected by gulp/build-config when
+  //    startup.mode === 'hidden') prevents the bounce entirely.
   self.startup._manager = self;
   self.startup._electron = electron || null;
   self.startup.applyEarly();
@@ -117,13 +181,12 @@ Manager.prototype.initialize = async function (consumerConfig, options) {
   // 12. Web-manager bridge (main-side Firebase Auth source of truth, IPC handlers for renderers)
   await self.webManager.initialize(self);
 
-  // 13. Conditionally show the main window. Skipped in test mode and in hidden/tray-only startup modes —
-  //     the consumer is expected to surface the UI themselves (tray click, deep link, IPC).
+  // 13. Initialize the windows lib — registers app-level handlers (window-all-closed, etc.)
+  //     but does NOT create any windows. Consumers are responsible for calling
+  //     `manager.windows.create('main')` (or any other named window) from their main.js
+  //     when they want to surface UI. This makes hidden / agent-app patterns trivial:
+  //     just don't call create() until something (tray click, deep link, IPC) warrants it.
   self.windows.initialize(self);
-  const shouldAutoCreate = !self._options.skipWindowCreation && !self.startup.isLaunchHidden();
-  if (shouldAutoCreate) {
-    await self.windows.createNamed('main', self);
-  }
 
   self._initialized = true;
   self.logger.log('electron-manager (main) initialized.');
@@ -141,19 +204,27 @@ Manager.prototype.initialize = async function (consumerConfig, options) {
     global.__em_manager = self;
     const harnessPath = process.env.EM_TEST_BOOT_HARNESS;
     if (harnessPath) {
-      try {
-        // __non_webpack_require__ is webpack's magic escape hatch — preserves a runtime
-        // require() that webpack won't try to inline. In plain Node it's undefined, so
-        // `typeof` gates the branch without ReferenceError.
-        // eslint-disable-next-line import/no-dynamic-require, global-require, no-undef
-        const realRequire = (typeof __non_webpack_require__ !== 'undefined') ? __non_webpack_require__ : require;
-        const harness = realRequire(harnessPath);
-        harness.run(self);
-      } catch (e) {
-        const { app } = require('electron');
-        process.stdout.write(`__EM_TEST__${JSON.stringify({ event: 'fatal', message: `boot harness failed to load: ${e.message}` })}\n`);
-        app.exit(1);
-      }
+      // Defer the harness so the consumer's `manager.initialize().then(() => { ... })`
+      // callback gets a chance to run first. EM doesn't auto-create any windows; the
+      // consumer's main.js does it inside .then(). If we ran the harness synchronously
+      // here, that callback wouldn't have fired yet and `manager.windows.get('main')`
+      // would be null. setImmediate flushes the microtask queue (where promise callbacks
+      // live) before our boot harness inspects state.
+      setImmediate(() => {
+        try {
+          // __non_webpack_require__ is webpack's magic escape hatch — preserves a runtime
+          // require() that webpack won't try to inline. In plain Node it's undefined, so
+          // `typeof` gates the branch without ReferenceError.
+          // eslint-disable-next-line import/no-dynamic-require, global-require, no-undef
+          const realRequire = (typeof __non_webpack_require__ !== 'undefined') ? __non_webpack_require__ : require;
+          const harness = realRequire(harnessPath);
+          harness.run(self);
+        } catch (e) {
+          const { app } = require('electron');
+          process.stdout.write(`__EM_TEST__${JSON.stringify({ event: 'fatal', message: `boot harness failed to load: ${e.message}` })}\n`);
+          app.exit(1);
+        }
+      });
     } else {
       const { app } = require('electron');
       process.stdout.write(`__EM_TEST__${JSON.stringify({ event: 'fatal', message: 'EM_TEST_BOOT=1 but EM_TEST_BOOT_HARNESS not set' })}\n`);

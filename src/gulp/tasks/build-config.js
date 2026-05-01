@@ -42,12 +42,15 @@ module.exports = function buildConfig(done) {
     // Build the full config object from EM defaults + consumer overrides.
     let builderConfig = baseConfig(config, { entitlementsPath, icons, distRoot });
 
-    // Mode-dependent injections.
-    if (startupMode === 'tray-only') {
+    // Mode-dependent injections. `hidden` mode bakes LSUIElement=true into Info.plist
+    // → on macOS the app launches with no dock icon, no Cmd+Tab presence, completely
+    // invisible. Tray/notifications/networking still work. Consumer surfaces UI via
+    // manager.windows.create('main') which calls app.dock.show() automatically.
+    if (startupMode === 'hidden') {
       builderConfig.mac = builderConfig.mac || {};
       builderConfig.mac.extendInfo = builderConfig.mac.extendInfo || {};
       builderConfig.mac.extendInfo.LSUIElement = true;
-      logger.log('startup.mode=tray-only → injected mac.extendInfo.LSUIElement=true');
+      logger.log('startup.mode=hidden → injected mac.extendInfo.LSUIElement=true');
     }
 
     // Inject `publish` from `releases` config.

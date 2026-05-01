@@ -77,5 +77,49 @@ module.exports = {
         ctx.expect(ctx.manager.windows.get('about')).toBeNull();
       },
     },
+    {
+      name: 'manager.quit + manager.relaunch exposed and set _allowQuit',
+      run: (ctx) => {
+        ctx.expect(typeof ctx.manager.quit).toBe('function');
+        ctx.expect(typeof ctx.manager.relaunch).toBe('function');
+        ctx.manager._allowQuit = false;
+
+        // Calling quit({force:true}) should set _allowQuit BEFORE invoking app.quit().
+        // We can't actually let app.quit() run mid-test (it'd kill the harness), so we
+        // stub electron.app.quit with a noop, observe the flag, then restore.
+        const electron = require('electron');
+        const origQuit = electron.app.quit;
+        electron.app.quit = () => {};
+        try {
+          ctx.manager.quit({ force: true });
+          ctx.expect(ctx.manager._allowQuit).toBe(true);
+        } finally {
+          electron.app.quit = origQuit;
+          ctx.manager._allowQuit = false;
+        }
+      },
+    },
+    {
+      name: 'auto-updater installNow flips manager._allowQuit',
+      run: (ctx) => {
+        ctx.manager._allowQuit = false;
+
+        // Force the autoUpdater state to "downloaded" + stub the underlying library
+        // so installNow doesn't actually quit the harness.
+        const prevState = ctx.manager.autoUpdater._state;
+        const prevLib   = ctx.manager.autoUpdater._library;
+        ctx.manager.autoUpdater._state = { code: 'downloaded', version: '9.9.9' };
+        ctx.manager.autoUpdater._library = { quitAndInstall: () => {} };
+
+        try {
+          ctx.manager.autoUpdater.installNow();
+          ctx.expect(ctx.manager._allowQuit).toBe(true);
+        } finally {
+          ctx.manager.autoUpdater._state   = prevState;
+          ctx.manager.autoUpdater._library = prevLib;
+          ctx.manager._allowQuit = false;
+        }
+      },
+    },
   ],
 };

@@ -15,7 +15,9 @@
 - **One-line bootstrap** per Electron process: `require('electron-manager/main')`, `/preload`, `/renderer`.
 - **Modular feature library** — storage, IPC, tray, menu, context menu, window manager, startup, app-state, deep-link, auto-updater, web-manager auth, Sentry. Each feature is its own module with documented API.
 - **File-based feature definitions** — trays, menus, and context-menus are JS files (full power, no DSL): `src/integrations/{tray,menu,context-menu}/index.js`. All three ship sensible **id-tagged defaults** (legacy-EM-style: about, preferences, check-for-updates, dev menu w/ inspector + log folders, etc.) and share the same **id-path mutation API**: `find`, `update`, `remove`, `enable`, `show`, `hide`, `insertBefore`, `insertAfter`, `appendTo`. Any default item is one line away from removal, customization, or repositioning.
-- **Zero-bounce tray-only launch on macOS** — production builds inject `LSUIElement: true` into Info.plist via build-config. No dock animation, no flash.
+- **Lazy windows + Discord-style hide-on-close.** EM doesn't auto-create any windows — your `main.js` calls `manager.windows.create('main')` when UI should appear (or never, for agent apps). The `main` window's X button hides instead of quitting on every platform; real quit only via Cmd+Q / menu Quit / tray Quit / auto-update install. Inset titlebar by default (mac `hiddenInset` traffic lights / win native overlay buttons / linux native frame) with a draggable topbar in the page template.
+- **Zero-bounce hidden-launch on macOS.** `startup.mode = 'hidden'` bakes `LSUIElement: true` into Info.plist at build time → app launches completely invisible (no dock icon, no Cmd+Tab, no taskbar). Tray + notifications + networking still work. The first time `manager.windows.create()` runs, EM auto-calls `app.dock.show()` so the dock icon appears alongside the window.
+- **Auto-update background install.** When a download finishes from a background poll (not user-initiated), EM auto-relaunches into the new version after 5s — apps update overnight without bothering the user. User-initiated checks skip this so your UI can prompt instead.
 - **Webpack-bundled** main / preload / renderer for source protection.
 - **Built-in test framework** — Jest-like syntax, four layers: `build` (plain Node), `main` (spawned Electron), `renderer` (hidden BrowserWindow), and `boot` (spawns the consumer's actual built `dist/main.bundle.js` for end-to-end smoke tests against the live manager — no `npm start && sleep && kill` shell hacks). Boot layer always rebuilds the bundle first so tests never see stale code.
 - **Multi-platform build/release** via GitHub Actions — macOS sign + notarize, Linux, Windows EV-token signing (self-hosted runner now, cloud-signing pluggable).
@@ -64,11 +66,11 @@ Each subsystem has its own API reference under [`docs/`](docs/):
 
 - [storage](docs/storage.md) — KV store, sync in main, async (via IPC) in renderer, dot-notation paths, change broadcasts
 - [ipc](docs/ipc.md) — typed channel bus, `handle` / `invoke` / `broadcast`
-- [windows](docs/windows.md) — named-window registry, bounds persistence, hide-on-close
+- [windows](docs/windows.md) — lazy named-window registry (no auto-create), bounds persistence, inset titlebar, hide-on-close
 - [tray](docs/tray.md) — file-based tray definition, dynamic items, runtime mutators
 - [menu](docs/menu.md) — file-based application menu, platform-aware default template
 - [context-menu](docs/context-menu.md) — file-based right-click menus, called per-event with `params`
-- [startup](docs/startup.md) — launch modes (`normal` / `hidden` / `tray-only`), zero-bounce production
+- [startup](docs/startup.md) — launch modes (`normal` / `hidden`), LSUIElement on macOS, login-item handling
 - [app-state](docs/app-state.md) — first-launch / launch-count / crash-sentinel flags
 - [deep-link](docs/deep-link.md) — cross-platform deep links, single-instance, pattern routing, built-in routes
 - [web-manager-bridge](docs/web-manager-bridge.md) — Firebase auth state synchronized across main + every renderer

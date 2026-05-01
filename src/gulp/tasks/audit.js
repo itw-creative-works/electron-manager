@@ -21,7 +21,7 @@ const Manager = new (require('../../build.js'));
 
 const logger = Manager.logger('audit');
 
-const VALID_STARTUP_MODES   = ['normal', 'hidden', 'tray-only'];
+const VALID_STARTUP_MODES   = ['normal', 'hidden'];
 const VALID_WIN_STRATEGIES  = ['self-hosted', 'cloud', 'local'];
 
 module.exports = function audit(done) {

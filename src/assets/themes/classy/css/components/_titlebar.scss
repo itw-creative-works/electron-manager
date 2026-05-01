@@ -1,0 +1,75 @@
+// EM Titlebar
+// =========================================================================
+// Renders a draggable strip at the top of every page so users can move the
+// window around. The native window controls (min/max/close on Windows;
+// traffic lights on macOS) are drawn by the OS — Electron handles them via
+// `titleBarStyle: 'hiddenInset'` (mac) and `titleBarOverlay` (windows). This
+// file just makes room for them and provides the drag region.
+//
+// Platform detection: web-manager sets `html[data-platform]` during init to
+// one of "mac" / "windows" / "linux" / etc. We key off that.
+
+$em-titlebar-height: 36px !default;
+
+.em-titlebar {
+  position:        relative;
+  display:         flex;
+  align-items:     center;
+  height:          $em-titlebar-height;
+  width:           100%;
+  user-select:     none;
+  -webkit-user-select: none;
+  background:      transparent; // inherits the BrowserWindow's backgroundColor
+  flex-shrink:     0;
+}
+
+// Drag region — fills the bar so the user can grab anywhere that isn't a
+// button. This is the magic Electron CSS property; it makes the entire div
+// behave like the native title bar (drag-to-move, double-click-to-maximize).
+.em-titlebar__drag {
+  position:        absolute;
+  inset:           0;
+  -webkit-app-region: drag;
+  // Buttons inside the titlebar should opt back out via `-webkit-app-region: no-drag`.
+}
+
+.em-titlebar__title {
+  position:        relative; // sit above the drag region
+  z-index:         1;
+  padding:         0 1rem;
+  font-size:       0.875rem;
+  font-weight:     500;
+  color:           var(--bs-body-color, #333);
+  pointer-events:  none;     // let drags pass through
+  white-space:     nowrap;
+  overflow:        hidden;
+  text-overflow:   ellipsis;
+}
+
+// macOS — leave room on the LEFT for the inset traffic lights.
+// Standard inset-style traffic light cluster is ~70px wide.
+html[data-platform="mac"] .em-titlebar {
+  padding-left: 70px;
+
+  .em-titlebar__title { text-align: center; }
+}
+
+// Windows — leave room on the RIGHT for the native overlay (min/max/close
+// drawn by the OS). The overlay default is ~140px on Win11.
+html[data-platform="windows"] .em-titlebar {
+  padding-right: 140px;
+
+  .em-titlebar__title { text-align: left; }
+}
+
+// Linux — native frame draws its own title bar; hide ours entirely.
+html[data-platform="linux"] .em-titlebar {
+  display: none;
+}
+
+// Make the page content account for the titlebar so views don't render under it.
+// (Only when the titlebar is visible — Linux hides it via display:none above.)
+.em-content {
+  // No specific top-padding here; views handle their own spacing inside. The
+  // titlebar is in normal flow, so it pushes content down naturally.
+}

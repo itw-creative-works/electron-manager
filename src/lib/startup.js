@@ -2,22 +2,23 @@
 //
 // Two independent things this lib controls:
 //
-// 1. `startup.mode` — how the app behaves when the USER launches it directly:
-//      normal     — default. Main window shows on launch, dock visible.
-//      hidden     — dock visible (brief bounce on macOS — unavoidable w/o LSUIElement),
-//                   but no window is auto-shown. Consumer calls manager.windows.show().
-//      tray-only  — packaged builds get LSUIElement=true (zero dock bounce on macOS).
-//                   All windows get skipTaskbar: true. App is tray/menubar-resident.
+// 1. `startup.mode` — how the app launches when the USER opens it directly:
+//      normal — default. Dock icon visible on macOS, taskbar entry on Windows.
+//      hidden — packaged builds get LSUIElement=true on macOS (zero dock bounce, no
+//               dock icon, not in Cmd+Tab). Tray/notifications/networking still work.
+//               Consumer surfaces UI later via `manager.windows.create('main')`, which
+//               calls app.dock.show() automatically so the icon appears alongside the
+//               window. Use this for menubar apps, agent apps, anything that should
+//               be invisible until the user explicitly asks for UI.
 //
-// 2. `startup.openAtLogin` — what happens at OS login:
-//      enabled (default true) — the OS launches the app automatically at user login.
-//      mode    (default 'hidden') — *additional* mode applied ONLY when launched at login.
-//                                   So a "normal" app can still start hidden at login,
-//                                   surfacing only when the user explicitly opens the app.
+// 2. `startup.openAtLogin` — what the OS does at user login:
+//      enabled (default true)     — register the app to auto-launch at login.
+//      mode    (default 'hidden') — what mode the app launches in WHEN OS-launched.
+//                                   Independent from the user-launch mode above.
 //
-// At runtime, isLaunchHidden() returns true if EITHER:
-//   - startup.mode is 'hidden' or 'tray-only' (user-launch mode says hide), OR
-//   - the app was actually launched at login AND startup.openAtLogin.mode is 'hidden'/'tray-only'.
+// EM does NOT auto-create any windows anymore — the consumer's main.js drives that.
+// So "isLaunchHidden" no longer needs to gate window creation; we just expose the
+// raw mode and let the consumer decide whether to call `manager.windows.create()`.
 //
 // Detection: macOS sets `getLoginItemSettings().wasOpenedAtLogin = true`. On Windows we
 // register the login item with `--em-launched-at-login` arg and check process.argv.
@@ -27,7 +28,9 @@ const LoggerLite = require('./logger-lite.js');
 
 const logger = new LoggerLite('startup');
 
-const VALID_MODES = ['normal', 'hidden', 'tray-only'];
+// Valid startup modes. `tray-only` is now folded into `hidden` (they were always the
+// same idea — LSUIElement on macOS — so we collapse to a single name).
+const VALID_MODES = ['normal', 'hidden'];
 const LOGIN_ARG   = '--em-launched-at-login';   // marker for Windows + Linux login-launch detection
 
 const startup = {
@@ -72,7 +75,7 @@ const startup = {
         } else {
           startup._electron.app.setLoginItemSettings({
             openAtLogin:  loginEnabled,
-            openAsHidden: loginMode === 'hidden' || loginMode === 'tray-only',
+            openAsHidden: loginMode === 'hidden',
             args:         loginEnabled ? [LOGIN_ARG] : [],
           });
         }
@@ -116,23 +119,13 @@ const startup = {
     return 'hidden';                                               // default: launch hidden at login
   },
 
-  // True if the current launch should not auto-show a window.
-  // Combines user-launch mode (always honored) with login-launch mode (only when launched at login).
+  // True if this launch is hidden — combines user-launch mode (always honored) with
+  // login-launch mode (only honored when the app was launched at login). Consumers can
+  // read this to decide whether to call manager.windows.create() during boot.
   isLaunchHidden() {
-    const userMode = startup.getMode();
-    if (userMode === 'hidden' || userMode === 'tray-only') return true;
-
-    if (startup.wasLaunchedAtLogin()) {
-      const lm = startup._loginMode();
-      if (lm === 'hidden' || lm === 'tray-only') return true;
-    }
-
+    if (startup.getMode() === 'hidden') return true;
+    if (startup.wasLaunchedAtLogin() && startup._loginMode() === 'hidden') return true;
     return false;
-  },
-
-  // True for tray-only user-launch mode — used by window-manager to set skipTaskbar.
-  isTrayOnly() {
-    return startup.getMode() === 'tray-only';
   },
 
   // Did the OS launch us at login (vs the user opening the app directly)?
@@ -181,7 +174,7 @@ const startup = {
     } else if (input && typeof input === 'object') {
       enabled      = input.enabled !== false;
       const mode   = VALID_MODES.includes(input.mode) ? input.mode : startup._loginMode();
-      openAsHidden = mode === 'hidden' || mode === 'tray-only';
+      openAsHidden = mode === 'hidden';
     } else {
       enabled      = true;
       openAsHidden = startup._loginMode() !== 'normal';

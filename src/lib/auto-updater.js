@@ -154,6 +154,14 @@ const autoUpdater = {
       logger.log('Dev mode — skipping real quitAndInstall().');
       return true;
     }
+    // Flip the manager's quit flag so the window-manager close handler lets the
+    // close events through instead of trapping them with hide-on-close. Without
+    // this, quitAndInstall() fires before-quit but the BrowserWindow's close
+    // handler (which runs FIRST since it has its own listener) would call
+    // event.preventDefault() and the install would just hide the window.
+    if (autoUpdater._manager) {
+      autoUpdater._manager._allowQuit = true;
+    }
     if (autoUpdater._library && typeof autoUpdater._library.quitAndInstall === 'function') {
       autoUpdater._library.quitAndInstall();
       return true;
@@ -208,8 +216,29 @@ const autoUpdater = {
   },
 
   _setState(patch) {
+    const prevCode = autoUpdater._state.code;
     autoUpdater._state = { ...autoUpdater._state, ...patch };
     autoUpdater._broadcastStatus();
+
+    // Background install — when an update finishes downloading and the user did NOT
+    // initiate the check (it was a startup or periodic background poll), schedule a
+    // 5s relaunch automatically. Matches legacy electron-manager behavior — apps
+    // like Discord get to update overnight without bothering the user. User-initiated
+    // checks skip this; the consumer's UI is expected to surface a "Restart to update"
+    // affordance (the menu/tray check-for-updates item already does this label-wise).
+    if (
+      patch.code === 'downloaded'
+      && prevCode !== 'downloaded'
+      && !autoUpdater._userInitiated
+      && !autoUpdater._isDevMode()
+    ) {
+      logger.log('Background download complete — scheduling auto-relaunch in 5s.');
+      const t = setTimeout(() => {
+        try { autoUpdater.installNow(); }
+        catch (e) { logger.warn(`background relaunch failed: ${e.message}`); }
+      }, 5000);
+      autoUpdater._pendingTimers.push(t);
+    }
   },
 
   _broadcastStatus() {

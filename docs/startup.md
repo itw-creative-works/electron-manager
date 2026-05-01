@@ -1,12 +1,12 @@
 # Startup
 
-Controls how the app launches: window-shown vs window-hidden vs tray-only background app. Also handles open-at-login.
+Controls how the app launches: full normal launch vs completely hidden background app. Also handles open-at-login.
 
 ## Config
 
 ```jsonc
 "startup": {
-  "mode": "normal",                // user-launch behavior: 'normal' | 'hidden' | 'tray-only'
+  "mode": "normal",                // user-launch behavior: 'normal' | 'hidden'
   "openAtLogin": {
     "enabled": true,               // OS auto-launches the app at login
     "mode":    "hidden"            // login-launch behavior (defaults to 'hidden')
@@ -24,29 +24,27 @@ The default behavior — `mode: 'normal'` + `openAtLogin: { enabled: true, mode:
 
 ### `normal` (default)
 
-Standard app behavior. Main window auto-creates and auto-shows on launch. Dock visible (macOS), taskbar entry (win/linux).
+Standard app behavior. Your `main.js` calls `manager.windows.create('main')` from inside `manager.initialize().then(...)` — typically gated on `if (!startup.isLaunchHidden())` so the same `main.js` works for both modes. Dock visible (macOS), taskbar entry (win/linux).
 
 ### `hidden`
 
-Dock-visible app but no window is auto-shown on launch. Consumer surfaces UI explicitly via `manager.windows.show('main')` from a tray click, deep-link, or IPC event.
+App launches **completely invisible**: no dock icon, no Cmd+Tab presence, no taskbar entry. Tray + notifications + networking + IPC + auto-update all still work — only the visible UI is suppressed. Production builds inject `LSUIElement: true` into `Info.plist` (via `gulp/build-config`) so macOS treats the process as a background agent from launch — **zero dock bounce**.
 
-**Caveat**: macOS will still bounce the dock briefly on launch. There's no plist trick that gives you "dock-icon-yes, dock-bounce-no" simultaneously — if you need zero bounce, use `tray-only`.
+When the consumer surfaces UI later via `manager.windows.create('main')` (from a tray click, deep-link, IPC event, or anything else), EM auto-runs `app.dock.show()` and the dock icon appears alongside the window. Reverse with `app.dock.hide()` to go back to invisible.
 
-### `tray-only`
-
-True agent app: zero dock bounce, no permanent dock icon, no taskbar entry. Production builds inject `LSUIElement: true` into `Info.plist` (via `gulp/build-config`) so macOS treats the process as a background agent from launch. All windows get `skipTaskbar: true` automatically (handles win/linux).
-
-You can still show windows in `tray-only` mode — they appear, work normally, and dismiss without leaving a permanent dock entry. Use this for menubar apps (Slack-tray-style, time trackers, system monitors).
+Use this for: menubar apps, agent apps (clipboard managers, time trackers, system monitors), apps that should be invisible at boot but available on demand.
 
 **Dev caveat**: in dev (`npm start` / `electron .`), the packaged `Info.plist` isn't in effect, so macOS will still briefly bounce. Production builds (`npm run build` / `npm run release`) get the real zero-bounce behavior.
+
+> **Note:** the deprecated `'tray-only'` mode is no longer valid — its behavior was always identical to `'hidden'`, so they've been folded into one. Old `tray-only` configs fall back to `'normal'` per `getMode()` validation.
 
 ## Public API on `manager.startup`
 
 ```js
-manager.startup.getMode()                  // user-launch mode: 'normal' | 'hidden' | 'tray-only'
-manager.startup.isLaunchHidden()           // true if THIS launch should not auto-show a window
-                                           //   (combines user-launch mode + login-launch detection)
-manager.startup.isTrayOnly()               // true only when user-launch mode is 'tray-only'
+manager.startup.getMode()                  // user-launch mode: 'normal' | 'hidden'
+manager.startup.isLaunchHidden()           // true if THIS launch is hidden — combines
+                                           //   user-launch mode + login-launch detection.
+                                           //   Use this in main.js to gate windows.create().
 manager.startup.wasLaunchedAtLogin()       // true if the OS auto-launched us at login
 manager.startup.applyEarly()               // calls app.dock.hide() if needed (called by main.js boot)
 
@@ -55,11 +53,23 @@ manager.startup.setOpenAtLogin({ enabled: true, mode: 'hidden' }) // object form
 manager.startup.isOpenAtLogin()            // read live OS state
 ```
 
+## Typical main.js pattern
+
+```js
+manager.initialize().then(() => {
+  // Surface the main window unless we're in hidden launch mode.
+  if (!manager.startup.isLaunchHidden()) {
+    manager.windows.create('main');
+  }
+  // Hidden mode? UI surfaces from a tray click / deep-link / IPC event later.
+});
+```
+
 ## Boot order
 
 `startup.applyEarly()` is the **first** call in `Manager.initialize()` — before `whenReady`, before any other lib. The goal: spend as little time as possible in the dock-bounce window.
 
-Sequence: applyEarly → ipc → storage → sentry → protocol → deep-link → app-state → whenReady → updater → tray/menu/contextMenu → startup.initialize → web-manager → windows → conditional `createNamed('main')`.
+Sequence: applyEarly → before-quit hook → ipc → storage → sentry → protocol → deep-link → app-state → whenReady → updater → tray/menu/contextMenu → startup.initialize → web-manager → windows.initialize. **EM no longer auto-creates the main window** — your `main.js` does that inside the `.then()` callback after `initialize()` resolves.
 
 ## How zero-bounce works on macOS
 
@@ -67,27 +77,25 @@ Sequence: applyEarly → ipc → storage → sentry → protocol → deep-link �
 
 EM handles this at build time:
 1. `gulp/build-config` reads `config/electron-manager.json`.
-2. If `startup.mode === 'tray-only'`, it injects `mac.extendInfo.LSUIElement: true` into the materialized `dist/electron-builder.yml`.
+2. If `startup.mode === 'hidden'`, it injects `mac.extendInfo.LSUIElement: true` into the materialized `dist/electron-builder.yml`.
 3. `electron-builder` packages the app with that key in the final `Info.plist`.
+
+At runtime, when the consumer first calls `manager.windows.create()` or `manager.windows.show()`, EM calls `app.dock.show()` so the dock icon appears alongside the window. Reverses cleanly via `app.dock.hide()` if you want to go back to invisible.
 
 The injection is YAML-text-level (preserves comments, idempotent, merges with existing `extendInfo`). See `src/gulp/tasks/build-config.js`.
 
 ## Pairing with tray/window patterns
 
-Tray-only apps usually want:
+Hidden / agent apps usually want:
 
 ```jsonc
-"startup": { "mode": "tray-only" },
-"tray":    { "enabled": true },
-"windows": {
-  "main": { "view": "main", "show": false, "hideOnClose": true }
-}
+"startup": { "mode": "hidden" }
 ```
 
-And in `src/tray/index.js`:
+And in `src/integrations/tray/index.js`:
 
 ```js
-tray.item({ label: 'Open', click: () => manager.windows.show('main') });
+tray.update('open', { click: () => manager.windows.create('main') });
 ```
 
-The window exists (created on first show, persisted bounds) but the app feels tray-resident.
+The window doesn't exist at launch (no dock icon, no UI). When the user clicks the tray's "Open" item, `windows.create('main')` runs, EM calls `app.dock.show()`, and the user sees both the dock icon and the window appear together.

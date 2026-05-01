@@ -1,23 +1,32 @@
 // Window manager — named-window registry over BrowserWindow.
 //
-// Purpose: framework default for the common case (named, persistent, integrated windows).
-// Consumers can still `new BrowserWindow()` directly for one-off windows; the manager doesn't get in the way.
+// **Lazy creation.** EM does NOT auto-create any windows. Consumers call
+// `manager.windows.create('main', opts?)` from their main.js when they want UI
+// to surface — typically right after `manager.initialize()` resolves, but may
+// be deferred (e.g. agent apps that only show UI when the user clicks the tray).
 //
-// Common case:
-//   await manager.windows.createNamed('settings');
-//   manager.windows.show('settings');
+// Defaults baked in (no JSON config required):
+//   main      → { width: 1024, height: 720, hideOnClose: true,  view: 'main' }
+//   any other → { width: 800,  height: 600, hideOnClose: false, view: name   }
 //
-// Config (in config/electron-manager.json):
-//   "windows": {
-//     "main":     { "view": "main",     "width": 1024, "height": 720, "show": true,  "hideOnClose": false },
-//     "settings": { "view": "settings", "width": 600,  "height": 480, "show": false, "hideOnClose": true  }
-//   }
+// Override at the call site:
+//   manager.windows.create('main',     { width: 1280, height: 800 });
+//   manager.windows.create('settings', { width: 600,  height: 480 });
 //
-// `view` matches a folder under src/views/ (so `view: "main"` loads src/views/main/index.html).
+// `view` resolves to `<projectRoot>/dist/views/<view>/index.html`.
 //
-// Bounds persistence: every named window's position + size is saved to storage on
-// resize/move/close and restored on createNamed. Disable per-window with
-// `persistBounds: false` in the window config. Storage key: `windows.<name>.bounds`.
+// Optional config (only if you need to override defaults persistently):
+//   "windows": { "main": { "width": 1280, "height": 800 } }
+// — overrides flow into create() unless overridden again at call site.
+//
+// macOS dock auto-show: when `LSUIElement: true` is baked at build time
+// (`startup.mode = 'hidden'`), the app launches with NO dock icon. The first
+// time `create()` or `show()` runs, EM calls `app.dock.show()` so the icon
+// appears alongside the window.
+//
+// Bounds persistence: every named window's position + size is saved to storage
+// on resize/move/close and restored on the next create(). Disable per-window
+// with `persistBounds: false`. Storage key: `windows.<name>.bounds`.
 
 const path = require('path');
 const LoggerLite = require('./logger-lite.js');
@@ -54,9 +63,20 @@ const windowManager = {
     logger.log('initialize');
   },
 
-  // Create or focus a named window.
-  async createNamed(name, manager) {
+  // Public create() — canonical name. Accepts (name, overrides?) so consumers
+  // can configure entirely from main.js without touching JSON. Falls through to
+  // createNamed which does the heavy lifting.
+  async create(name, overrides) {
+    return windowManager.createNamed(name, windowManager._manager, overrides);
+  },
+
+  // Create or focus a named window. Args:
+  //   name      — registry key + default view name + storage key for bounds.
+  //   manager   — Manager instance (defaults to the one passed to initialize()).
+  //   overrides — optional opts that take precedence over config.windows.<name>.
+  async createNamed(name, manager, overrides) {
     manager = manager || windowManager._manager;
+    overrides = overrides || {};
 
     // Single-instance dedup
     const existing = windowManager._windows[name];
@@ -73,7 +93,17 @@ const windowManager = {
     }
 
     const { BrowserWindow } = windowManager._electron;
-    const config = manager?.config?.windows?.[name] || {};
+
+    // Resolve final per-window config: framework defaults < JSON config < call-site overrides.
+    // Defaults are split: `main` gets a wider default + hideOnClose; everything else gets a
+    // smaller default + close-actually-closes.
+    const isMain = name === 'main';
+    const defaults = isMain
+      ? { width: 1024, height: 720, view: 'main', hideOnClose: true }
+      : { width: 800,  height: 600, view: name,   hideOnClose: false };
+    const jsonConfig = manager?.config?.windows?.[name] || {};
+    const config = { ...defaults, ...jsonConfig, ...overrides };
+
     const persistBounds = config.persistBounds !== false;
     const projectRoot = process.cwd();
     const viewName = config.view || name;
@@ -82,17 +112,50 @@ const windowManager = {
     const htmlPath = path.join(projectRoot, 'dist', 'views', viewName, 'index.html');
     const preloadPath = path.join(projectRoot, 'dist', 'preload.bundle.js');
 
-    // Resolve initial bounds: saved bounds (if any + valid + persistBounds enabled) override config defaults.
+    // Resolve initial bounds: saved bounds (if any + valid + persistBounds enabled)
+    // override config defaults. `x` and `y` are passed through from config when set
+    // (so call-site overrides like `{ x: 100, y: 100 }` actually take effect).
     const defaultBounds = {
       width:  config.width  || 1024,
       height: config.height || 720,
     };
+    if (typeof config.x === 'number') defaultBounds.x = config.x;
+    if (typeof config.y === 'number') defaultBounds.y = config.y;
     const savedBounds = persistBounds ? windowManager._loadBounds(name, manager) : null;
     const bounds = savedBounds
       ? windowManager._clampToDisplays(savedBounds)
       : defaultBounds;
 
-    const isTrayOnly = manager?.startup?.isTrayOnly?.() === true;
+    // skipTaskbar is per-window now. The old startup-mode 'tray-only' has been folded
+    // into 'hidden' (LSUIElement on macOS) — visibility in the dock is handled by the
+    // Info.plist flag, not by skipTaskbar on individual windows.
+    const skipTaskbar = config.skipTaskbar === true;
+
+    // Inset titlebar by default. Mac → traffic lights inset into the window, Windows →
+    // native min/max/close overlay drawn by the OS in the corner of our chrome region,
+    // Linux → native frame (no override). Override per-window via config.windows.<name>.
+    //   titleBar: 'inset' (default) | 'native' (frame:true everywhere)
+    // Consumers needing finer control (custom overlay color, frame:false everywhere)
+    // can pass `electronBuilder`-style options via config.windows.<name>.titleBarOverlay
+    // / config.windows.<name>.frame.
+    const titleBarMode = config.titleBar || 'inset';
+    const isMac        = process.platform === 'darwin';
+    const isWin        = process.platform === 'win32';
+
+    const titleBarOpts = {};
+    if (titleBarMode === 'inset') {
+      if (isMac) {
+        titleBarOpts.titleBarStyle = 'hiddenInset';
+      } else if (isWin) {
+        titleBarOpts.titleBarStyle    = 'hidden';
+        titleBarOpts.titleBarOverlay  = config.titleBarOverlay || {
+          color:        config.backgroundColor || '#ffffff',
+          symbolColor:  '#000000',
+          height:       36,
+        };
+      }
+      // Linux → native frame, no override.
+    }
 
     const winOpts = {
       width:  bounds.width,
@@ -101,9 +164,10 @@ const windowManager = {
       minHeight: config.minHeight || 300,
       show: false, // flicker prevention — show on ready-to-show
       // Tray-only apps suppress all taskbar/dock representation for their windows.
-      skipTaskbar: isTrayOnly || config.skipTaskbar === true,
+      skipTaskbar,
       title: config.title || manager?.config?.app?.productName || name,
       backgroundColor: config.backgroundColor || '#ffffff',
+      ...titleBarOpts,
       webPreferences: {
         preload: preloadPath,
         contextIsolation: true,
@@ -133,21 +197,16 @@ const windowManager = {
       manager.contextMenu.attach(win.webContents);
     }
 
-    // Load the HTML
-    try {
-      await win.loadFile(htmlPath);
-      logger.log(`createNamed: loaded ${htmlPath} for "${name}"`);
-    } catch (e) {
-      logger.error(`createNamed: failed to load ${htmlPath}`, e);
-    }
+    // ALL event listeners must attach BEFORE `await loadFile()` below — otherwise the
+    // window can be in the registry but missing close/resize/etc. listeners during the
+    // ~ms window between BrowserWindow construction and load completion. Boot tests +
+    // any code that inspects/interacts with the window via the registry before await
+    // resolves would see an inconsistent state.
 
-    // Show when ready (unless config or startup mode says otherwise).
-    // - config.show: false  → never auto-show (consumer drives visibility)
-    // - hidden / tray-only mode → never auto-show on launch; consumer drives visibility
+    // Show when ready (unless config says otherwise).
     win.once('ready-to-show', () => {
-      const launchHidden = manager?.startup?.isLaunchHidden?.() === true;
-      const shouldShow = config.show !== false && !launchHidden;
-      if (shouldShow) {
+      if (config.show !== false) {
+        windowManager._ensureDockVisible();
         win.show();
       }
     });
@@ -165,9 +224,29 @@ const windowManager = {
       win.on('close', () => windowManager._saveBoundsNow(name));
     }
 
-    // Hide-on-close vs quit-on-close
+    // Hide-on-close vs quit-on-close.
+    //
+    // Default `hideOnClose: true` for the `main` window — Discord-style behavior on
+    // every platform (X = hide, real quit only via Cmd+Q / menu Quit / tray Quit /
+    // auto-updater install). Other named windows default to `false` (X = close).
+    // Consumers override per-window via config.windows.<name>.hideOnClose.
+    //
+    // Three escape hatches let a close-event ACTUALLY close:
+    //   1. `manager._allowQuit` — set by manager.quit({ force: true }) and by the
+    //      auto-updater before installNow().
+    //   2. `manager._isQuitting` — set by app.on('before-quit'), so any quit path
+    //      Electron knows about (Cmd+Q, role:'quit' menu, app.quit() programmatic,
+    //      OS shutdown) flows through naturally.
+    //   3. `win._emForceClose` — per-window override for one-off "close this for
+    //      real" scenarios.
+    const hideOnClose = config.hideOnClose === true;
+
     win.on('close', (event) => {
-      if (config.hideOnClose && !win._emForceClose) {
+      const allowQuit  = manager?._allowQuit  === true;
+      const isQuitting = manager?._isQuitting === true;
+      const force      = win._emForceClose === true;
+
+      if (hideOnClose && !allowQuit && !isQuitting && !force) {
         event.preventDefault();
         win.hide();
       }
@@ -181,6 +260,16 @@ const windowManager = {
         delete windowManager._saveTimers[name];
       }
     });
+
+    // Load the HTML *after* all listeners are attached, so the window is fully observable
+    // by the time loadFile completes. This also means createNamed's returned promise
+    // resolves with a fully-wired window, which is what consumers + tests expect.
+    try {
+      await win.loadFile(htmlPath);
+      logger.log(`createNamed: loaded ${htmlPath} for "${name}"`);
+    } catch (e) {
+      logger.error(`createNamed: failed to load ${htmlPath}`, e);
+    }
 
     return win;
   },
@@ -281,8 +370,24 @@ const windowManager = {
       logger.warn(`show: no window named "${name}"`);
       return;
     }
+    windowManager._ensureDockVisible();
     win.show();
     win.focus();
+  },
+
+  // Internal: make the macOS dock icon appear if it's currently hidden (LSUIElement
+  // mode). No-op on Windows/Linux. Idempotent. Called automatically by show()/create()
+  // whenever we surface a window — apps that ship with LSUIElement=true (mode='hidden')
+  // are completely invisible until UI is requested, then dock + window appear together.
+  _ensureDockVisible() {
+    if (process.platform !== 'darwin') return;
+    const dock = windowManager._electron?.app?.dock;
+    if (!dock || typeof dock.show !== 'function') return;
+    try {
+      // dock.isVisible() exists from Electron 13+; fall back to always-call for older.
+      if (typeof dock.isVisible === 'function' && dock.isVisible()) return;
+      dock.show();
+    } catch (_) { /* no-op; dock surface is best-effort */ }
   },
 
   hide(name) {

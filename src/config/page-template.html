@@ -12,7 +12,22 @@
     <link href="../../assets/css/components/{{ page.name }}.bundle.css?cb={{ cacheBust }}" rel="stylesheet">
   </head>
   <body>
-    {{ content }}
+    <!--
+      EM titlebar — provides the draggable region for the inset native window controls.
+      - Mac: padded left ~70px to clear the inset traffic lights.
+      - Windows: padded right ~140px to clear the native overlay min/max/close buttons.
+      - Linux: hidden entirely (the native window frame supplies the title bar).
+      Platform detection comes from `html[data-platform]` set by web-manager during init —
+      see themes/classy/css/components/_titlebar.scss for the styling.
+    -->
+    <div class="em-titlebar">
+      <div class="em-titlebar__drag" aria-hidden="true"></div>
+      <div class="em-titlebar__title">{{ page.title }}</div>
+    </div>
+
+    <main class="em-content">
+      {{ content }}
+    </main>
 
     <!-- Per-page JS — entry bundle for this view (compiled by webpack renderer config). -->
     <script src="../../assets/js/components/{{ page.name }}.bundle.js?cb={{ cacheBust }}"></script>

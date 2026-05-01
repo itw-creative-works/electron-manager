@@ -32,7 +32,7 @@ module.exports = {
     {
       name: 'getMode honors valid values',
       run: (ctx) => {
-        for (const mode of ['normal', 'hidden', 'tray-only']) {
+        for (const mode of ['normal', 'hidden']) {
           ctx.manager.config.startup.mode = mode;
           ctx.expect(ctx.manager.startup.getMode()).toBe(mode);
         }
@@ -46,29 +46,24 @@ module.exports = {
       },
     },
     {
-      name: 'isLaunchHidden true for hidden + tray-only, false for normal',
+      name: 'getMode rejects deprecated tray-only as unknown (falls back to normal)',
+      run: (ctx) => {
+        // tray-only was folded into hidden; it's no longer a valid mode.
+        ctx.manager.config.startup.mode = 'tray-only';
+        ctx.expect(ctx.manager.startup.getMode()).toBe('normal');
+      },
+    },
+    {
+      name: 'isLaunchHidden true for hidden, false for normal',
       run: (ctx) => {
         ctx.manager.config.startup.mode = 'normal';
         ctx.expect(ctx.manager.startup.isLaunchHidden()).toBe(false);
         ctx.manager.config.startup.mode = 'hidden';
         ctx.expect(ctx.manager.startup.isLaunchHidden()).toBe(true);
-        ctx.manager.config.startup.mode = 'tray-only';
-        ctx.expect(ctx.manager.startup.isLaunchHidden()).toBe(true);
       },
     },
     {
-      name: 'isTrayOnly only true for tray-only mode',
-      run: (ctx) => {
-        ctx.manager.config.startup.mode = 'normal';
-        ctx.expect(ctx.manager.startup.isTrayOnly()).toBe(false);
-        ctx.manager.config.startup.mode = 'hidden';
-        ctx.expect(ctx.manager.startup.isTrayOnly()).toBe(false);
-        ctx.manager.config.startup.mode = 'tray-only';
-        ctx.expect(ctx.manager.startup.isTrayOnly()).toBe(true);
-      },
-    },
-    {
-      name: 'applyEarly is a no-op outside hidden/tray-only',
+      name: 'applyEarly is a no-op outside hidden mode',
       run: (ctx) => {
         ctx.manager.config.startup.mode = 'normal';
         // Just confirm it doesn't throw.

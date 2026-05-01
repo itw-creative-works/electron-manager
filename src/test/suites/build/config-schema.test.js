@@ -79,11 +79,12 @@ module.exports = {
       },
     },
     {
-      name: 'has named-window registry under windows',
+      name: 'has NO `windows` block — windows are created from main.js (lazy)',
       run: (ctx) => {
-        ctx.expect(ctx.state.cfg.windows).toBeTruthy();
-        ctx.expect(ctx.state.cfg.windows.main).toBeTruthy();
-        ctx.expect(ctx.state.cfg.windows.main.view).toBe('main');
+        // EM no longer auto-creates windows. The `windows` config block is optional —
+        // consumer adds it only when overriding defaults persistently. Default config
+        // ships without one.
+        ctx.expect(ctx.state.cfg.windows).toBeFalsy();
       },
     },
     {

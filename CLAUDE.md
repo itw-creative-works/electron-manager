@@ -41,19 +41,20 @@ new (require('electron-manager/renderer'))().initialize();
 
 Boot sequence (main process — `manager.initialize()`):
 
-1. **`startup.applyEarly()`** — first thing, before `whenReady`. Calls `app.dock.hide()` for hidden/tray-only modes (zero-bounce production via `LSUIElement` baked at build time).
-2. **`ipc`** — typed channel bus online before any feature can register handlers.
-3. **`storage`** — async (electron-store v11 ESM via `webpackIgnore`'d dynamic import). Other libs depend on this.
-4. **`sentry`** — earliest catchable global handler.
-5. **`protocol`** — single-instance lock + custom scheme register.
-6. **`deepLink`** — argv parse for cold-start, second-instance handler.
-7. **`appState`** — first-launch / launch-count / crash-sentinel / version-change.
-8. `await app.whenReady()`.
-9. **`autoUpdater`** — electron-updater, never blocks.
-10. **`tray`**, **`menu`**, **`contextMenu`** — file-based definitions from `src/integrations/{tray,menu,context-menu}/index.js`. Disable any of them at runtime via `manager.<name>.disable()` (no config flag).
-11. **`startup.initialize`** — applies `setLoginItemSettings`.
-12. **`webManager`** — relay renderer auth state.
-13. **`windows.initialize`** + conditional `createNamed('main')` (skipped when `startup.isLaunchHidden()` — i.e. `mode === 'hidden'` or `mode === 'tray-only'`).
+1. **`startup.applyEarly()`** — first thing, before `whenReady`. Calls `app.dock.hide()` for `mode: 'hidden'` (zero-bounce production via `LSUIElement` baked at build time).
+2. **`app.on('before-quit')`** wired — sets `manager._isQuitting = true` so any quit path (Cmd+Q, role:'quit' menu, programmatic `app.quit()`, OS shutdown) bypasses the window-manager's hide-on-close trap.
+3. **`ipc`** — typed channel bus online before any feature can register handlers.
+4. **`storage`** — async (electron-store v11 ESM via `webpackIgnore`'d dynamic import). Other libs depend on this.
+5. **`sentry`** — earliest catchable global handler.
+6. **`protocol`** — single-instance lock + custom scheme register.
+7. **`deepLink`** — argv parse for cold-start, second-instance handler.
+8. **`appState`** — first-launch / launch-count / crash-sentinel / version-change.
+9. `await app.whenReady()`.
+10. **`autoUpdater`** — electron-updater, never blocks.
+11. **`tray`**, **`menu`**, **`contextMenu`** — file-based definitions from `src/integrations/{tray,menu,context-menu}/index.js`. Disable any of them at runtime via `manager.<name>.disable()` (no config flag).
+12. **`startup.initialize`** — applies `setLoginItemSettings`.
+13. **`webManager`** — relay renderer auth state.
+14. **`windows.initialize`** — registers app-level handlers (`window-all-closed` → quit on win/linux). **Does NOT auto-create any window.** The consumer's main.js calls `manager.windows.create('main')` from inside `manager.initialize().then(() => { ... })` — typically gated on `if (!startup.isLaunchHidden())` so agent/menubar apps stay invisible until the user explicitly asks for UI.
 
 ### Lib modules
 
@@ -63,11 +64,11 @@ Boot sequence (main process — `manager.initialize()`):
 |---|---|---|
 | `ipc` | real | typed channel bus, single registration point |
 | `storage` | real | electron-store wrapper, sync main / async renderer via IPC |
-| `window-manager` | real | named-window registry + bounds persistence + auto-context-menu attach |
+| `window-manager` | real | lazy-creation registry (no auto-windows; consumer calls `manager.windows.create('main')`). Bounds persistence + auto context-menu attach + inset titlebar (mac `hiddenInset` / win `titleBarOverlay` / linux native) + Discord-style hide-on-close on `main`. Auto `app.dock.show()` on macOS when first window appears (LSUIElement parity). |
 | `tray` | real | file-based, dynamic items, runtime mutators |
 | `menu` | real | file-based, platform-aware default template |
 | `context-menu` | real | file-based, called per right-click with `params` |
-| `startup` | real | `mode: 'normal' | 'hidden' | 'tray-only'`, login-item, zero-bounce production |
+| `startup` | real | `mode: 'normal' | 'hidden'` (was `tray-only`, now folded into `hidden` since they were the same LSUIElement flag). `hidden` mode bakes `LSUIElement: true` into Info.plist on macOS at build time → zero dock bounce, no dock icon, not in Cmd+Tab. Tray + notifications + networking still work. Consumer surfaces UI later via `manager.windows.create('main')` which triggers `app.dock.show()` automatically. |
 | `app-state` | real | storage-backed launch flags + crash sentinel |
 | `protocol` | real | single-instance lock + scheme registration |
 | `deep-link` | real | unified deep-link dispatch (cold + warm start, mac + win + linux), built-in routes, pattern matching |
@@ -118,6 +119,29 @@ Implemented once in `src/lib/_menu-mixin.js` and mixed into all three. The resol
 
 Items support function `label`/`enabled`/`visible`/`checked` evaluated on `refresh()`. Click handlers wrapped to swallow errors. Auto-updater hook patches both `main/check-for-updates`/`help/check-for-updates` (menu) AND `check-for-updates` (tray) in lockstep.
 
+### Windows (lazy creation, inset titlebar, Discord-style hide-on-close)
+
+EM does NOT auto-create any windows. Consumers call `manager.windows.create(name, opts?)` from inside `manager.initialize().then(() => { ... })`. Defaults baked in (no JSON `windows:` block needed):
+
+- `main` → `{ width: 1024, height: 720, hideOnClose: true,  view: 'main' }`
+- any other → `{ width: 800,  height: 600, hideOnClose: false, view: name   }`
+
+Merge order: framework defaults < `config.windows.<name>` (if present) < call-site `overrides`. So `manager.windows.create('main', { width: 1280 })` produces `{ width: 1280, height: 720, hideOnClose: true, view: 'main' }`.
+
+**Inset titlebar by default.** macOS gets `titleBarStyle: 'hiddenInset'` (OS-drawn traffic lights inset into the chrome region). Windows gets `titleBarStyle: 'hidden'` + `titleBarOverlay: { color, symbolColor, height: 36 }` (OS-drawn min/max/close buttons in the corner). Linux gets a native frame. Override per-window via `config.windows.<name>.titleBar = 'inset' | 'native'` or `titleBarOverlay = { ... }`.
+
+**Page template is EM-internal** (`<em>/src/config/page-template.html`, copied to `<em>/dist/config/page-template.html` by prepare-package). Consumer's old `<consumer>/config/page-template.html` is no longer read. Template ships a draggable topbar (`.em-titlebar` + `.em-titlebar__drag` div with `-webkit-app-region: drag`) sized via `themes/classy/css/components/_titlebar.scss`, which keys off `html[data-platform]` (set by web-manager during init) — mac → pad-left 70px (clear traffic lights), windows → pad-right 140px (clear native overlay), linux → display:none (native frame draws title bar).
+
+**Quit-vs-hide gating (Discord-style).** `main` window's X click hides instead of quitting. Real quit only via Cmd+Q / role:'quit' menu / tray Quit / auto-updater install — those flip `manager._isQuitting` (via `app.on('before-quit')`) or `manager._allowQuit` (via `manager.quit({ force: true })` or `autoUpdater.installNow()`), which the close handler checks before deciding to swallow vs let through. Three escape hatches: `manager._allowQuit` (programmatic force), `manager._isQuitting` (any path Electron knows about), `win._emForceClose` (per-window override).
+
+`manager.quit({ force })` and `manager.relaunch({ force })` are exposed on the live manager. `relaunch` calls `autoUpdater.installNow()` if an update is downloaded, otherwise `app.relaunch() + app.quit()`.
+
+**Auto-update background install (legacy parity).** When a download finishes (`code: 'downloaded'`) AND the check was NOT user-initiated (no menu/tray click — just the periodic background poll), `_setState` schedules `installNow()` after 5s. User-initiated checks skip this so the consumer's UI can prompt instead. Auto-updater menu/tray hook keeps the label in lockstep with status (Checking → Downloading 42% → Restart to Update v1.2.3 → You're up to date).
+
+**macOS dock auto-show.** `windows.create()` and `windows.show()` call `app.dock.show()` if the dock is hidden — works even when `LSUIElement: true` is baked at build (`startup.mode = 'hidden'`). The app launches completely invisible (no dock icon, no Cmd+Tab, no taskbar) and the dock icon appears the moment the consumer surfaces UI.
+
+**`startup.mode` simplified.** Was `'normal' | 'hidden' | 'tray-only'` — `tray-only` was always the same idea (LSUIElement) so it's now folded into `'hidden'`. Old `tray-only` configs fall back to `'normal'` per `getMode()` validation.
+
 ### Build system
 
 - **prepare-package** copies framework `src/` → `dist/` (BXM-style).
@@ -137,7 +161,12 @@ Notable defaults / behaviors:
 - **productName**: same as `brand.name`
 - **Deep-link scheme**: always `<brand.id>://...` (no config). Built-in routes: `auth/token`, `app/show`, `app/quit`. Custom routes: `manager.deepLink.on('pattern', fn)` at runtime.
 - **Tray / menu / context-menu**: paths are conventional (`src/integrations/{name}/index.js`) — no config block. Disable: `manager.<name>.disable()`.
+- **`startup.mode`**: `'normal'` | `'hidden'`. `'hidden'` bakes `LSUIElement: true` into Info.plist on macOS at build time → completely invisible launch (no dock, no Cmd+Tab); tray + notifications still work. The deprecated `'tray-only'` mode is no longer valid — its behavior was always identical to `'hidden'` so it's been folded in.
 - **`startup.openAtLogin`**: object form `{ enabled: true, mode: 'hidden' }`. The mode applies ONLY when the OS auto-launches at login; user-direct launches always use `startup.mode`. Force-OFF in dev (uses `app.isPackaged`) to prevent dev runs from polluting login items — set `EM_FORCE_LOGIN_ITEM=1` to override.
+- **Windows**: no JSON config required. Consumer calls `manager.windows.create('main', opts?)` from inside `initialize().then(...)`. Framework defaults bake in `main` → `{ width: 1024, height: 720, hideOnClose: true, view: 'main' }` (Discord-style X=hide), other named windows → `{ width: 800, height: 600, hideOnClose: false }`. Override by passing opts to `create()` or by adding a `windows: { <name>: { ... } }` block in config (merge order: defaults < json < overrides).
+- **Titlebar**: inset by default (`titleBarStyle: 'hiddenInset'` on mac; `titleBarOverlay` on windows; native on linux). Page template ships a `.em-titlebar` draggable strip sized per-platform via `html[data-platform]` (set by web-manager).
+- **Page template**: EM-internal, no longer copied to `<consumer>/config/page-template.html`. Lives at `<em>/src/config/page-template.html`.
+- **`manager.quit({ force })`** / **`manager.relaunch({ force })`**: programmatic quit/relaunch entry points that flip `_allowQuit` so window-manager's hide-on-close trap doesn't swallow the close events. Auto-updater's `installNow()` flips `_allowQuit` automatically before calling `quitAndInstall()`.
 - **Icons**: 3-tier waterfall per slot/platform (config → `config/icons/<platform>/<slot>.png` → EM bundled). `@2x` retina auto-paired from `@1x`. Linux follows Windows resolution; Windows tray falls back to Windows app icon.
 - **Entitlements**: `entitlements.mac` is an object map (key→bool/string/array). Consumer overrides EM's defaults; `null` removes a default. Plist generated to `dist/build/entitlements.mac.plist`.
 - **Stable download names** (`gulp/mirror-downloads`): `Somiibo.dmg`, `Somiibo-Setup.exe`, `somiibo_amd64.deb`, `Somiibo.AppImage` — preserves legacy URLs. Apple Silicon gets `-arm64` suffix.
