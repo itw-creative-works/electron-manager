@@ -217,12 +217,17 @@ async function registerOrg(options) {
   // by Node's CreateProcess on Windows, so we need cmd.exe as the shell — but `shell: true`
   // triggers Node 24's DEP0190 deprecation warning when args are passed as an array.
   // Explicit `cmd.exe /c <script> <args>` is the supported, warning-free path.
+  //
+  // stdio: 'inherit' — config.cmd's --runasservice service-install path silently
+  // SKIPS service creation when stdout/stderr are piped (Node captures them and the
+  // child sees no console). With inherit, the runner's banner + progress + service
+  // install messages stream directly to the user's terminal and the install actually
+  // happens. Discovered the hard way after several "registered but no service" rounds.
   const { spawnSync } = require('child_process');
   logger.log(`Registering against ${org} (cwd: ${orgRunnerDir})…`);
   const r = spawnSync('cmd.exe', ['/c', configCmd, ...args], {
     cwd:      orgRunnerDir,
-    stdio:    ['ignore', 'pipe', 'pipe'],   // capture so we can surface real errors
-    encoding: 'utf8',
+    stdio:    'inherit',
     timeout:  180000,                        // 3 min — config.cmd does network + service install
   });
 
@@ -230,13 +235,7 @@ async function registerOrg(options) {
     throw new Error(`Could not spawn config.cmd: ${r.error.message}`);
   }
   if (r.status !== 0) {
-    const stdoutTail = (r.stdout || '').trim().split('\n').slice(-15).join('\n');
-    const stderrTail = (r.stderr || '').trim().split('\n').slice(-15).join('\n');
-    const detail = [
-      stdoutTail && `stdout: ${stdoutTail}`,
-      stderrTail && `stderr: ${stderrTail}`,
-    ].filter(Boolean).join('\n');
-    throw new Error(`config.cmd exited ${r.status === null ? 'null (killed)' : r.status} for ${org}.\n${detail || '(no output captured)'}`);
+    throw new Error(`config.cmd exited ${r.status === null ? 'null (killed)' : r.status} for ${org}. See output above.`);
   }
 
   // Sanity check — config.cmd's success exit doesn't always mean the service was created

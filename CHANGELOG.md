@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.2.8 — runner install: stdio inherit so service install actually runs
+
+The piped-stdio capture in v1.2.7 (and every prior version) was the reason
+`config.cmd --runasservice` SILENTLY SKIPPED the service-creation step.
+When Node's spawnSync captures stdout/stderr via pipes, the child sees no
+console, and actions/runner's --runasservice path treats that as "non-
+interactive, skip the service install."
+
+Verified by running config.cmd directly from cmd.exe (inherited stdio): the
+runner banner + "Service ... successfully installed" / "started successfully"
+messages all printed and the service was actually created.
+
+Fix: `stdio: 'inherit'` for the config.cmd spawn. The runner's banner and
+progress now stream straight to the user's terminal during install (which
+is fine — it looks like running it manually) and the service actually gets
+created.
+
+Side-effect: we lose the ability to capture stdout/stderr for surfacing in
+error messages on non-zero exit. That's a fair trade — the inherited output
+is right there in the terminal so the user can read it directly.
+
 ## 1.2.7 — runner install nukes per-org dirs before re-cloning (FOR REAL this time)
 
 The actual root cause of all the runner-install failures: `mgr runner install`

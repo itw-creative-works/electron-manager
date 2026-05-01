@@ -264,11 +264,13 @@ module.exports = {
       },
     },
     {
-      name: 'config.cmd spawn captures stdout/stderr (no more silent status:null)',
+      name: 'config.cmd spawn uses inherited stdio (so --runasservice actually creates the service)',
       run: (ctx) => {
         const fs = require('fs');
         const src = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'commands', 'runner.js'), 'utf8');
-        ctx.expect(src).toContain("stdio:    ['ignore', 'pipe', 'pipe']");
+        // Inherit, NOT pipe — actions/runner's --runasservice silently skips service
+        // install when stdout/stderr are piped (it can't see a console).
+        ctx.expect(src).toContain("stdio:    'inherit'");
         ctx.expect(src).toContain('null (killed)');                       // surfaces kill status meaningfully
       },
     },
