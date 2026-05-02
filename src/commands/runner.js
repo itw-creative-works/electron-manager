@@ -774,6 +774,18 @@ function createRunnerLogonTask({ taskName, runnerDir, account, password }) {
   // quoted, so we keep it simple. The path is double-quoted to handle spaces.
   const tr = `"${runCmd}"`;
 
+  // /IT is critical: marks the task as INTERACTIVE, meaning it binds to the
+  // /RU user's existing logged-on interactive session at run time instead of
+  // creating a fresh non-interactive batch logon for them. Without /IT, the
+  // task spawns in a separate non-interactive session that has its own (empty)
+  // view of the user's cert store — signtool then fails with "No certificates
+  // were found that met all the given criteria" even though the same cert is
+  // visible in the user's actual desktop session. /IT also ensures the
+  // SafeNet eToken Token Logon dialog, when triggered, renders on the user's
+  // visible desktop where automately can find and type into it.
+  // Cost: the task only runs while the user is logged on. With Windows
+  // auto-logon configured (one-time), this is a non-issue on a dedicated box.
+  //
   // /RL HIGHEST is intentionally omitted: signtool, npm install, electron-builder,
   // and automately keystroke injection don't require elevated tokens, and /RL
   // HIGHEST is what triggers schtasks's "Access is denied" without explicit
@@ -785,6 +797,7 @@ function createRunnerLogonTask({ taskName, runnerDir, account, password }) {
     '/TN', taskName,
     '/SC', 'ONLOGON',
     '/RU', account,
+    '/IT',
     '/TR', tr,
     '/F',
   ];

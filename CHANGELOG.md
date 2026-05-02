@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.2.18 — `/IT` flag on Logon Task so it binds to user's interactive session
+
+Critical follow-up to 1.2.17. Without `/IT`, schtasks treats `/SC ONLOGON /RU
+<user>` as a non-interactive batch logon — when the task runs, Windows creates
+a fresh logon session for that user instead of binding to their already-active
+desktop session. That fresh session has its own (empty) view of the user's
+cert store and never loads the SafeNet eToken CSP, so `signtool` immediately
+fails with "No certificates were found that met all the given criteria"
+even though the same cert is visible in the user's actual desktop session.
+
+Fix: pass `/IT` to `schtasks /Create`. `/IT` marks the task as interactive,
+which means Windows binds it to the `/RU` user's existing logged-on session
+at run time. Cert store, SafeNet driver state, and desktop access all flow
+through, so `signtool` sees the cert and the SafeNet PIN dialog renders on
+the visible desktop where automately can find and type into it.
+
+Trade-off (already accepted): `/IT` tasks only run while the user is
+interactively logged on. With Windows auto-logon configured (one-time setup),
+this is a non-issue on a dedicated build box.
+
 ## 1.2.17 — `runner install` auto-starts the Logon Task
 
 Follow-up to 1.2.16. After registering each per-org Logon Task, `register-org`
