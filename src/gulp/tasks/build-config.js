@@ -119,6 +119,13 @@ function baseConfig(config, extras = {}) {
     return abs;
   };
 
+  // Sanitized productName for use in artifact filenames. electron-builder's default
+  // `${productName}` template variable preserves spaces, which then become dots in NSIS
+  // output ("Deployment.Playground.Setup.1.0.6.exe") and behave inconsistently across
+  // targets. Replacing spaces with hyphens up front gives consistent hyphenated names
+  // across mac/win/linux that match what mirror-downloads produces on download-server.
+  const safeProductName = String(productName).replace(/[^A-Za-z0-9._-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+
   const out = {
     appId,
     productName,
@@ -148,9 +155,12 @@ function baseConfig(config, extras = {}) {
       hardenedRuntime:    true,
       gatekeeperAssess:   false,
       notarize: false,   // notarization runs via afterSign hook
+      artifactName: `${safeProductName}-\${version}-\${arch}.\${ext}`,
     },
 
-    dmg: {},
+    dmg: {
+      artifactName: `${safeProductName}-\${version}-\${arch}.\${ext}`,
+    },
 
     win: {
       target: [
@@ -161,12 +171,19 @@ function baseConfig(config, extras = {}) {
       },
     },
 
+    nsis: {
+      // NSIS-Setup form. version baked in so update-server keeps unique per-release
+      // filenames. download-server mirror strips the version for stable URLs.
+      artifactName: `${safeProductName}-Setup-\${version}.\${ext}`,
+    },
+
     linux: {
       target: [
         { target: 'deb',      arch: ['x64'] },   // Ubuntu/Debian/Mint. (i386 dropped — extinct on modern distros.)
         { target: 'AppImage', arch: ['x64'] },   // Fedora/Arch/openSUSE — distro-agnostic.
       ],
       category: 'Utility',
+      artifactName: `${safeProductName}-\${version}-\${arch}.\${ext}`,
     },
   };
 

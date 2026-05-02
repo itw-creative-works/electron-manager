@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.2.19 — hyphenated artifact filenames across all platforms
+
+`productName` containing a space (e.g. "Deployment Playground") was producing
+inconsistent artifact filenames:
+
+- mac dmg/zip used `${productName}-${version}-${arch}` → `Deployment Playground-1.0.6-arm64.dmg` (with literal space)
+- nsis exe collapsed spaces to dots → `Deployment.Playground.Setup.1.0.6.exe`
+- linux deb/AppImage varied per target
+
+Fix: set `artifactName` on every target (mac/dmg/nsis/linux) using a sanitized
+`safeProductName` where non-filename-safe chars become hyphens. All targets now
+produce hyphenated filenames consistently, matching what `mirror-downloads`
+already does for download-server stable names. After this:
+
+- `Deployment-Playground-1.0.6-arm64.dmg`
+- `Deployment-Playground-1.0.6-mac.zip`
+- `Deployment-Playground-Setup-1.0.6.exe`
+- `Deployment-Playground-1.0.6-x64.AppImage`
+- `deployment-playground_1.0.6_amd64.deb` (Debian convention preserved)
+
 ## 1.2.18 — `/IT` flag on Logon Task so it binds to user's interactive session
 
 Critical follow-up to 1.2.17. Without `/IT`, schtasks treats `/SC ONLOGON /RU
