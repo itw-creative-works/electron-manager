@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.2.24 — exclude `logs/` from packaged app; force cmd for Windows build job
+
+Two bugs surfaced when running v1.2.23's universal-mac build end-to-end:
+
+### Mac universal-build failure: "Can't reconcile two non-macho files logs/dev.log"
+
+Root cause: `@electron/universal` builds the universal binary by building x64
+and arm64 separately and then merging the two app bundles. For non-mach-O
+files (regular files like text/log/etc), it requires the two copies to be
+byte-identical. Gulp writes `logs/dev.log` during each build, with different
+content each time → merge fails.
+
+Fix: exclude `logs/**` from the electron-builder `files` glob so log files
+never make it into the bundle in the first place. They shouldn't have been
+shipping to end users anyway — these are dev/build pipeline outputs.
+
+### Windows build job: `npm ci` failing silently in PowerShell
+
+v1.2.12 added `defaults.run.shell: cmd` to the windows-sign job (because
+self-hosted runners often have PowerShell ExecutionPolicy=Restricted),
+but the windows-build job (hosted runner) was left on its default shell
+which is now PowerShell 7. PowerShell 7 wraps each step in a way that
+`npm ci`'s output gets swallowed and exit non-zero with no error context.
+
+Fix: explicit `shell: cmd` on every windows-only step in the build job.
+mac/linux steps unaffected (the cmd shell is win-only; mac/linux ignore it
+or substitute their default bash).
+
+### Net effect
+
+After this version, dp's release pipeline runs end-to-end on universal mac
+without merge failures, and Windows-build doesn't silently drop dead at
+`npm ci`. v1.2.23 was a real fix conceptually but couldn't ship because of
+these two collateral issues.
+
 ## 1.2.23 — universal mac binary; mirror-downloads bug fixes
 
 ### One mac download, not two

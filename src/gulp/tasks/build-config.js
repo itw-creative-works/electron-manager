@@ -142,6 +142,12 @@ function baseConfig(config, extras = {}) {
       '!.env',
       '!.env.*',
       '!**/*.env',
+      // Exclude project logs/ — gulp writes dev.log here during build, which
+      // (a) shouldn't ship to end users, and (b) breaks @electron/universal's
+      // merge step ("Can't reconcile two non-macho files logs/dev.log") when
+      // the file content differs between the x64 and arm64 builds.
+      '!logs/**',
+      '!**/logs/**',
     ],
 
     asar: true,

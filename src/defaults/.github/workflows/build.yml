@@ -113,9 +113,22 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
-      - run: npm ci
+      # On Windows, force cmd for every shell step in this job — the runner's default
+      # is PowerShell 7 which has its own ExecutionPolicy/wrapping quirks that cause
+      # `npm ci` and similar to exit silently with no captured output. cmd has none
+      # of that. mac/linux use their default bash regardless of this flag (per
+      # actions/runner shell-resolution: `cmd` is win-only and ignored elsewhere).
+      - if: matrix.os == 'windows-latest'
+        shell: cmd
+        run: npm ci
+      - if: matrix.os != 'windows-latest'
+        run: npm ci
 
-      - run: npx mgr setup
+      - if: matrix.os == 'windows-latest'
+        shell: cmd
+        run: npx mgr setup
+      - if: matrix.os != 'windows-latest'
+        run: npx mgr setup
 
       # macOS — decode signing assets from secrets, then sign + notarize + publish.
       # `npx mgr push-secrets` uploads .p12 / .p8 files as base64-encoded secrets;
@@ -142,7 +155,9 @@ jobs:
       # Windows — package (build + electron-builder package) unsigned. We do NOT publish
       # here. Mac/linux's `npm run release:local` step already created the GH Release via
       # electron-builder publish; windows-sign uploads signed .exe to that same release.
+      # shell: cmd as above — PowerShell 7's wrapping breaks long-running npm scripts.
       - if: matrix.os == 'windows-latest'
+        shell: cmd
         env:
           EM_SKIP_WIN_SIGN: 'true'
         run: npm run package
