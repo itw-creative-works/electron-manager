@@ -44,9 +44,17 @@ const templating = {
   buildPageVars(pageName, extras, manager) {
     const m = manager || templating._manager;
     const cfg = (m && m.config) || (m && typeof m.getConfig === 'function' ? m.getConfig() : {}) || {};
+    // Pull version from the consumer's package.json at build time. This baked-in
+    // string is used by templates that want to display the running version in the
+    // UI (e.g. "v1.0.5" in a footer). At runtime it always matches the version
+    // that was packaged + signed + uploaded, since both come from the same
+    // package.json read.
+    const pkg = (m && typeof m.getPackage === 'function' ? m.getPackage('project') : null) || {};
+    const appBlock = { ...(cfg.app || {}) };
+    if (pkg.version && !appBlock.version) appBlock.version = pkg.version;
     const vars = {
       brand: cfg.brand   || {},
-      app:   cfg.app     || {},
+      app:   appBlock,
       theme: { appearance: cfg?.theme?.appearance || 'auto' },
       page: {
         name:  pageName,

@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.2.21 — `{{ app.version }}` in templating page vars
+
+`buildPageVars` now exposes the consumer's `package.json` version as `app.version`,
+so HTML templates can display the running build's version with `{{ app.version }}`.
+Read at build time from `manager.getPackage('project')` — always matches the
+exact version that was packaged, signed, and uploaded (same source-of-truth read).
+
+If `config.app.version` is set explicitly in `electron-manager.json`, that wins;
+otherwise the package.json version is used.
+
+Useful for verifying auto-updates in the running UI without round-tripping IPC:
+the value is baked into the HTML at build time.
+
 ## 1.2.20 — Windows auto-updater feed (latest.yml) generated post-sign
 
 Closes the last gap in the Windows auto-update path. After signing the .exe,
