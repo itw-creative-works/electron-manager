@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.2.25 — `npm run package:quick` for fast local production builds
+
+Adds a quick-package path for testing production code paths locally without
+the full DMG/zip/universal/notarize pipeline. ~20-30s vs ~3min for `package`.
+
+- New gulp task `packageQuick` (delegates to `package-quick.js`).
+- New `package:quick` projectScript injected by `mgr setup`.
+- Output: `release/<platform>-<arch>/<ProductName>.app` (or `.exe`-folder/linux-unpacked).
+  Skips DMG, zip, universal stitching, and notarization. Code signing still runs
+  if the cert is in the keychain — the .app launches normally on the dev machine.
+
+Use case: smoke-testing the production main bundle (config loading, packaged-mode
+behavior, asar archive contents) without waiting for a full release build.
+
 ## 1.2.24 — exclude `logs/` from packaged app; force cmd for Windows build job
 
 Two bugs surfaced when running v1.2.23's universal-mac build end-to-end:

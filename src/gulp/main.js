@@ -80,6 +80,15 @@ exports.packageBuild = series(
   exports.package,
 );
 
+// Quick package: build + electron-builder --dir for host platform/arch only.
+// Skips DMG/zip/universal/notarize. Output: release/<platform>-<arch>/<ProductName>.app
+// (or .exe-folder on win, linux-unpacked on linux). ~20-30s. For local smoke-testing
+// production code paths (config loading, packaged-mode behavior) without the full pipeline.
+exports.packageQuick = series(
+  exports.build,
+  exports['package-quick'],
+);
+
 // Publish: build + hook:release:pre + electron-builder release + mirror + hook:release:post.
 // Single sign+notarize pass; mirror is post-publish (re-uploads artifacts under stable names).
 exports.publish = series(

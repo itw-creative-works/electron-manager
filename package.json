@@ -1,6 +1,6 @@
 {
   "name": "electron-manager",
-  "version": "1.2.24",
+  "version": "1.2.25",
   "description": "Electron Manager — all-in-one development framework for Electron apps",
   "main": "dist/index.js",
   "exports": {
@@ -59,6 +59,7 @@
     "gulp": "gulp --cwd ./ --gulpfile ./node_modules/electron-manager/dist/gulp/main.js",
     "build": "npx mgr clean && npx mgr setup && npx cross-env EM_BUILD_MODE=true npm run gulp -- build",
     "package": "npx mgr clean && npx mgr setup && npx cross-env EM_BUILD_MODE=true npm run gulp -- packageBuild",
+    "package:quick": "npx mgr clean && npx mgr setup && npx cross-env EM_BUILD_MODE=true npm run gulp -- packageQuick",
     "publish": "npx cross-env EM_BUILD_MODE=true EM_IS_PUBLISH=true npm run gulp -- publish",
     "release": "npx mgr release",
     "release:local": "npx mgr clean && npx mgr setup && npx cross-env EM_BUILD_MODE=true EM_IS_PUBLISH=true npm run gulp -- publish",
