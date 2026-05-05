@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.2.20 — Windows auto-updater feed (latest.yml) generated post-sign
+
+Closes the last gap in the Windows auto-update path. After signing the .exe,
+`mgr sign-windows` now generates `latest.yml` (and a per-exe `.blockmap` for
+delta updates) in the signed-output directory. `finalize-release` then
+uploads them alongside the signed .exe to update-server.
+
+### Why this had to happen
+
+electron-builder generates `latest.yml` only as part of its publish flow.
+Our pipeline signs Windows out-of-band (separate self-hosted runner,
+EV USB token, signtool — see commands/sign-windows.js), so by the time we
+have a signed binary, electron-builder is long gone and never wrote a yml.
+
+The yml's `sha512` field MUST match the bytes of the signed binary —
+generating it BEFORE signing would produce a hash that doesn't match the
+final exe, and electron-updater would reject the update with a checksum
+mismatch. So the only correct place to write it is right after signing,
+which is what this version does.
+
+### What's new
+
+- `lib/sign-helpers/update-info.js` — pure module that computes sha512
+  (raw bytes → base64), generates blockmap via `app-builder-bin`'s
+  `blockmap` subcommand (best-effort; warns and skips if not resolvable
+  — auto-updater still works without delta), and writes `latest.yml` in
+  the canonical schema electron-updater expects.
+- `commands/sign-windows.js` — after the signing loop, calls
+  `writeUpdateInfo` for all signed `.exe` files. Failure is logged loudly
+  but does not fail the sign step (signed binary is still valid).
+- 11 new build-layer tests pinning sha512 base64 encoding, schema shape,
+  end-to-end yml round-trip via real file IO, and error paths.
+
+### Impact
+
+After this version, a fresh `npm run release` from a Windows-EV-token
+consumer produces a fully working auto-update path on Windows for the
+first time. `latest.yml` is what electron-updater fetches from the GH
+release to discover new versions; without it, Windows clients never see
+new releases. Was the silent reason "draft → published" worked but no
+Windows machine ever auto-updated.
+
 ## 1.2.19 — hyphenated artifact filenames across all platforms
 
 `productName` containing a space (e.g. "Deployment Playground") was producing

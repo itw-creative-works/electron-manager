@@ -24,6 +24,7 @@ const { execute } = require('node-powertools');
 const Manager = new (require('../build.js'));
 const logger = Manager.logger('sign-windows');
 const { startAutoUnlock } = require('../lib/sign-helpers/auto-unlock.js');
+const { writeUpdateInfo } = require('../lib/sign-helpers/update-info.js');
 
 module.exports = async function (options) {
   options = options || {};
@@ -124,6 +125,11 @@ async function signWithSigntool(targets, inDir, outDir) {
   const signtool = getSigntoolPath();
   const timestampUrl = process.env.WIN_TIMESTAMP_URL || 'http://timestamp.sectigo.com';
 
+  // Track which signed installers are NSIS-style .exe so we can write latest.yml
+  // for them after the signing loop. .msi targets use Windows Installer's own
+  // update mechanism (not electron-updater) and don't need a yml.
+  const signedExes = [];
+
   for (const target of targets) {
     const rel = path.relative(inDir, target);
     const outPath = path.join(outDir, rel);
@@ -160,6 +166,38 @@ async function signWithSigntool(targets, inDir, outDir) {
     const verifyCmd = `"${signtool}" verify /pa "${outPath}"`;
     await execute(verifyCmd, { log: false });
     logger.log(logger.format.green(`✓ Signed: ${path.relative(projectRoot, outPath)}`));
+
+    if (outPath.toLowerCase().endsWith('.exe')) {
+      signedExes.push({ filePath: outPath, urlName: path.basename(outPath) });
+    }
+  }
+
+  // Generate latest.yml + per-exe .blockmap for the signed NSIS installers. Without
+  // this, electron-updater on Windows clients has no way to discover the new release
+  // (mac/linux equivalents are produced by electron-builder during their publish step,
+  // but Windows is split into a post-build sign job so we have to write the yml here).
+  if (signedExes.length > 0) {
+    const pkg = Manager.getPackage('project') || {};
+    const version = pkg.version;
+    if (!version) {
+      logger.warn('Could not determine version from package.json — skipping latest.yml generation.');
+    } else {
+      logger.log(`Generating Windows auto-updater feed (latest.yml) for ${signedExes.length} installer(s)...`);
+      try {
+        await writeUpdateInfo({
+          signedExes,
+          outDir,
+          version,
+          logger,
+        });
+      } catch (e) {
+        // Don't fail the whole sign step if yml generation hits something unexpected —
+        // the signed exe is still valid + uploadable. But this IS a real problem
+        // because auto-updates won't work, so log loudly.
+        logger.error(`latest.yml generation failed: ${e.message}`);
+        logger.error('  Signed binary is OK but Windows auto-updater will not see this release.');
+      }
+    }
   }
 }
 
