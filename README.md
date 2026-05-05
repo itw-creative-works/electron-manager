@@ -38,14 +38,29 @@ npx mgr test         # run framework + project test suites
 
 ## Logs
 
-Every `npm start` (and any other gulp invocation) tees its complete stdout + stderr to `<projectRoot>/logs/dev.log` — gulp tasks, electron child, console output, the works. ANSI color codes are stripped from the file (terminal output stays colored). The file is truncated fresh on each run.
+Three logs in `<projectRoot>/logs/`, each with its own purpose:
+
+| File | What | Lifetime |
+|---|---|---|
+| `runtime.log` | Your packaged app's runtime — main + preload + renderer all converge here via electron-log | Persistent, rotates at 10 MB |
+| `dev.log` | Gulp pipeline output — sass, webpack, html, electron child stdout from `npm start` | Truncated each run |
+| `build.log` | `npm run release` — streamed GH Actions output during a CI release | Truncated each run |
 
 ```bash
-tail -f logs/dev.log              # live tail
-grep -i error logs/dev.log        # search
+npx mgr logs                  # tail last 50 of runtime.log
+npx mgr logs --tail           # follow runtime.log live
+tail -f logs/dev.log          # gulp pipeline output
+grep -i error logs/runtime.log
 ```
 
-Override path via `EM_LOG_FILE=<path>`. Disable entirely via `EM_LOG_FILE=false`. The default `.gitignore` includes `logs/`.
+In production, `runtime.log` lives at `app.getPath('logs')`:
+- macOS: `~/Library/Logs/<AppName>/runtime.log`
+- Windows: `%APPDATA%\<AppName>\logs\runtime.log`
+- Linux: `~/.config/<AppName>/logs/runtime.log`
+
+See [docs/logging.md](docs/logging.md) for the full picture (renderer forwarding, log levels, programmatic path access).
+
+Override gulp's `dev.log` path via `EM_LOG_FILE=<path>`; disable entirely via `EM_LOG_FILE=false`. The default `.gitignore` includes `logs/`.
 
 ## Per-process imports
 

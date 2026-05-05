@@ -1,5 +1,82 @@
 # Changelog
 
+## 1.2.22 — runtime logger writes to disk; `mgr logs` CLI
+
+The runtime logger (`lib/logger-lite.js`) gains a file transport via [electron-log].
+All three Electron processes (main + preload + renderer) now converge on a
+single `runtime.log` file:
+
+- **Dev** (`app.isPackaged === false`): `<projectRoot>/logs/runtime.log`
+- **Prod** (`app.isPackaged === true`): `app.getPath('logs')/runtime.log` —
+  i.e. `~/Library/Logs/<AppName>/runtime.log` on macOS,
+  `%APPDATA%\<AppName>\logs\runtime.log` on Windows,
+  `~/.config/<AppName>/logs/runtime.log` on Linux.
+
+### How processes converge
+
+- **Main**: writes directly to file via electron-log's file transport. Sets up
+  an IPC listener on channel `em:log:forward` to receive forwarded calls from
+  the other contexts.
+- **Preload**: writes to console (DevTools) AND forwards each call via
+  `ipcRenderer.send('em:log:forward', ...)` to main.
+- **Renderer**: same as preload, exposed through `window.em.logger` so
+  contextIsolated user code can use it without direct ipcRenderer access.
+  `LoggerLite` in renderer also forwards via `window.em.ipc.send` if available.
+
+All three end up in the same file with `[main|preload|renderer]` scope tags
+so you can grep one context: `grep ' main ' logs/runtime.log`.
+
+Format is `[YYYY-MM-DD HH:MM:SS.ms] [level] scope text`. File rotates at 10 MB
+(→ `runtime.old.log`). Per-transport level overrides via env: `EM_LOG_LEVEL_FILE`,
+`EM_LOG_LEVEL_CONSOLE` (defaults to `silly` everywhere).
+
+### `npx mgr logs` command
+
+New CLI for inspecting the runtime log from the consumer project root:
+
+| Command | Effect |
+|---|---|
+| `npx mgr logs` | Print path + last 50 lines |
+| `npx mgr logs --tail` (or `-f`) | Follow live (cross-platform; pure-Node `tail -f`) |
+| `npx mgr logs --path` (or `-p`) | Print resolved path only (pipe-friendly) |
+| `npx mgr logs --open` | Open in OS default editor |
+| `npx mgr logs --lines=100` | Custom tail length for default mode |
+
+### Programmatic path access
+
+```js
+const LoggerLite = require('electron-manager/lib/logger-lite');
+LoggerLite.getLogFilePath();
+// → '/Users/<user>/Library/Logs/MyApp/runtime.log' in prod
+// → '<projectRoot>/logs/runtime.log' in dev
+```
+
+Useful for "send us your log" buttons or programmatic log shipping.
+
+### Coexistence with dev.log + build.log
+
+Three separate logs serve three separate purposes:
+
+- `runtime.log` — packaged app runtime (this version)
+- `dev.log` — gulp pipeline output (existing)
+- `build.log` — CI release stream (existing)
+
+Different rotation policies, different writers, different lifetimes — none of
+them conflict. See `docs/logging.md` for the full picture.
+
+### What changed
+
+- New: `electron-log@^5.4.3` runtime dep
+- New: `lib/logger-lite.js` rewritten — adds file transport + IPC forwarding
+- New: `commands/logs.js` for the `mgr logs` CLI
+- New: `docs/logging.md` full reference
+- Updated: `preload.js` exposes a forwarding logger via contextBridge
+- Updated: README + CLAUDE.md
+- Tests: 14 new (logger-lite shape + serialization + tryForwardToMain; logs
+  command path/default/lines flags)
+
+[electron-log]: https://github.com/megahertz/electron-log
+
 ## 1.2.21 — `{{ app.version }}` in templating page vars
 
 `buildPageVars` now exposes the consumer's `package.json` version as `app.version`,

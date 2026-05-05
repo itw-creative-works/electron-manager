@@ -58,11 +58,12 @@ Manager.prototype.initialize = async function () {
         return () => ipcRenderer.removeListener('em:storage:change', wrapped);
       },
     },
-    logger: {
-      log:   (...a) => console.log('[em]',   ...a),
-      warn:  (...a) => console.warn('[em]',  ...a),
-      error: (...a) => console.error('[em]', ...a),
-    },
+    // Renderer logger — writes to console (visible in DevTools) AND forwards each
+    // call to main where it's written through electron-log's file transport. Same
+    // file (logs/runtime.log in dev, OS logs/<AppName>/runtime.log in prod) where
+    // main + preload logs land too. Each entry is scoped 'renderer' so you can
+    // grep for renderer-only output.
+    logger: makeForwardingLogger('renderer', ipcRenderer),
     autoUpdater: {
       getStatus:  ()  => ipcRenderer.invoke('em:auto-updater:status'),
       checkNow:   ()  => ipcRenderer.invoke('em:auto-updater:check-now'),
@@ -80,5 +81,56 @@ Manager.prototype.initialize = async function () {
 
   return self;
 };
+
+// Build a console+forward logger object suitable for exposing through contextBridge
+// to the renderer. Each method:
+//   1. Writes to the renderer's DevTools console (live debug visibility).
+//   2. Sends an 'em:log:forward' IPC to main, which replays through electron-log's
+//      file transport. Result: every renderer log call lands in runtime.log too.
+//
+// Args are JSON-serialized before sending (IPC requires structured-cloneable values).
+// Errors and other non-cloneable values are flattened to objects with a __error flag.
+function makeForwardingLogger(scope, ipcRenderer) {
+  const FORWARD_CHANNEL = 'em:log:forward';
+  // Mirror the same keyset as LoggerLite for parity (log/info/warn/error/debug).
+  // Renderer code typically only uses log/warn/error so the others are forward-compat.
+  const methods = ['log', 'info', 'warn', 'error', 'debug'];
+  const out = {};
+  for (const m of methods) {
+    const fileLevel = m === 'log' ? 'info' : m;
+    out[m] = function () {
+      // Console first.
+      const args = ['[em]', ...Array.from(arguments)];
+      const fn = console[m] || console.log;
+      try { fn.apply(console, args); } catch (e) { /* ignore */ }
+      // Forward to main.
+      try {
+        ipcRenderer.send(FORWARD_CHANNEL, {
+          name: scope,
+          level: fileLevel,
+          args: serializeForIpc(arguments),
+        });
+      } catch (e) {
+        // Quietly drop — renderer console call above is the fallback.
+      }
+    };
+  }
+  return out;
+}
+
+// Pre-serialize log args so IPC's structured clone doesn't choke on Errors / circulars.
+function serializeForIpc(args) {
+  return Array.from(args).map((a) => {
+    if (a instanceof Error) return { __error: true, name: a.name, message: a.message, stack: a.stack };
+    if (a === undefined)    return { __undefined: true };
+    if (a === null)         return null;
+    if (typeof a === 'function') return `[Function: ${a.name || 'anonymous'}]`;
+    try {
+      return JSON.parse(JSON.stringify(a));
+    } catch (e) {
+      return String(a);
+    }
+  });
+}
 
 module.exports = Manager;

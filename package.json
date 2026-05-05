@@ -1,6 +1,6 @@
 {
   "name": "electron-manager",
-  "version": "1.2.21",
+  "version": "1.2.22",
   "description": "Electron Manager — all-in-one development framework for Electron apps",
   "main": "dist/index.js",
   "exports": {
@@ -106,6 +106,7 @@
     "chalk": "^5.6.2",
     "cross-env": "^7.0.3",
     "dotenv": "^17.4.2",
+    "electron-log": "^5.4.3",
     "electron-store": ">=11",
     "electron-updater": "^6.8.3",
     "fs-jetpack": "^5.1.0",

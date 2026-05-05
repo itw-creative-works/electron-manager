@@ -246,6 +246,7 @@ API references for each subsystem live in `docs/`:
 - [docs/auto-updater.md](docs/auto-updater.md) — startup + periodic checks, 30-day pending-update gate, dev simulation
 - [docs/sentry.md](docs/sentry.md) — per-context split, auto auth attribution, dev-mode gating
 - [docs/templating.md](docs/templating.md) — `{{ }}` token replacement, page vars, HTML pipeline
+- [docs/logging.md](docs/logging.md) — runtime logger (main + preload + renderer → one `runtime.log`), `mgr logs` CLI, dev vs prod paths
 - [docs/themes.md](docs/themes.md) — vendored classy + bootstrap themes, `@use 'electron-manager'` overrides, per-page CSS bundles
 - [docs/hooks.md](docs/hooks.md) — lifecycle hooks (build/pre, build/post, release/pre, release/post, notarize/post)
 - [docs/signing.md](docs/signing.md) — code signing for macOS + Windows, cert file inventory, env vars

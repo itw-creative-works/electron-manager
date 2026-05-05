@@ -16,6 +16,7 @@ const ALIASES = {
   publish:          ['-p', '--publish'],
   release:          ['-r', '--release'],
   test:             ['-t', '--test'],
+  logs:             ['--logs', 'log'],
   'validate-certs': ['certs', '--validate-certs'],
   'sign-windows':   ['--sign-windows'],
   'push-secrets':   ['secrets', '--push-secrets'],
