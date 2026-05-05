@@ -1,5 +1,63 @@
 # Changelog
 
+## 1.2.23 — universal mac binary; mirror-downloads bug fixes
+
+### One mac download, not two
+
+Previously dp produced separate `-x64.dmg` and `-arm64.dmg` (Intel + Apple Silicon).
+End users had to know which one their machine was. Switched mac default to
+`arch: ['universal']` — one .dmg + one .zip that run on both, via electron-builder's
+universal-binary support (Apple-blessed lipo stitch).
+
+Trade-offs:
+- File size: ~225MB instead of ~117MB single-arch (both binaries embedded)
+- Build time: ~2x for the mac job (build both archs, then stitch)
+- Win: ONE "Download for Mac" button. No user choice required.
+
+Filenames after upgrade:
+- `Deployment-Playground-1.0.8.dmg` (was `-x64.dmg` + `-arm64.dmg`)
+- `Deployment-Playground-1.0.8-mac.zip` (was `-x64-mac.zip` + `-arm64-mac.zip`)
+
+If a consumer wants to keep separate archs, they can override in their
+`electronBuilder` config block: `mac: { target: [{ target: 'dmg', arch: ['x64', 'arm64'] }] }`.
+
+### Mirror-downloads bug fixes
+
+Two bugs in `mirror-downloads.stableName` caused stale assets on download-server
+(some files 4+ days old while others were fresh):
+
+1. **Linux `x86_64` AppImage misclassified as `ia32`**: arch detection used
+   `lower.includes('-x86')` which matched `-x86_64` substring, returning ia32.
+   Fixed with proper word-boundary regex + explicit `x86_64`/`amd64` matches first.
+
+2. **Mac `.zip` not recognized after v1.2.19's artifactName change**: detection
+   required the `mac.zip` substring, but v1.2.19's mac.artifactName produced
+   `-x64.zip` / `-arm64.zip` (no `-mac` suffix). Fix in two places:
+   - This release re-adds `-mac` suffix to mac.artifactName so existing detection works
+   - Mirror's mac-zip detection now also accepts the no-suffix form (defensive)
+
+After this version, a fresh release fully replaces all stable-name assets on
+download-server (no more stale 4-day-old leftovers from misclassified naming).
+
+### Final asset list per release (universal mac)
+
+**update-server v{version}/**:
+- `Deployment-Playground-{version}.dmg` (+ blockmap)
+- `Deployment-Playground-{version}-mac.zip` (+ blockmap)
+- `Deployment-Playground-Setup-{version}.exe` (+ blockmap)
+- `Deployment-Playground-{version}-x86_64.AppImage`
+- `Deployment-Playground-{version}-amd64.deb`
+- `latest.yml`, `latest-mac.yml`, `latest-linux.yml`
+
+**download-server installer/** (stable names):
+- `Deployment-Playground.dmg`
+- `Deployment-Playground-mac.zip`
+- `Deployment-Playground-Setup.exe`
+- `Deployment-Playground.AppImage`
+- `deployment-playground_amd64.deb`
+
+5 user-facing files instead of 7. Cleaner end-user surface.
+
 ## 1.2.22 — runtime logger writes to disk; `mgr logs` CLI
 
 The runtime logger (`lib/logger-lite.js`) gains a file transport via [electron-log].

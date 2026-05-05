@@ -34,10 +34,10 @@ module.exports = {
       run: (ctx) => {
         const { baseConfig } = require(path.join(__dirname, '..', '..', '..', 'gulp', 'tasks', 'build-config.js'));
         const out = baseConfig({});
-        // Mac: dmg + zip, both archs.
+        // Mac: dmg + zip, universal arch (one binary that runs on both Intel + Apple Silicon).
         ctx.expect(out.mac.target.find((t) => t.target === 'dmg')).toBeDefined();
         ctx.expect(out.mac.target.find((t) => t.target === 'zip')).toBeDefined();
-        ctx.expect(out.mac.target[0].arch).toEqual(['x64', 'arm64']);
+        ctx.expect(out.mac.target[0].arch).toEqual(['universal']);
         // Win: nsis x64.
         ctx.expect(out.win.target[0].target).toBe('nsis');
         ctx.expect(out.win.target[0].arch).toEqual(['x64']);

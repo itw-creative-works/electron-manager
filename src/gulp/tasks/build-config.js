@@ -148,18 +148,31 @@ function baseConfig(config, extras = {}) {
 
     mac: {
       category: 'public.app-category.utilities',
+      // Universal binary — one .dmg + one .zip that runs on both Intel and Apple
+      // Silicon. Trade-off: ~2x file size (~225MB vs ~117MB single-arch), ~2x mac
+      // build time (electron-builder builds both archs then stitches them with lipo).
+      // Win: one user-facing download, no "which one do I pick?" choice for end users.
       target: [
-        { target: 'dmg', arch: ['x64', 'arm64'] },
-        { target: 'zip', arch: ['x64', 'arm64'] },
+        { target: 'dmg', arch: ['universal'] },
+        { target: 'zip', arch: ['universal'] },
       ],
       hardenedRuntime:    true,
       gatekeeperAssess:   false,
       notarize: false,   // notarization runs via afterSign hook
-      artifactName: `${safeProductName}-\${version}-\${arch}.\${ext}`,
+      // mac.artifactName is the FALLBACK template for mac targets that don't have
+      // their own. The .dmg target overrides it (cleaner names without -mac suffix).
+      // The .zip target uses this — KEEP the `-mac` suffix on zip filenames because
+      // (a) it's electron-builder's convention, (b) mirror-downloads keys off `-mac`
+      // to recognize "this is the auto-updater zip" vs a generic archive on the same
+      // release. With arch=universal there's only ONE zip per version (no -arm64 split)
+      // so we drop ${arch} from the template — produces e.g. `Product-1.0.0-mac.zip`.
+      artifactName: `${safeProductName}-\${version}-mac.\${ext}`,
     },
 
     dmg: {
-      artifactName: `${safeProductName}-\${version}-\${arch}.\${ext}`,
+      // Plain `Product-version.dmg` — the user-facing installer name. Universal
+      // binary so no arch suffix. Stable URL on download-server is `Product.dmg`.
+      artifactName: `${safeProductName}-\${version}.\${ext}`,
     },
 
     win: {

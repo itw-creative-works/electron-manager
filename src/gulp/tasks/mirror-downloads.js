@@ -146,10 +146,16 @@ function stableName(filename, productName) {
   const lower   = filename.toLowerCase();
   const ext     = path.extname(filename).slice(1).toLowerCase();
 
-  // Detect arch.
+  // Detect arch. Order matters — x86_64 must be checked BEFORE x86 (which is ia32),
+  // and arm64 before either, since electron-builder uses these substrings unanchored
+  // in the filename. Without word-boundary checks here we'd misclassify `x86_64`
+  // (linux 64-bit AppImage) as ia32 just because the substring `-x86` appears in it.
   let arch = 'x64';
-  if (lower.includes('arm64')) arch = 'arm64';
-  else if (lower.includes('ia32') || lower.includes('-x86')) arch = 'ia32';
+  if (lower.includes('arm64'))                                            arch = 'arm64';
+  else if (lower.includes('x86_64') || lower.includes('amd64'))           arch = 'x64';
+  else if (/(?:^|[-_.])ia32(?:[-_.]|$)/.test(lower))                      arch = 'ia32';
+  else if (/(?:^|[-_.])i386(?:[-_.]|$)/.test(lower))                      arch = 'ia32';
+  else if (/(?:^|[-_.])x86(?:[-_.]|$)/.test(lower))                       arch = 'ia32';
 
   // Per-platform stable naming.
   if (ext === 'dmg' || ext === 'pkg') {
