@@ -51,6 +51,43 @@ The gate:
 
 This guarantees no app on EM stays > maxAgeMs days behind a downloaded update.
 
+## Idle-aware install (15-min default)
+
+When an update finishes downloading via a background poll (NOT a user-initiated check), EM does NOT immediately quit-and-install. Instead, it kicks off an idle watcher:
+
+- Any UI activity bumps `_lastActivityAt = Date.now()`. Built-in signals:
+  - **Renderer-side** — `mousedown`, `keydown`, `wheel`, `touchstart`, `focus` on `window` (capture phase, debounced to once per 5s; sent to main as IPC `em:auto-updater:activity`).
+  - **Main-side** — `app.on('browser-window-focus')` (covers tray-click-to-show, dock click, alt-tab back, etc.).
+- Every minute, the watcher polls `Date.now() - _lastActivityAt`:
+  - If `>= 15min` → `installNow()` (app quits + relaunches into the new version).
+  - Else if we haven't prompted for this version yet → show a native dialog ("Restart Now / Later"). One prompt per version, ever. Dismissal ("Later") is "not now" — the watcher keeps polling and will auto-install when the user eventually walks away.
+
+Constants are hardcoded at the top of `src/lib/auto-updater.js`:
+- `IDLE_INSTALL_THRESHOLD_MS = 15 * 60 * 1000` — how long the user must be idle.
+- `IDLE_WATCHER_INTERVAL_MS = 60 * 1000` — how often the watcher re-evaluates.
+
+User-initiated checks (someone clicked "Check for Updates" in the menu/tray) bypass this entirely — the consumer's UI is responsible for surfacing the "Restart to Update" affordance (the menu/tray item already does this label-wise).
+
+### Consumer hook: `markActive()`
+
+Consumers can force-bump the activity timestamp from anywhere:
+
+```js
+manager.autoUpdater.markActive();
+```
+
+Call this from app-specific signals the framework can't see — e.g. just received an auth event, finished a long renderer task, finished a backend sync. Use sparingly; the built-in renderer mouse/keyboard/focus signals cover almost everything.
+
+### Why 15 minutes?
+
+Long enough that an actively-used app won't surprise-quit mid-task. Short enough that a user who minimizes the app and walks to lunch comes back to the new version. Tune the constants in `auto-updater.js` if your app's usage pattern is different.
+
+### Implementation notes
+
+- `_promptedForVersion` tracks the version we've already shown the dialog for. Reset on `shutdown()`. If a *newer* update downloads later, the prompt fires again (different version).
+- `_idleWatcherId` is cleared as soon as `_state.code !== 'downloaded'` (i.e. the moment installNow() takes effect or storage clears the pending update).
+- The watcher tick runs immediately upon download, then every `IDLE_WATCHER_INTERVAL_MS`. So a user who's been idle for hours when the update lands gets the install instantly without waiting another minute.
+
 ## Menu integration
 
 EM's default menu template includes a "Check for Updates..." item with id `em:check-for-updates`. The auto-updater listens to its own status changes and updates the item's label + enabled state, VS Code-style:

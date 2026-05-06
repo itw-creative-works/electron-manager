@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.2.33 — auto-updater: idle-aware install (no more surprise quit-and-install)
+
+Replaces the flat 5s background-install delay with an idle-aware watcher. When
+an update finishes downloading via a background poll, EM no longer just quits
+and installs — instead:
+
+- The watcher polls every minute. If the user has been idle ≥ 15min, it
+  installs.
+- If the user is active when the update lands, EM shows a native dialog ONCE
+  per version ("Restart Now / Later"). Dismissal is "not now" — the watcher
+  keeps polling and will auto-install whenever the user eventually walks away.
+- Any UI activity bumps the timer. Built-in signals: renderer
+  mousedown/keydown/wheel/touchstart/focus (debounced to 5s in preload, sent as
+  IPC `em:auto-updater:activity`) + main `app.on('browser-window-focus')`
+  (covers tray clicks, dock clicks, alt-tab back).
+- Consumers can force-bump from app-specific signals via
+  `manager.autoUpdater.markActive()` (e.g. auth event, long task finished).
+
+User-initiated checks ("Check for Updates" menu/tray click) still skip the
+watcher — that path is the consumer's responsibility to wire to a "Restart"
+affordance, which the menu/tray item label already provides.
+
+Hardcoded constants at the top of `src/lib/auto-updater.js` —
+`IDLE_INSTALL_THRESHOLD_MS = 15min` and `IDLE_WATCHER_INTERVAL_MS = 60s`.
+Tunable there for now; not yet config-shaped.
+
 ## 1.2.32 — `mgr runner install` / `uninstall` auto-elevate via UAC
 
 When run from a non-admin shell, `mgr runner install` (and `uninstall`) now spawn

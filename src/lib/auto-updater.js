@@ -25,6 +25,25 @@ const logger = new LoggerLite('auto-updater');
 
 const STORAGE_KEY = 'autoUpdater';
 
+// Idle-aware install constants — hardcoded for now (not config-shaped). Tune here.
+//
+// A downloaded update no longer auto-installs after a flat 5s delay. Instead:
+//   1. Any UI activity (mouse / keyboard / window focus / IPC traffic / tray click /
+//      menu invocation / deep-link arrival) bumps `_lastActivityAt = Date.now()`.
+//   2. Once an update is downloaded, an idle-watcher polls every minute. If the user
+//      has been idle for `IDLE_INSTALL_THRESHOLD_MS` it fires `installNow()`.
+//   3. If they're active when the update lands, EM prompts ONCE via electron's
+//      native dialog ("Restart now / Later"). Dismissal is "not now" — the watcher
+//      keeps polling so it'll auto-install whenever the user eventually walks away.
+//      We never re-prompt for the same version (tracked via `_promptedForVersion`).
+//
+// Consumer hook: `manager.autoUpdater.markActive()` lets app code force-bump the
+// activity timestamp from anywhere (e.g. just received an auth event, finished a
+// long-running renderer task, etc.). Use sparingly — the built-in signals cover
+// 99% of real activity.
+const IDLE_INSTALL_THRESHOLD_MS = 15 * 60 * 1000;   // 15 min
+const IDLE_WATCHER_INTERVAL_MS  = 60 * 1000;        // re-check every minute
+
 const DEFAULTS = {
   enabled:       true,
   channel:       'latest',
@@ -56,6 +75,12 @@ const autoUpdater = {
   _pendingTimers: [],
   _userInitiated: false,
   _devSimulating: false,
+
+  // Idle-aware install state.
+  _lastActivityAt:     Date.now(),     // bumped by markActive(); seed to "now" so we don't auto-install the instant we boot
+  _idleWatcherId:      null,           // setInterval handle for the post-download watcher
+  _promptedForVersion: null,           // version string we've already prompted about — never prompt twice for the same version
+  _activityHooksWired: false,          // guard: only wire main-side activity listeners once per process
 
   async initialize(manager) {
     autoUpdater._manager = manager;
@@ -92,7 +117,17 @@ const autoUpdater = {
         try { if (typeof manager.ipc.unhandle === 'function') manager.ipc.unhandle(chan); } catch (e) { /* ignore */ }
         manager.ipc.handle(chan, fn);
       }
+      // Activity ping from preload (debounced renderer-side mouse/keyboard/focus).
+      // Listener (not handle) — fire-and-forget, no response needed. Set-backed
+      // listener registry deduplicates same-fn re-adds, so re-init is safe.
+      if (typeof manager.ipc.on === 'function') {
+        manager.ipc.on('em:auto-updater:activity', autoUpdater._onActivityIpc);
+      }
     }
+
+    // 3b. Wire main-side activity hooks (browser-window focus, tray clicks, menu
+    // invocations, deep-link arrivals — see _wireActivityHooks). One-shot per process.
+    autoUpdater._wireActivityHooks();
 
     // 4. Schedule startup check (non-blocking).
     const startupDelay = autoUpdater._options.startupDelayMs;
@@ -145,6 +180,20 @@ const autoUpdater = {
     return autoUpdater.getStatus();
   },
 
+  // Bump the activity timestamp. Called automatically by the built-in activity hooks
+  // (renderer mouse/keyboard, browser-window focus). Consumer code can also call this
+  // directly from anywhere (`manager.autoUpdater.markActive()`) to force-bump on
+  // app-specific activity.
+  markActive() {
+    autoUpdater._lastActivityAt = Date.now();
+  },
+
+  // Named handler for the IPC activity listener so the listener registry's Set-based
+  // dedupe collapses repeated re-init calls into one entry.
+  _onActivityIpc() {
+    autoUpdater.markActive();
+  },
+
   async installNow() {
     if (autoUpdater._state.code !== 'downloaded') {
       logger.log(`installNow ignored — state=${autoUpdater._state.code}`);
@@ -171,14 +220,18 @@ const autoUpdater = {
 
   // Lifecycle teardown — used by tests.
   shutdown() {
-    if (autoUpdater._intervalId) clearInterval(autoUpdater._intervalId);
+    if (autoUpdater._intervalId)   clearInterval(autoUpdater._intervalId);
+    if (autoUpdater._idleWatcherId) clearInterval(autoUpdater._idleWatcherId);
     autoUpdater._pendingTimers.forEach((t) => clearTimeout(t));
     autoUpdater._intervalId  = null;
+    autoUpdater._idleWatcherId = null;
     autoUpdater._pendingTimers = [];
     autoUpdater._initialized   = false;
     autoUpdater._library       = null;
     autoUpdater._userInitiated = false;
     autoUpdater._devSimulating = false;
+    autoUpdater._promptedForVersion = null;
+    autoUpdater._activityHooksWired = false;
 
     const m = autoUpdater._manager;
     if (m && m.ipc && typeof m.ipc.unhandle === 'function') {
@@ -220,25 +273,123 @@ const autoUpdater = {
     autoUpdater._state = { ...autoUpdater._state, ...patch };
     autoUpdater._broadcastStatus();
 
-    // Background install — when an update finishes downloading and the user did NOT
-    // initiate the check (it was a startup or periodic background poll), schedule a
-    // 5s relaunch automatically. Matches legacy electron-manager behavior — apps
-    // like Discord get to update overnight without bothering the user. User-initiated
-    // checks skip this; the consumer's UI is expected to surface a "Restart to update"
-    // affordance (the menu/tray check-for-updates item already does this label-wise).
+    // Idle-aware install — when an update finishes downloading via a background poll
+    // (NOT a user-initiated check), kick off the idle watcher. Watcher polls every
+    // minute; only auto-installs when the user has been idle ≥ IDLE_INSTALL_THRESHOLD_MS.
+    // If active when the update lands, prompts once via electron's native dialog and
+    // never re-prompts for the same version — but the watcher keeps polling so the
+    // install eventually fires whenever the user steps away.
+    //
+    // User-initiated checks skip all this; the consumer's UI is expected to surface a
+    // "Restart to update" affordance (the menu/tray check-for-updates item already does
+    // this label-wise — see _menuItemFieldsForState).
     if (
       patch.code === 'downloaded'
       && prevCode !== 'downloaded'
       && !autoUpdater._userInitiated
       && !autoUpdater._isDevMode()
     ) {
-      logger.log('Background download complete — scheduling auto-relaunch in 5s.');
-      const t = setTimeout(() => {
-        try { autoUpdater.installNow(); }
-        catch (e) { logger.warn(`background relaunch failed: ${e.message}`); }
-      }, 5000);
-      autoUpdater._pendingTimers.push(t);
+      autoUpdater._startIdleInstallWatcher();
     }
+  },
+
+  // Start (or restart) the idle-install watcher. Called when an update transitions to
+  // 'downloaded' from a non-user-initiated check. Idempotent — clears any prior watcher
+  // first. The watcher tick runs every IDLE_WATCHER_INTERVAL_MS:
+  //   - If now - _lastActivityAt >= IDLE_INSTALL_THRESHOLD_MS → installNow() (which exits)
+  //   - Else if we haven't prompted for this version yet → show the dialog
+  //   - Else: do nothing this tick, check again next tick
+  _startIdleInstallWatcher() {
+    if (autoUpdater._idleWatcherId) clearInterval(autoUpdater._idleWatcherId);
+    logger.log(`Update downloaded — starting idle-install watcher (threshold=${IDLE_INSTALL_THRESHOLD_MS / 60000}min, tick=${IDLE_WATCHER_INTERVAL_MS / 1000}s).`);
+    // Run one tick immediately so a downloaded update during a long idle stretch installs
+    // promptly instead of waiting another full interval.
+    autoUpdater._idleInstallTick();
+    autoUpdater._idleWatcherId = setInterval(() => autoUpdater._idleInstallTick(), IDLE_WATCHER_INTERVAL_MS);
+  },
+
+  _idleInstallTick() {
+    if (autoUpdater._state.code !== 'downloaded') {
+      // Update was applied or cleared — stop the watcher.
+      if (autoUpdater._idleWatcherId) {
+        clearInterval(autoUpdater._idleWatcherId);
+        autoUpdater._idleWatcherId = null;
+      }
+      return;
+    }
+
+    const idleMs = Date.now() - autoUpdater._lastActivityAt;
+    if (idleMs >= IDLE_INSTALL_THRESHOLD_MS) {
+      logger.log(`User idle for ${Math.round(idleMs / 60000)}min — auto-installing update v${autoUpdater._state.version}.`);
+      try { autoUpdater.installNow(); }
+      catch (e) { logger.warn(`idle auto-install failed: ${e.message}`); }
+      return;
+    }
+
+    // User is active — prompt once per version.
+    const v = autoUpdater._state.version;
+    if (v && autoUpdater._promptedForVersion !== v) {
+      autoUpdater._promptedForVersion = v;
+      autoUpdater._promptToInstall(v).catch((e) => logger.warn(`install prompt failed: ${e.message}`));
+    }
+  },
+
+  // Show a native dialog asking the user to restart now. Non-blocking (fire-and-forget).
+  // Dismissal ("Later") is fine — the watcher keeps polling and will auto-install once
+  // the user goes idle.
+  async _promptToInstall(version) {
+    try {
+      const electron = require('electron');
+      const { dialog, BrowserWindow } = electron;
+      if (!dialog) return;
+
+      const focusedWindow = BrowserWindow?.getFocusedWindow?.() || null;
+      const productName = autoUpdater._manager?.config?.app?.productName
+        || autoUpdater._manager?.config?.brand?.name
+        || 'this app';
+
+      const result = await dialog.showMessageBox(focusedWindow, {
+        type:    'info',
+        buttons: ['Restart Now', 'Later'],
+        defaultId: 0,
+        cancelId:  1,
+        title:   'Update Ready',
+        message: `${productName} is ready to install version ${version}.`,
+        detail:  `Restart to apply the update now, or it will install automatically the next time you're idle.`,
+      });
+
+      if (result.response === 0) {
+        logger.log(`User accepted install prompt — installing v${version}.`);
+        autoUpdater.installNow();
+      } else {
+        logger.log(`User dismissed install prompt for v${version} — watcher continues.`);
+        // Bump activity so we don't re-prompt within the same tick window.
+        autoUpdater.markActive();
+      }
+    } catch (e) {
+      logger.warn(`_promptToInstall failed: ${e.message}`);
+    }
+  },
+
+  // Wire main-process activity hooks. Idempotent — only runs once per process.
+  // Renderer-side activity arrives via the 'em:auto-updater:activity' IPC listener
+  // wired in initialize() (mouse/keyboard/wheel/touch/focus debounced in preload).
+  // This method covers main-process signals that don't go through the renderer:
+  //   - browser-window-focus: user alt-tabbed back, clicked a window from elsewhere,
+  //     or surfaced the app via tray click / dock click — any path that gives the
+  //     window focus fires this. Tray/menu clicks that show/focus a window are also
+  //     covered by this transitively.
+  // Deep-link arrivals are a softer signal (the user might have clicked a link in a
+  // browser hours ago and walked away) — we deliberately don't bump activity from
+  // them. If a consumer wants to count something specific, they can call markActive().
+  _wireActivityHooks() {
+    if (autoUpdater._activityHooksWired) return;
+    autoUpdater._activityHooksWired = true;
+
+    try {
+      const { app } = require('electron');
+      app.on('browser-window-focus', () => autoUpdater.markActive());
+    } catch (e) { /* electron not available */ }
   },
 
   _broadcastStatus() {

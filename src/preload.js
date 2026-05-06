@@ -77,6 +77,31 @@ Manager.prototype.initialize = async function () {
     },
   });
 
+  // Auto-updater activity tracking — listen for renderer-side mouse / keyboard / wheel
+  // / focus events and debounce-fire an `em:auto-updater:activity` IPC ping to main.
+  // Main uses these pings to keep `lastActivityAt` fresh so a downloaded update only
+  // auto-installs when the user has been idle for 15+ minutes.
+  //
+  // Debounced to once per 5s — anything more granular is just noise (the threshold is
+  // 15 min; sub-second precision doesn't matter). Listeners attach in `capture` phase
+  // on `window` so renderer code can't accidentally suppress them via stopPropagation.
+  try {
+    let lastPing = 0;
+    const ACTIVITY_DEBOUNCE_MS = 5000;
+    const ping = () => {
+      const now = Date.now();
+      if (now - lastPing < ACTIVITY_DEBOUNCE_MS) return;
+      lastPing = now;
+      try { ipcRenderer.send('em:auto-updater:activity'); } catch (e) { /* ignore */ }
+    };
+    const events = ['mousedown', 'keydown', 'wheel', 'touchstart', 'focus'];
+    for (const ev of events) {
+      // `passive: true` so we never accidentally block scrolling; `capture: true` so we
+      // see the event before any renderer-side handler can stopPropagation it.
+      window.addEventListener(ev, ping, { passive: true, capture: true });
+    }
+  } catch (e) { /* DOM not available (test mode) — skip */ }
+
   self.logger.log('electron-manager (preload) initialized.');
 
   return self;
