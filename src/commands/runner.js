@@ -75,7 +75,7 @@ module.exports = async function (options) {
 async function install(options) {
   ensureWindows();
   ensureGhToken();
-  ensureWindowsAdmin();
+  ensureWindowsAdmin(options);
 
   // Idempotent by replacement: always tear down any prior install before starting.
   if (jetpack.exists(RUNNER_HOME)) {
@@ -428,9 +428,9 @@ async function statusServices() {
 }
 
 // ─── uninstall ──────────────────────────────────────────────────────────────────
-async function uninstall() {
+async function uninstall(options) {
   ensureWindows();
-  ensureWindowsAdmin();
+  ensureWindowsAdmin(options);
 
   // Stop + delete em-runner-watcher service. node-windows knows its own service
   // metadata (script, name, etc.) — let it do the removal cleanly. This handles
@@ -584,15 +584,68 @@ function ensureGhToken() {
 
 // Service install/start/stop on Windows requires admin. Without it, `sc` commands silently
 // fail with status 1060 ("service not found") which sends us down weird debugging paths.
-// Detect early and exit with a clear message.
-function ensureWindowsAdmin() {
+// Detect early; auto-elevate via UAC if running interactively and not already admin.
+function ensureWindowsAdmin(options) {
   if (process.platform !== 'win32') return;
   const { spawnSync } = require('child_process');
   // `net session` requires admin and exits 0 if elevated, non-zero otherwise. Faster than spawning powershell.
   const r = spawnSync('net', ['session'], { stdio: 'ignore' });
-  if (r.status !== 0) {
+  if (r.status === 0) return;
+
+  const optsBlock = options || {};
+  const autoElevate = process.stdin.isTTY
+    && !optsBlock['no-auto-elevate']
+    && !process.env.EM_RUNNER_NO_AUTO_ELEVATE;
+
+  if (!autoElevate) {
     throw new Error('This command needs an elevated cmd.exe (Run as Administrator). Service install/uninstall and `sc` commands fail silently without admin rights.');
   }
+
+  relaunchElevated();
+  // relaunchElevated() exits this process — control never returns past this point.
+}
+
+// Re-launch the original `npx mgr ...` invocation in a new elevated cmd.exe window via
+// PowerShell's Start-Process -Verb RunAs (triggers UAC prompt). The new window:
+//   - inherits this process's env (including PATH so `npx` works)
+//   - has cwd set to the current cwd (UAC defaults to system32 otherwise)
+//   - uses `cmd /k` so the window stays open after the command finishes (the user can
+//     read the output and close it manually)
+function relaunchElevated() {
+  const { spawnSync } = require('child_process');
+  const cwd = process.cwd();
+
+  // Reconstruct the original argv. process.argv[0] is the node binary, [1] is the
+  // entry script (bin/electron-manager), the rest are user args. We re-invoke via
+  // `npx mgr ...` so the elevated cmd doesn't need to know about node-version
+  // managers (nvm-windows etc.) — npx handles resolution.
+  const userArgs = process.argv.slice(2);   // strip node + entry
+  // Quote any arg that contains a space.
+  const quoted = userArgs.map((a) => /\s/.test(a) ? `"${a}"` : a).join(' ');
+  const cmdLine = `cd /d "${cwd}" && npx mgr ${quoted}`;
+
+  // PowerShell Start-Process -Verb RunAs is the documented way to trigger UAC.
+  // -ArgumentList passes args; -WorkingDirectory sets the new process's cwd.
+  // We invoke a NEW cmd.exe with /k so it stays open. The /k arg's value is our
+  // command line.
+  const psArgs = [
+    '-NoProfile',
+    '-Command',
+    `Start-Process cmd.exe -Verb RunAs -ArgumentList '/k', '${cmdLine.replace(/'/g, "''")}'`,
+  ];
+
+  process.stdout.write('\nThis command requires admin. Requesting elevation — accept the UAC prompt.\n');
+  process.stdout.write('A new elevated cmd window will open with the install output.\n');
+  process.stdout.write(`(Cmd: ${cmdLine})\n\n`);
+
+  const r = spawnSync('powershell', psArgs, { stdio: 'inherit' });
+  if (r.status !== 0) {
+    process.stderr.write('Failed to request elevation. Open an elevated cmd manually and re-run.\n');
+    process.exit(1);
+  }
+
+  // Done in this process — the elevated window is doing the real work.
+  process.exit(0);
 }
 
 async function downloadActionsRunner(runnerDir) {

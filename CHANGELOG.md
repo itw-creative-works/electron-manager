@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.2.32 — `mgr runner install` / `uninstall` auto-elevate via UAC
+
+When run from a non-admin shell, `mgr runner install` (and `uninstall`) now spawn
+a new elevated cmd.exe window via PowerShell `Start-Process -Verb RunAs` instead
+of failing with "needs an elevated cmd.exe". Triggers a UAC prompt; the new
+window inherits cwd + env and uses `cmd /k` so it stays open for you to read the
+output. Suppress with `--no-auto-elevate` or `EM_RUNNER_NO_AUTO_ELEVATE=1`.
+
+Auto-elevate only kicks in when stdin is a TTY, so CI / piped contexts still get
+the original error.
+
 ## 1.2.31 — `mgr runner monitor` JOB START banner now calls out org/repo
 
 `sign-windows` now records `github_owner` + `github_repo` (split from
