@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.2.28 — fix: `mgr runner monitor` defaults to a machine-wide signing log
+
+`mgr runner monitor` was watching `<cwd>/em-signing.log` while `mgr sign-windows`
+(invoked by the runner service) was writing to `<RUNNER_WORKSPACE>/em-signing.log`
+— two different paths, so monitor never saw any events. Fixed by making the log
+path machine-wide on Windows: defaults to `C:\actions-runners\em-signing.log`
+(matches the default `EM_RUNNER_HOME`). Both writer and reader resolve via the
+same `signEvents.getLogPath()` helper, so `npx mgr runner monitor` with no
+arguments now picks up signing requests from EVERY org and EVERY repo on the
+machine without env vars.
+
+Resolution order (in priority): `EM_SIGN_LOG` → `<EM_RUNNER_HOME>/em-signing.log` →
+Windows default `C:\actions-runners\em-signing.log` → legacy `RUNNER_TOOLSDIRECTORY`/
+`RUNNER_WORKSPACE` fallback → `<cwd>/em-signing.log`.
+
 ## 1.2.27 — fix: `mgr setup` no longer copies `_*` archive dirs to consumers
 
 The `_mas/` reference-plist archive added in 1.2.26 was supposed to live only in

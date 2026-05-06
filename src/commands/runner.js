@@ -1099,7 +1099,14 @@ async function monitor(options) {
   const followOnly = !!options['follow-only'];
 
   logger.log(`Watching: ${file}`);
+  logger.log('(monitoring ALL signing requests across every org/repo on this machine)');
   if (!fs.existsSync(file)) {
+    // Make sure the parent dir exists so events written before monitor sees the file
+    // don't fail (sign-events.js handles its own write errors, but pre-creating the dir
+    // avoids a confusing "waiting forever" UX when EM_RUNNER_HOME hasn't been used yet).
+    try {
+      jetpack.dir(path.dirname(file));
+    } catch (_) { /* best-effort */ }
     logger.log('(file does not exist yet — waiting for first sign event...)');
   }
 
