@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.2.30 — fix: `mgr runner monitor` org listing — filter + correct task lookup
+
+Two bugs in the 1.2.29 banner:
+
+1. `config.registeredOrgs` could carry a stale full org list from before
+   `EM_RUNNER_ORGS` was set, so monitor showed all 32 admin orgs even when the
+   user had explicitly filtered down to one. Now respects `EM_RUNNER_ORGS` —
+   intersects it with `config.registeredOrgs` (or shows the filter directly if
+   none match).
+
+2. Task-state lookup was reverse-parsing `em-runner-<host>-<org>` with a regex
+   that took the first dash-segment as host. Hosts and orgs can both contain
+   dashes (e.g. `desktop-iweed` × `deployment-playground`), so the split was
+   ambiguous and EVERY org displayed "no Logon Task — runner may be offline".
+   Now builds the expected task name via the same `runnerTaskName(org)` helper
+   that creates them and looks each one up directly.
+
 ## 1.2.29 — `mgr runner monitor` lists registered orgs at startup
 
 Banner now prints the list of registered orgs (read from `<EM_RUNNER_HOME>/config.json`)

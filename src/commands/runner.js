@@ -1102,24 +1102,33 @@ async function monitor(options) {
 
   // List the registered orgs (and per-org runner tasks + state) so the user can see
   // exactly which orgs the monitor will pick up signing events from.
+  //
+  // We trust EM_RUNNER_ORGS over config.registeredOrgs when set, because installs
+  // that predated the filter often left a stale full-org list in config.json.
   const cfg = readConfig();
-  const orgs = cfg.registeredOrgs || [];
+  let orgs = cfg.registeredOrgs || [];
+  const filterRaw = process.env.EM_RUNNER_ORGS || '';
+  const filter = filterRaw.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
+  if (filter.length > 0) {
+    const filterSet = new Set(filter.map((o) => o.toLowerCase()));
+    orgs = orgs.filter((o) => filterSet.has(o.toLowerCase()));
+    if (orgs.length === 0) orgs = filter;   // EM_RUNNER_ORGS set but no matches in config — show the filter directly
+  }
+
   if (orgs.length === 0) {
     logger.log('(no orgs registered yet — run `npx mgr runner install` first)');
   } else {
     logger.log(`Monitoring signing requests across ${orgs.length} org(s):`);
-    const tasks = listEmRunnerTasks();
-    const taskByOrg = new Map();
-    for (const t of tasks) {
-      // task name format: em-runner-<host>-<org>
-      const m = /^em-runner-[^-]+-(.+)$/.exec(t);
-      if (m) taskByOrg.set(m[1].toLowerCase(), { name: t, state: taskState(t) });
-    }
+    // Build the expected task name for each org via the same helper that creates them
+    // (don't reverse-parse — host can contain dashes and so can the org, so splitting
+    // is ambiguous). Then look each one up directly.
+    const allTasks = new Set(listEmRunnerTasks());
     for (const org of orgs) {
-      const task = taskByOrg.get(org.toLowerCase());
-      if (task) {
-        const symbol = task.state === 'RUNNING' ? '✓' : task.state === 'READY' ? '·' : '?';
-        logger.log(`  ${symbol} ${org} (task: ${task.name} — ${task.state})`);
+      const expectedTask = runnerTaskName(org);
+      if (allTasks.has(expectedTask)) {
+        const state = taskState(expectedTask);
+        const symbol = state === 'RUNNING' ? '✓' : state === 'READY' ? '·' : '?';
+        logger.log(`  ${symbol} ${org} (task: ${expectedTask} — ${state})`);
       } else {
         logger.log(`  · ${org} (no Logon Task — runner may be offline)`);
       }
