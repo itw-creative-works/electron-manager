@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.27 — fix: `mgr setup` no longer copies `_*` archive dirs to consumers
+
+The `_mas/` reference-plist archive added in 1.2.26 was supposed to live only in
+EM's npm package (the leading `_` was meant to keep it out of the active scaffold),
+but `mgr setup` happily copied it into consumer projects. Fixed: setup now skips
+any path segment starting with `_` (other than `_.` for dotfiles like `_.env`).
+
+If you ran `mgr setup` against EM 1.2.26 and got an `_mas/` folder in your project
+root, just `rm -rf _mas` and re-run `mgr setup`.
+
 ## 1.2.26 — packaged-app launch fixes + re-surface on user re-launch + lifecycle logging
 
 This release fixes the silent-launch bug we hit testing dp 1.0.8 and adds the missing
