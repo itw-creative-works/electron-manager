@@ -119,16 +119,24 @@ const deepLink = {
       deepLink._handle(url, 'warm-start', { argv: process.argv, cwd: process.cwd() });
     });
 
-    // Windows/Linux warm-start: another instance launched with our scheme. The OS gave
-    // us the lock, killed the duplicate, and forwarded its argv here.
+    // Windows/Linux warm-start: another instance launched (e.g. user double-clicked the
+    // app icon while it's already running, or a deep link arrived). The OS gave us the
+    // lock, killed the duplicate, and forwarded its argv here.
     app.on('second-instance', (_event, argv, cwd) => {
-      // Focus the existing main window if present (standard pattern; consumer can override
-      // by registering a handler for the route and calling whatever they want).
+      logger.log(`second-instance — argv=${JSON.stringify(argv)} cwd=${cwd}`);
+
+      // Surface the main window. With hidden-mode apps, the consumer typically created
+      // `main` with `show: false` at boot, so it's in the registry but invisible — we
+      // just need to show it now that the user explicitly asked.
       const main = deepLink._manager?.windows?.get?.('main');
       if (main) {
+        logger.log(`second-instance — surfacing main (visible=${main.isVisible()}, minimized=${main.isMinimized()})`);
         if (main.isMinimized()) main.restore();
+        deepLink._manager?.windows?._ensureDockVisible?.();
         main.show();
         main.focus();
+      } else {
+        logger.log('second-instance — no main window in registry; ignoring');
       }
 
       const url = deepLink._extractUrlFromArgv(argv);

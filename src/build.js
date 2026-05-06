@@ -185,11 +185,11 @@ Manager.getLiveReloadPort = function () {
 };
 Manager.prototype.getLiveReloadPort = Manager.getLiveReloadPort;
 
-// Windows signing strategy. Config-only — `signing.windows.strategy` in electron-manager.json.
-// Default 'self-hosted'.
+// Windows signing strategy. Config-only — `targets.win.signing.strategy` in
+// electron-manager.json. Default 'self-hosted'.
 Manager.getWindowsSignStrategy = function () {
   const config = Manager.getConfig();
-  return config?.signing?.windows?.strategy || 'self-hosted';
+  return config?.targets?.win?.signing?.strategy || 'self-hosted';
 };
 Manager.prototype.getWindowsSignStrategy = Manager.getWindowsSignStrategy;
 

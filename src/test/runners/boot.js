@@ -85,11 +85,8 @@ async function runBootTests({ tests, projectRoot, emDistRoot }) {
     // Suppress dev-mode dock-bounce / startup item changes during the test.
     NODE_ENV:                      process.env.NODE_ENV || 'test',
   });
-  // Strip ELECTRON_RUN_AS_NODE — if it leaks in from the shell or from runners/electron.js
-  // (the build/main test runner sets it for plain-Node suites), electron will boot as Node
-  // instead of as a real main process. ipcMain becomes undefined, electron-store throws,
-  // and nothing works. Same fix gulp/serve.js applies.
-  delete childEnv.ELECTRON_RUN_AS_NODE;
+  // ELECTRON_RUN_AS_NODE is already stripped by bin/mgr at the CLI boundary, so the child
+  // env is clean — no extra delete here.
 
   // Args passed to electron:
   //   projectRoot — load the consumer project (package.json#main = dist/main.bundle.js).

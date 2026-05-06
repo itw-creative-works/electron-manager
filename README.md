@@ -15,12 +15,12 @@
 - **One-line bootstrap** per Electron process: `require('electron-manager/main')`, `/preload`, `/renderer`.
 - **Modular feature library** — storage, IPC, tray, menu, context menu, window manager, startup, app-state, deep-link, auto-updater, web-manager auth, Sentry. Each feature is its own module with documented API.
 - **File-based feature definitions** — trays, menus, and context-menus are JS files (full power, no DSL): `src/integrations/{tray,menu,context-menu}/index.js`. All three ship sensible **id-tagged defaults** (legacy-EM-style: about, preferences, check-for-updates, dev menu w/ inspector + log folders, etc.) and share the same **id-path mutation API**: `find`, `update`, `remove`, `enable`, `show`, `hide`, `insertBefore`, `insertAfter`, `appendTo`. Any default item is one line away from removal, customization, or repositioning.
-- **Lazy windows + Discord-style hide-on-close.** EM doesn't auto-create any windows — your `main.js` calls `manager.windows.create('main')` when UI should appear (or never, for agent apps). The `main` window's X button hides instead of quitting on every platform; real quit only via Cmd+Q / menu Quit / tray Quit / auto-update install. Inset titlebar by default (mac `hiddenInset` traffic lights / win native overlay buttons / linux native frame) with a draggable topbar in the page template.
-- **Zero-bounce hidden-launch on macOS.** `startup.mode = 'hidden'` bakes `LSUIElement: true` into Info.plist at build time → app launches completely invisible (no dock icon, no Cmd+Tab, no taskbar). Tray + notifications + networking still work. The first time `manager.windows.create()` runs, EM auto-calls `app.dock.show()` so the dock icon appears alongside the window.
+- **Lazy windows + Discord-style hide-on-close.** EM doesn't auto-create any windows — your `main.js` calls `windows.create('main', { show: !startup.isLaunchHidden() })`. The `main` window's X button hides instead of quitting on every platform; real quit only via Cmd+Q / menu Quit / tray Quit / auto-update install. Inset titlebar by default (mac `hiddenInset` traffic lights / win native overlay buttons / linux native frame) with a draggable topbar in the page template.
+- **Zero-bounce hidden-launch on macOS.** `startup.mode = 'hidden'` bakes `LSUIElement: true` into Info.plist at build time → app launches completely invisible (no dock icon, no Cmd+Tab, no taskbar). Tray + notifications + networking still work. When the user double-clicks the running app's icon, EM's `app.on('activate')` (macOS) / `app.on('second-instance')` (win/linux) handler surfaces the `main` window and the dock icon appears alongside it. CleanMyMac-style "tray-only at login, full window when manually opened" is the default.
 - **Auto-update background install.** When a download finishes from a background poll (not user-initiated), EM auto-relaunches into the new version after 5s — apps update overnight without bothering the user. User-initiated checks skip this so your UI can prompt instead.
 - **Webpack-bundled** main / preload / renderer for source protection.
 - **Built-in test framework** — Jest-like syntax, four layers: `build` (plain Node), `main` (spawned Electron), `renderer` (hidden BrowserWindow), and `boot` (spawns the consumer's actual built `dist/main.bundle.js` for end-to-end smoke tests against the live manager — no `npm start && sleep && kill` shell hacks). Boot layer always rebuilds the bundle first so tests never see stale code.
-- **Multi-platform build/release** via GitHub Actions — macOS sign + notarize, Linux, Windows EV-token signing (self-hosted runner now, cloud-signing pluggable).
+- **Multi-platform build/release** via GitHub Actions — macOS sign + notarize, Linux (deb + AppImage + optional Snap), Windows EV-token signing (self-hosted runner now, cloud-signing pluggable). Sensible installer defaults out of the box: NSIS one-click install on Windows (desktop + start menu shortcut, launch on finish), universal mac binary (one .dmg for Intel + Apple Silicon), `app.category` automatically mapped to per-platform values, copyright `{YEAR}` token always current. Snap Store publishing is one config flag away. See [installer-options](docs/installer-options.md).
 
 ## Quick start (consumer)
 
@@ -28,12 +28,14 @@ EM auto-syncs your system Node version to match whatever Node Electron's bundled
 
 ```bash
 npm install electron-manager --save-dev
-npx mgr setup        # scaffolds project; auto-resolves & writes correct .nvmrc from electron version
-nvm use              # switch to the Node version Electron uses (one-time per shell)
-npm start            # dev: gulp → webpack → electron .
-npm run build        # local production build
-npm run release      # signed + published release
-npx mgr test         # run framework + project test suites
+npx mgr setup            # scaffolds project; auto-resolves & writes correct .nvmrc from electron version
+nvm use                  # switch to the Node version Electron uses (one-time per shell)
+npm start                # dev: gulp → webpack → electron .
+npm run build            # local production build (bundles only, no installer)
+npm run package:quick    # fast packaged build for host platform/arch (.app/.exe-folder/linux-unpacked, ~20-30s) — for smoke-testing packaged behavior
+npm run package          # full local production package (DMG/zip/universal-mac, NSIS-win, deb+AppImage-linux)
+npm run release          # signed + published release via GitHub Actions
+npx mgr test             # run framework + project test suites
 ```
 
 ## Logs
@@ -94,9 +96,10 @@ Each subsystem has its own API reference under [`docs/`](docs/):
 - [themes](docs/themes.md) — classy + bootstrap themes, `@use 'electron-manager' as * with (...)` overrides, per-page CSS bundles
 - [sentry](docs/sentry.md) — error/crash reporting, dev-mode gating, auto auth attribution, release tagging
 - [hooks](docs/hooks.md) — lifecycle hooks (build/pre, build/post, release/pre, release/post, notarize)
+- [installer-options](docs/installer-options.md) — installer/distribution config: NSIS one-click defaults, ia32 inclusion, app.category mapping, `{YEAR}` copyright token, snap publishing opt-in, MAS roadmap
 - [signing](docs/signing.md) — macOS + Windows code signing reference, cert files, env vars
 - [releasing](docs/releasing.md) — end-to-end release walkthrough (`.env` → GitHub Release)
-- [runner](docs/runner.md) — Windows EV-token signing runner — `npx mgr runner install`, auto-onboards new GH orgs
+- [runner](docs/runner.md) — Windows EV-token signing runner — `npx mgr runner install`, auto-onboards new GH orgs, `npx mgr runner monitor` for a live signing event tail
 - [test-framework](docs/test-framework.md) — writing tests, running them, layers
 - [test-boot-layer](docs/test-boot-layer.md) — boot test layer (spawns the consumer's actual built bundle for end-to-end smoke tests)
 - [build-system](docs/build-system.md) — gulp, webpack, electron-builder pipeline

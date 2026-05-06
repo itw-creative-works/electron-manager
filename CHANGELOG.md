@@ -1,5 +1,188 @@
 # Changelog
 
+## 1.2.26 — packaged-app launch fixes + re-surface on user re-launch + lifecycle logging
+
+This release fixes the silent-launch bug we hit testing dp 1.0.8 and adds the missing
+glue around hidden-mode apps that come back to life when the user double-clicks.
+
+### Packaged-app silent-launch (multiple causes)
+
+Symptom: production builds launched, exited cleanly with code 0, no window, no error.
+Root cause was actually four overlapping bugs all hidden by a fifth:
+
+1. **`ELECTRON_RUN_AS_NODE=1` leak from VS Code's Claude Code extension.** The extension
+   runs as a `node.mojom.NodeService` utility process with that env var set, and the
+   var propagated to every shell it spawned. Any Electron app launched from such a
+   shell ran as plain Node — `app` undefined, no BrowserWindow, exit 0, no log.
+   `bin/electron-manager` and `src/gulp/main.js` now `delete process.env.ELECTRON_RUN_AS_NODE`
+   at the top so all child spawns get a clean slate. Existing per-spawn strips in
+   `serve.js` / `runners/{boot,electron}.js` are now redundant and removed.
+
+2. **`json5` was in webpack externals.** The framework's `loadConfigFromFile` called
+   `require('json5')` at runtime, but json5 isn't in the consumer's `node_modules`
+   (consumers don't depend on it directly). Removed from externals → bundled in.
+   Also: with json5 now bundled, webpack's `__esModule` interop wrapper means
+   `require('json5')` may surface `.parse` directly OR via `.default.parse`. The
+   `loadConfigFromFile` fn now handles both shapes.
+
+3. **`manager.config` was empty in packaged apps.** `manager.initialize()` read config
+   from `<process.cwd()>/config/electron-manager.json`, but in a packaged .app
+   `process.cwd()` is `/`, and the config file is inside the asar. Result: empty
+   `manager.config = {}`, productName/brand/etc. all undefined. `initialize()` now
+   prefers the build-time-injected `EM_BUILD_JSON.config` (already in the bundle via
+   webpack DefinePlugin) and only falls back to disk read when running in dev.
+
+4. **`window-manager` resolved view paths via `process.cwd()`** so `dist/views/main/index.html`
+   became `/dist/views/main/index.html` in packaged apps → `ERR_FILE_NOT_FOUND`. New
+   `src/utils/app-root.js` helper resolves to `app.getAppPath()` (returns asar path)
+   when in Electron, falling back to `process.cwd()`. Used in window-manager (HTML +
+   preload paths), tray (icons + integration loader), menu + context-menu (integration
+   loaders).
+
+### Re-surface main window on user re-launch (CleanMyMac-style)
+
+Hidden-mode apps now respond when the user double-clicks them while running:
+
+- **macOS** — new `app.on('activate')` handler in `window-manager.initialize()` calls
+  `windows.show('main')` if `main` is in the registry. Fires whenever the dock icon
+  is clicked or the user double-clicks the running .app.
+- **Windows / Linux** — existing `app.on('second-instance')` handler in `deep-link`
+  hardened: now also calls `_ensureDockVisible()` for parity (no-op on win/linux,
+  matches mac behavior).
+
+The canonical `main.js` pattern changed:
+
+```js
+// OLD — `main` not in registry during hidden launch → re-surface had nothing to find
+if (!startup.isLaunchHidden()) {
+  windows.create('main');
+}
+
+// NEW — always create, gate visibility instead. `main` always in the registry,
+// so activate/second-instance handlers can surface it.
+windows.create('main', { show: !startup.isLaunchHidden() });
+```
+
+The default scaffold in `src/defaults/src/main.js` was updated to use the new pattern.
+
+### `--em-launched-at-login` documented as a public testing entry point
+
+The arg already existed (used by EM to detect login-launches on Windows/Linux), but
+it's now documented as a supported way to simulate login behavior locally without
+configuring login items + rebooting:
+
+```bash
+open -n /path/to/MyApp.app --args --em-launched-at-login
+```
+
+### Comprehensive lifecycle logging
+
+Added high-signal log lines for every important transition so post-mortem debugging
+works against `runtime.log` alone. New entries cover:
+
+- **Boot summary** in `startup.initialize` — two parallel blocks (RAW inputs +
+  RESOLVED values) showing argv, platform, packaged flag, login-item settings,
+  EM/electron/node env vars, and the resolved booleans (`isDev`, `hasLoginArg`,
+  `wasLaunchedAtLogin()` with `via:argv-flag` or `via:macos-wasOpenedAtLogin`,
+  `isLaunchHidden()`).
+- **App-level events**: `before-quit`, `will-quit`, `quit`, `window-all-closed`,
+  `activate`, `open-url`, `open-file`, `render-process-gone`, `child-process-gone`.
+- **Process-level**: `uncaughtException`, `unhandledRejection`, `process exit`.
+- **Per-window events**: `show`, `hide`, `focus`, `minimize`, `restore`, `closed`,
+  `ready-to-show` (with surfacing decision), and `close` handler outcomes
+  (`intercepted (hide-on-close)` vs `allowed (hideOnClose=…, allowQuit=…, …)`).
+- **Re-surface handlers**: `activate (macOS) — surfacing main`, `second-instance — surfacing main`,
+  `_ensureDockVisible — calling dock.show()` / `dock already visible`.
+
+See `docs/logging.md` for the full reference.
+
+### `mgr launch` — clean-env app launcher for manual smoke-testing
+
+New CLI command that wraps `open -n .../MyApp.app` with the `ELECTRON_RUN_AS_NODE`
+strip applied. Auto-discovers the produced .app/.exe under
+`release/<platform>-<arch>/`, so a single `npx mgr launch` from your project root
+launches the most recent `mgr package:quick` output. Forward argv to the app
+via `--args="..."` (useful for simulating login launches:
+`npx mgr launch --args="--em-launched-at-login"`).
+
+Aliases: `mgr open`, `mgr --launch`.
+
+The CLI entry point (`bin/electron-manager`) and gulp boundary already strip
+`ELECTRON_RUN_AS_NODE`, so anything launched THROUGH `mgr` or `gulp` was already
+clean. This command extends that protection to the manual-launch flow (where
+people previously called `open -n` directly and hit the silent-exit symptom).
+
+### Live signing monitor
+
+- New `npx mgr runner monitor` subcommand on the Windows signing box. Pretty-prints a
+  structured JSONL event log with timestamps, durations, byte counts, and color-coded
+  status (yellow `→` start, green `✓` done, red `✗` fail, cyan boundaries for
+  job-start/job-end). Run it in a separate PowerShell tab during a release to watch
+  signtool jobs flow through in real time.
+- `sign-windows` now emits structured events (`job-start`, `sign-start`, `sign-done`,
+  `sign-fail`, `job-end`) to `<runner-workspace>/em-signing.log` (override path via
+  `EM_SIGN_LOG=<path>`). The log persists across job runs — system of record after
+  the GH Actions UI rolls off.
+- Helper module `src/lib/sign-helpers/sign-events.js`.
+
+### Installer / distribution config (new schema)
+
+Comprehensive per-target installer config with sensible defaults across the board.
+The generated `dist/electron-builder.yml` is now driven by:
+
+- **`app.category`** (default `'productivity'`) — generic high-level category EM maps
+  to per-platform values (Apple UTI for mac, freedesktop category for linux).
+  Allowed: `productivity` | `developer-tools` | `utilities` | `media` | `social` | `network`.
+- **`app.copyright`** with `{YEAR}` token (default `'© {YEAR}, ITW Creative Works'`).
+  Token expansion happens at YAML generation time — string never goes stale.
+- **`app.languages`** (default `['en']`) — applied as `mac.electronLanguages`.
+- **`app.darkModeSupport`** (default `true`) — mac honors via `NSRequiresAquaSystemAppearance`.
+- **`targets.win.{oneClick, desktopShortcut, startMenuShortcut, runAfterFinish, perMachine}`** —
+  Slack-style frictionless install by default (oneClick:true, all shortcuts on, per-user).
+- **`targets.win.arch`** — defaults to `['x64', 'ia32']`. Single multi-arch NSIS installer
+  ships both 64-bit and 32-bit support. Toggle to `['x64']` to drop 32-bit.
+- **`targets.linux.snap.*`** — opt-in Snap Store publishing. Set `enabled: true` and
+  put `SNAPCRAFT_STORE_CREDENTIALS` in `.env` (run `snapcraft export-login -` to mint).
+  CI workflow conditionally installs snapcraft only when enabled.
+- **`targets.mac.mas.*`** — Mac App Store config keys exist but are STUBBED. Setting
+  `enabled: true` triggers an audit warning. Reference plists from a working MAS app
+  archived at `<em>/src/defaults/_mas/` for the future implementation.
+- **`fileAssociations`** + **`protocols`** — optional passthrough fields for OS file-type
+  registration + extra URL schemes. EM auto-registers `<brand.id>://` always; `protocols`
+  is for additional schemes only. Empty by default — not emitted to YAML when unset.
+- **Per-target `arch`** — `targets.{mac,win,linux}.arch` controls the architecture list
+  for each platform's targets.
+
+Full reference: `docs/installer-options.md` (new file).
+
+Migration: existing consumers don't need to change anything — all the new fields have
+defaults that match (or improve on) the previous behavior. The biggest visible change
+is `targets.win.arch` now includes `ia32` — to drop, set it to `['x64']`. The other
+default flip (NSIS `oneClick: true`) is consistent with how Slapform, Slack, Discord,
+etc. ship; if you specifically want a wizard installer set `targets.win.oneClick: false`.
+
+**Two BREAKING config-shape changes** (cleanups, easy to migrate):
+
+1. `entitlements.mac` (top-level) → `targets.mac.entitlements`. Everything mac-related
+   now lives under `targets.mac.*`.
+2. `signing.windows.{strategy,cloud}` (top-level) → `targets.win.signing.{strategy,cloud}`.
+   Same logic — Windows signing is purely a `targets.win` concern.
+
+Consumers using either old path silently get EM's defaults until they move the keys
+into the new location. This is unreleased v1 — migration cost is bounded; the cleaner
+schema is worth not carrying the old paths forever. After moving:
+
+```jsonc
+// OLD                                       // NEW
+entitlements: { mac: { ... } }               targets: { mac: { entitlements: { ... } } }
+signing:      { windows: { strategy: ... }}  targets: { win: { signing:    { strategy: ... }}}
+```
+
+### Misc
+
+- Comment-accuracy fix in `src/lib/storage.js` (the filename comment said `config.json`,
+  the actual filename is `em-storage.json`).
+
 ## 1.2.25 — `npm run package:quick` for fast local production builds
 
 Adds a quick-package path for testing production code paths locally without

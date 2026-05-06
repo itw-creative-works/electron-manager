@@ -11,9 +11,11 @@ Electron Manager (EM) is a comprehensive framework for building modern Electron 
 1. `npm install electron-manager --save-dev`
 2. `npx mgr setup` — scaffolds the project (writes `config/electron-manager.json`, `src/main.js`, `src/preload.js`, per-window renderer entries, and integrations skeletons in `src/integrations/{tray,menu,context-menu}/index.js`). `electron-builder.yml` and `entitlements.mac.plist` are NOT scaffolded — they're generated into `dist/build/` at build time.
 3. `npm start` — dev (gulp → webpack → electron .)
-4. `npm run build` — local production build
-5. `npm run release` — signed + published release (requires certs)
-6. `npx mgr test` — runs framework + project test suites
+4. `npm run build` — local production build (compiles bundles only, no installer)
+5. `npm run package:quick` — fast packaged build for the host platform/arch only — produces a launchable `release/<platform>-<arch>/<ProductName>.app` (or `.exe`-folder/linux-unpacked) in ~20-30s. Skips DMG/zip/universal/notarize. Use this to smoke-test packaged-mode behavior locally without waiting for the full pipeline.
+6. `npm run package` — full local production package (DMG/zip/universal-mac, NSIS-win, deb+AppImage-linux). Slow (~3min on mac for universal).
+7. `npm run release` — signed + published release (requires certs)
+8. `npx mgr test` — runs framework + project test suites
 
 ### For Framework Development (This Repository)
 
@@ -54,7 +56,7 @@ Boot sequence (main process — `manager.initialize()`):
 11. **`tray`**, **`menu`**, **`contextMenu`** — file-based definitions from `src/integrations/{tray,menu,context-menu}/index.js`. Disable any of them at runtime via `manager.<name>.disable()` (no config flag).
 12. **`startup.initialize`** — applies `setLoginItemSettings`.
 13. **`webManager`** — relay renderer auth state.
-14. **`windows.initialize`** — registers app-level handlers (`window-all-closed` → quit on win/linux). **Does NOT auto-create any window.** The consumer's main.js calls `manager.windows.create('main')` from inside `manager.initialize().then(() => { ... })` — typically gated on `if (!startup.isLaunchHidden())` so agent/menubar apps stay invisible until the user explicitly asks for UI.
+14. **`windows.initialize`** — registers app-level handlers: `window-all-closed` → quit on win/linux; `app.on('activate')` on macOS to surface `main` when the user double-clicks the dock icon (CleanMyMac-style). **Does NOT auto-create any window.** The consumer's main.js calls `manager.windows.create('main', { show: !startup.isLaunchHidden() })` from inside `manager.initialize().then(() => { ... })`. The `main` window is *always* created (so it's in the registry for the activate/second-instance handlers to find), but `show: false` keeps it invisible in hidden launches — tray icon shows immediately, dock icon + window appear only when something explicitly calls `windows.show('main')` (or the user double-clicks the running app).
 
 ### Lib modules
 
@@ -64,7 +66,7 @@ Boot sequence (main process — `manager.initialize()`):
 |---|---|---|
 | `ipc` | real | typed channel bus, single registration point |
 | `storage` | real | electron-store wrapper, sync main / async renderer via IPC |
-| `window-manager` | real | lazy-creation registry (no auto-windows; consumer calls `manager.windows.create('main')`). Bounds persistence + auto context-menu attach + inset titlebar (mac `hiddenInset` / win `titleBarOverlay` / linux native) + Discord-style hide-on-close on `main`. Auto `app.dock.show()` on macOS when first window appears (LSUIElement parity). |
+| `window-manager` | real | lazy-creation registry (no auto-windows; consumer calls `manager.windows.create('main')`). Bounds persistence + auto context-menu attach + inset titlebar (mac `hiddenInset` / win `titleBarOverlay` / linux native) + Discord-style hide-on-close on `main`. Auto `app.dock.show()` on macOS when first window appears (LSUIElement parity). Re-surface handlers: `app.on('activate')` on macOS + `app.on('second-instance')` on win/linux call `main.show()` when the user double-clicks the running app — so hidden-mode apps come back to life on a second click without consumer wiring. |
 | `tray` | real | file-based, dynamic items, runtime mutators |
 | `menu` | real | file-based, platform-aware default template |
 | `context-menu` | real | file-based, called per right-click with `params` |
@@ -121,7 +123,15 @@ Items support function `label`/`enabled`/`visible`/`checked` evaluated on `refre
 
 ### Windows (lazy creation, inset titlebar, Discord-style hide-on-close)
 
-EM does NOT auto-create any windows. Consumers call `manager.windows.create(name, opts?)` from inside `manager.initialize().then(() => { ... })`. Defaults baked in (no JSON `windows:` block needed):
+EM does NOT auto-create any windows. Consumers call `manager.windows.create(name, opts?)` from inside `manager.initialize().then(() => { ... })`. The canonical pattern for the `main` window:
+
+```js
+windows.create('main', { show: !startup.isLaunchHidden() });
+```
+
+Always create `main` — its presence in the registry is what lets EM's `app.on('activate')` (macOS dock click) and `app.on('second-instance')` (win/linux re-launch) handlers surface UI when the user double-clicks the running app. In hidden launches, pass `show: false` to keep the window invisible until something explicitly calls `windows.show('main')` (or the user double-clicks). Tray icon shows immediately, dock icon + window appear together when surfaced.
+
+Defaults baked in (no JSON `windows:` block needed):
 
 - `main` → `{ width: 1024, height: 720, hideOnClose: true,  view: 'main' }`
 - any other → `{ width: 800,  height: 600, hideOnClose: false, view: name   }`
@@ -140,6 +150,18 @@ Merge order: framework defaults < `config.windows.<name>` (if present) < call-si
 
 **macOS dock auto-show.** `windows.create()` and `windows.show()` call `app.dock.show()` if the dock is hidden — works even when `LSUIElement: true` is baked at build (`startup.mode = 'hidden'`). The app launches completely invisible (no dock icon, no Cmd+Tab, no taskbar) and the dock icon appears the moment the consumer surfaces UI.
 
+**Re-surface on user re-launch.** When the user double-clicks a running app (or clicks its dock icon on macOS), EM transparently shows the main window — no consumer wiring needed. Mechanisms:
+- **macOS** → `window-manager.initialize()` registers `app.on('activate')` which calls `windows.show('main')` if `main` is in the registry.
+- **Windows / Linux** → `deep-link.initialize()` registers `app.on('second-instance')` which does the same. (The OS spawns a duplicate process, our single-instance lock kills it, and forwards its argv here.)
+
+Both handlers are no-ops if `main` isn't in the registry, so consumers who genuinely never want a window can omit `windows.create('main', ...)` entirely. Otherwise, with `windows.create('main', { show: !isLaunchHidden() })` at boot, hidden-mode apps come back to life on a second click.
+
+**Testing the login-launch path locally.** Pass `--em-launched-at-login` as a command-line arg when launching the .app; EM treats it identically to a real OS-driven login launch (`startup.wasLaunchedAtLogin()` returns `true`, `via:argv-flag`). Useful for testing hidden-mode behavior without actually configuring login items.
+
+```bash
+open -n /path/to/MyApp.app --args --em-launched-at-login
+```
+
 **`startup.mode` simplified.** Was `'normal' | 'hidden' | 'tray-only'` — `tray-only` was always the same idea (LSUIElement) so it's now folded into `'hidden'`. Old `tray-only` configs fall back to `'normal'` per `getMode()` validation.
 
 ### Build system
@@ -147,18 +169,26 @@ Merge order: framework defaults < `config.windows.<name>` (if present) < call-si
 - **prepare-package** copies framework `src/` → `dist/` (BXM-style).
 - **Gulp** auto-loads tasks from `src/gulp/tasks/`.
 - **Webpack** — three targets (electron-main / electron-preload / electron-renderer), all bundled in production for source protection. DefinePlugin + BannerPlugin inject `EM_BUILD_JSON` into bundles.
-- **electron-builder** packages + publishes. `gulp/build-config` GENERATES `dist/electron-builder.yml` from EM defaults + `config/electron-manager.json` (no consumer-shipped `electron-builder.yml`). It also writes `dist/build/entitlements.mac.plist` (defaults + consumer overrides via `entitlements.mac` config) and resolves icons via a 3-tier waterfall (config → `<consumer>/config/icons/<platform>/<slot>.png` → EM bundled defaults) into `dist/build/icons/`.
-- **Strategy-pluggable Windows signing** — `signing.windows.strategy` config key (no env var) selects `self-hosted` (EV USB token) | `cloud` | `local`. The GH Actions workflow has a `windows-strategy` job that reads the JSON5 config to drive runner selection + job gating.
+- **electron-builder** packages + publishes. `gulp/build-config` GENERATES `dist/electron-builder.yml` from EM defaults + `config/electron-manager.json` (no consumer-shipped `electron-builder.yml`). It also writes `dist/build/entitlements.mac.plist` (defaults + consumer overrides via `targets.mac.entitlements` config) and resolves icons via a 3-tier waterfall (config → `<consumer>/config/icons/<platform>/<slot>.png` → EM bundled defaults) into `dist/build/icons/`.
+- **Strategy-pluggable Windows signing** — `targets.win.signing.strategy` config key (no env var) selects `self-hosted` (EV USB token) | `cloud` | `local`. The GH Actions workflow has a `windows-strategy` job that reads the JSON5 config to drive runner selection + job gating.
 
 ### Config flow
 
-`config/electron-manager.json` (JSON5, in consumer) → `Manager.getConfig()` (applies derived defaults: `app.appId` ← `com.itwcreativeworks.<brand.id>`, `app.productName` ← `brand.name`) → injected into renderer + preload bundles via webpack DefinePlugin as `EM_BUILD_JSON` → `require()`-able JSON in main.
+`config/electron-manager.json` (JSON5, in consumer) → `Manager.getConfig()` (applies derived defaults: `app.appId` ← `com.itwcreativeworks.<brand.id>`, `app.productName` ← `brand.name`) → injected into ALL THREE bundles (main / renderer / preload) at build time via webpack DefinePlugin as `EM_BUILD_JSON`. At runtime, `manager.initialize()` reads `EM_BUILD_JSON.config` first (this is authoritative in packaged apps because `process.cwd()` is `/`, so reading config from disk doesn't work). Dev mode falls back to disk read from `<appRoot>/config/electron-manager.json` for live-reload during development.
 
 Required fields: `brand.id` + `brand.name`. Everything else has defaults. Audit (`gulp/audit`) validates `brand.id` matches URL-scheme grammar (since it's also the deep-link scheme).
 
 Notable defaults / behaviors:
 - **appId**: `com.itwcreativeworks.<brand.id>` (set explicitly only if you must)
 - **productName**: same as `brand.name`
+- **copyright**: defaults to `© {YEAR}, ITW Creative Works`. The `{YEAR}` token is expanded to the current year at YAML generation time, so the string never goes stale across releases. Consumers can override with their own string (still gets `{YEAR}` substitution if used).
+- **app.category**: generic high-level category — defaults `'productivity'`, allowed `'productivity' | 'developer-tools' | 'utilities' | 'media' | 'social' | 'network'`. EM owns the per-platform mapping (Apple UTI → mac.category, freedesktop → linux.category). See `docs/installer-options.md` for the full table. Override per-platform via `electronBuilder.mac.category` if you need something not in the table.
+- **app.languages**: `['en']`. Applied as `mac.electronLanguages` (strips other `.lproj` dirs from the .app bundle, ~10MB savings).
+- **app.darkModeSupport**: `true`. macOS honors via `NSRequiresAquaSystemAppearance: false`; win/linux ignore.
+- **targets.win**: `arch: ['x64', 'ia32']` (multi-arch single NSIS installer); `oneClick: true` + `desktopShortcut/startMenuShortcut/runAfterFinish: true` + `perMachine: false` — Slack-style frictionless install. Override any of those in `targets.win.<key>`.
+- **targets.mac**: `arch: ['universal']` (Intel + Apple Silicon in one .dmg via lipo). MAS distribution config keys exist (`targets.mac.mas.*`) but are STUBBED — setting `enabled: true` triggers an audit warning. Reference plists archived at `<em>/src/defaults/_mas/`.
+- **targets.linux**: `arch: ['x64']`, `snap.enabled: false`. Snap publishing is opt-in — set `targets.linux.snap.enabled: true` and put `SNAPCRAFT_STORE_CREDENTIALS` in `.env` (run `snapcraft export-login -` to mint, then `mgr push-secrets` to flow to GH Actions).
+- **fileAssociations / protocols**: optional passthrough fields for OS file-type registration + extra URL schemes. EM auto-registers `<brand.id>://` always; `protocols` is for additional schemes only. Empty by default; not emitted to YAML when unset.
 - **Deep-link scheme**: always `<brand.id>://...` (no config). Built-in routes: `auth/token`, `app/show`, `app/quit`. Custom routes: `manager.deepLink.on('pattern', fn)` at runtime.
 - **Tray / menu / context-menu**: paths are conventional (`src/integrations/{name}/index.js`) — no config block. Disable: `manager.<name>.disable()`.
 - **`startup.mode`**: `'normal'` | `'hidden'`. `'hidden'` bakes `LSUIElement: true` into Info.plist on macOS at build time → completely invisible launch (no dock, no Cmd+Tab); tray + notifications still work. The deprecated `'tray-only'` mode is no longer valid — its behavior was always identical to `'hidden'` so it's been folded in.
@@ -168,7 +198,7 @@ Notable defaults / behaviors:
 - **Page template**: EM-internal, no longer copied to `<consumer>/config/page-template.html`. Lives at `<em>/src/config/page-template.html`.
 - **`manager.quit({ force })`** / **`manager.relaunch({ force })`**: programmatic quit/relaunch entry points that flip `_allowQuit` so window-manager's hide-on-close trap doesn't swallow the close events. Auto-updater's `installNow()` flips `_allowQuit` automatically before calling `quitAndInstall()`.
 - **Icons**: 3-tier waterfall per slot/platform (config → `config/icons/<platform>/<slot>.png` → EM bundled). `@2x` retina auto-paired from `@1x`. Linux follows Windows resolution; Windows tray falls back to Windows app icon.
-- **Entitlements**: `entitlements.mac` is an object map (key→bool/string/array). Consumer overrides EM's defaults; `null` removes a default. Plist generated to `dist/build/entitlements.mac.plist`.
+- **Entitlements**: `targets.mac.entitlements` is an object map (key→bool/string/array). Consumer overrides EM's defaults; `null` removes a default. Plist generated to `dist/build/entitlements.mac.plist`.
 - **Stable download names** (`gulp/mirror-downloads`): `Somiibo.dmg`, `Somiibo-Setup.exe`, `somiibo_amd64.deb`, `Somiibo.AppImage` — preserves legacy URLs. Apple Silicon gets `-arm64` suffix.
 
 ### Build modes
@@ -187,7 +217,7 @@ Four layers:
 - **build** — plain Node, fast.
 - **main** — spawns Electron via `runners/electron.js`, JSON-line stdout protocol. Tests EM lib code in isolation.
 - **renderer** — hidden BrowserWindow.
-- **boot** — spawns Electron with the consumer's actual built `dist/main.bundle.js` (the production main entry). Waits for `manager.initialize()` to resolve, then runs each test's `inspect(manager)` callback against the live runtime. Replaces shell-level `npm start && sleep && kill` smoke tests with deterministic, signal-driven pass/fail. Uses a single Electron process for all boot tests (~1s after build). **Always rebuilds the bundle** before running so tests never see stale code (~10s build cost; opt out with `EM_TEST_SKIP_BUILD=1` for CI where build ran in a separate step). Plumbing: `EM_TEST_BOOT`/`EM_TEST_BOOT_HARNESS`/`EM_TEST_BOOT_SPEC` env vars, harness in `src/test/harness/boot-entry.js`, runner in `src/test/runners/boot.js`. Strips `ELECTRON_RUN_AS_NODE` from the child env (matches `gulp/serve`) so electron starts in main-process mode regardless of the surrounding shell. See `docs/test-boot-layer.md`.
+- **boot** — spawns Electron with the consumer's actual built `dist/main.bundle.js` (the production main entry). Waits for `manager.initialize()` to resolve, then runs each test's `inspect(manager)` callback against the live runtime. Replaces shell-level `npm start && sleep && kill` smoke tests with deterministic, signal-driven pass/fail. Uses a single Electron process for all boot tests (~1s after build). **Always rebuilds the bundle** before running so tests never see stale code (~10s build cost; opt out with `EM_TEST_SKIP_BUILD=1` for CI where build ran in a separate step). Plumbing: `EM_TEST_BOOT`/`EM_TEST_BOOT_HARNESS`/`EM_TEST_BOOT_SPEC` env vars, harness in `src/test/harness/boot-entry.js`, runner in `src/test/runners/boot.js`. See `docs/test-boot-layer.md`.
 
 Test files export `{ type, layer, description, tests, cleanup }`. Boot tests use `inspect: async ({ manager, expect, projectRoot }) => { ... }` instead of `run`. See `docs/test-framework.md` and `docs/test-boot-layer.md`.
 
@@ -214,7 +244,9 @@ Implementation: `src/utils/attach-log-file.js` wraps `process.stdout.write` and 
 | `publish` | real | shells `gulp publish` with `EM_BUILD_MODE=true EM_IS_PUBLISH=true`; full sign + notarize + GH release upload |
 | `validate-certs` | real | check cert files, env vars, profile expiration + appId match, Keychain identity. Auto-runs at end of `setup` (non-fatal). |
 | `push-secrets` | real | read `.env` Default section, encrypt via libsodium, push to GH Actions secrets. Auto-base64s file paths. **Auto-runs at end of `setup`** when `GH_TOKEN` is set. |
-| `sign-windows` | real | strategy-aware EV/cloud/local signer. Self-hosted runs `signtool` against EV token; cloud dispatches to provider CLI; local is a no-op with a clear message. |
+| `sign-windows` | real | strategy-aware EV/cloud/local signer. Self-hosted runs `signtool` against EV token; cloud dispatches to provider CLI; local is a no-op with a clear message. Emits structured JSONL events to `<runner-workspace>/em-signing.log` (job-start, sign-start, sign-done, sign-fail, job-end) so `mgr runner monitor` can pretty-print them in real time. |
+| `runner monitor` | real | tails the `em-signing.log` JSONL feed and pretty-prints events (color-coded JOB START/END, file/duration/byte info per signtool call, error spew on sign-fail). Run on the Windows signing box in a separate terminal during a release. Flags: `--follow-only` (skip replay), `--file <path>` (override log path). |
+| `launch` | real | Launch a packaged app with a clean env (strips `ELECTRON_RUN_AS_NODE` so the host process's leaked var doesn't make the .app silently exit). Auto-discovers `release/<platform>-<arch>/<App>.app` (or `.exe`-folder/linux-unpacked) when no path given. Forward args to the app via `--args="..."`. Aliases: `mgr open`. Use this for manual smoke-testing instead of raw `open -n .../MyApp.app`. |
 | `finalize-release` | real | `--signed-dir <path>` uploads signed Windows installers to the update-server release (created by mac/linux's electron-builder publish) AND mirrors them to download-server's installer tag with stable filenames. `--publish` flips the update-server release Draft→Published so electron-updater feeds work. CI workflow runs both modes (windows-sign job calls `--signed-dir`, finalize job calls `--publish`). |
 | `release` | real | Trigger the consumer's GH Actions Build & Release workflow via `workflow_dispatch`, then poll-stream every job's logs to the local terminal AND tee them to `logs/build.log`. Exits 0 on workflow success, 1 on failure. This is the canonical "ship a release" UX — `npm run release` in any consumer maps to this. The legacy "sign + publish from my own laptop" flow is preserved as `npm run release:local`. |
 
@@ -228,6 +260,8 @@ Implementation: `src/utils/attach-log-file.js` wraps `process.stdout.write` and 
 - Prefer **`fs-jetpack`** over `fs-extra`.
 - **No backwards compatibility** unless explicitly requested — this is unreleased v1.
 - **Lib structure — flat file vs directory split.** Default to a flat `src/lib/<name>.js`. Split into a directory (`src/lib/<name>/{index,core,main,renderer,preload}.js`) ONLY when each Electron context (main / renderer / preload) has materially different logic that would force runtime branching inside one file. `index.js` is then a thin context detector that delegates. Currently only `lib/sentry/` is split (the SDK has separate main/renderer/preload entry points). Don't split prophylactically — convert when the branching gets ugly.
+- **Use `app.getAppPath()`, not `process.cwd()`, for runtime path resolution.** In a packaged app, `process.cwd()` is `/` (or wherever Finder/launchd happened to chdir from), so `path.join(process.cwd(), 'dist', 'views', ...)` resolves to absolute garbage. Use `require('./utils/app-root.js')()` — it tries `app.getAppPath()` first (returns the asar mount or project dir) and falls back to `process.cwd()` for tests/non-Electron contexts. The build-time tools (`gulp/`, `commands/`) are exempt — they always run with cwd set correctly.
+- **`ELECTRON_RUN_AS_NODE` is stripped at the CLI boundary.** When set, Electron silently runs as plain Node — `app` is undefined, no BrowserWindow, no window. The variable leaks into shells from common parent processes (notably VS Code's Claude Code extension, which runs as a `node.mojom.NodeService` utility process with the var set). `bin/electron-manager` and `src/gulp/main.js` both call `delete process.env.ELECTRON_RUN_AS_NODE` at the top so any child process they spawn (electron-builder rebuild, mgr serve, mgr test) gets a clean slate.
 
 ## Documentation
 
@@ -249,9 +283,10 @@ API references for each subsystem live in `docs/`:
 - [docs/logging.md](docs/logging.md) — runtime logger (main + preload + renderer → one `runtime.log`), `mgr logs` CLI, dev vs prod paths
 - [docs/themes.md](docs/themes.md) — vendored classy + bootstrap themes, `@use 'electron-manager'` overrides, per-page CSS bundles
 - [docs/hooks.md](docs/hooks.md) — lifecycle hooks (build/pre, build/post, release/pre, release/post, notarize/post)
+- [docs/installer-options.md](docs/installer-options.md) — per-target installer config (NSIS one-click, snap publishing, ia32 inclusion, app.category mapping, `{YEAR}` token, MAS roadmap)
 - [docs/signing.md](docs/signing.md) — code signing for macOS + Windows, cert file inventory, env vars
 - [docs/releasing.md](docs/releasing.md) — end-to-end release walkthrough (`.env` → GitHub Release)
-- [docs/runner.md](docs/runner.md) — Windows EV-token signing runner, `npx mgr runner install`
+- [docs/runner.md](docs/runner.md) — Windows EV-token signing runner, `npx mgr runner install`, `npx mgr runner monitor` (live signing event tail)
 - [docs/test-framework.md](docs/test-framework.md) — writing tests, running them, layers
 - [docs/test-boot-layer.md](docs/test-boot-layer.md) — boot test layer (spawns the consumer's actual built bundle for end-to-end smoke tests)
 - [docs/build-system.md](docs/build-system.md) — gulp, webpack, electron-builder pipeline

@@ -10,12 +10,26 @@
       icon:      'src/assets/icons/icon.png',
     },
   },
-  // App-level metadata. `appId` defaults to `com.itwcreativeworks.<brand.id>` if not set.
-  // `productName` defaults to `brand.name`. Override either explicitly only if you must.
+  // App-level metadata — universal cross-platform fields. EM auto-derives sensible
+  // defaults: `appId` ← `com.itwcreativeworks.<brand.id>`, `productName` ← `brand.name`,
+  // `copyright` ← `© <year>, ITW Creative Works`. Override any of these explicitly only
+  // if you must.
+  //
+  // `category` is a generic high-level category — EM maps it to per-platform values
+  // (mac uses Apple's UTI strings, linux uses freedesktop categories). Allowed values:
+  //   productivity (default) | developer-tools | utilities | media | social | network
+  // Override the per-platform mapping in `targets.<plat>.category` if you need
+  // something specific. See docs/installer-options.md for the full table.
+  //
+  // `copyright` accepts a `{YEAR}` token expanded at build time to the current year.
+  // Default is `© {YEAR}, ITW Creative Works`. Set explicitly only to change the holder.
   app: {
-    appId:       null,
-    productName: null,
-    copyright:   '© ITW Creative Works',
+    appId:           null,
+    productName:     null,
+    copyright:       null,                // null → `© {YEAR}, ITW Creative Works`
+    category:        'productivity',
+    languages:       ['en'],              // applied as mac.electronLanguages
+    darkModeSupport: true,                // mac honors via NSRequiresAquaSystemAppearance; win/linux ignore
     // Icon overrides. Each is an optional project-relative or absolute path. Resolution
     // chain per slot, per platform: explicit config path → <projectRoot>/config/icons/<platform>/<slot>.png
     // → EM's bundled default. Linux follows the Windows chain; Windows tray falls back to
@@ -35,11 +49,67 @@
       trayLinux:   null,
     },
   },
-  // mac.* keys override EM's defaults. `null` removes a default. Any key not in the defaults
-  // is added to the merged set. See docs/signing.md for the full default list.
-  // Example:  mac: { 'com.apple.security.cs.allow-jit': false, 'com.apple.security.network.client': true }
-  entitlements: {
-    mac: {},
+  // Per-target install/distribution config. The keys here map directly to the same
+  // electron-builder concepts (`mac.target`, `win.target`, `linux.target`) but EM owns
+  // the actual target list (dmg+zip on mac, nsis on win, deb+AppImage on linux) so
+  // auto-update keeps working — see docs/installer-options.md for why. Each block
+  // exposes only the knobs that exist for that platform's target — no cross-platform
+  // analog for any of these.
+  targets: {
+    mac: {
+      arch: ['universal'],   // universal binary (x64 + arm64 lipo'd) — one .dmg/.zip for both
+      // Entitlements override map. EM ships sensible defaults (allow-jit,
+      // allow-unsigned-executable-memory, disable-library-validation, network.client/server,
+      // files.user-selected.read-write, allow-dyld-environment-variables). To override:
+      //   - Set a key to a value to add/replace it (boolean, string, or array per Apple's plist spec)
+      //   - Set a key to `null` to remove it from EM's defaults
+      // Output: dist/build/entitlements.mac.plist (auto-wired into electron-builder.yml).
+      // Example: { 'com.apple.security.network.server': false, 'com.apple.security.device.audio-input': true }
+      entitlements: {},
+      // MAS (Mac App Store) — STUBBED. Config is parsed but not yet implemented;
+      // setting `enabled: true` triggers an audit warning. Real implementation lands
+      // in a future release. Reference plists from a working MAS-published Electron app
+      // are archived at <em>/src/defaults/_mas/ for the eventual implementation.
+      mas: {
+        enabled:             false,
+        provisioningProfile: null,
+        entitlements:        null,
+        entitlementsInherit: null,
+      },
+    },
+    win: {
+      arch: ['x64', 'ia32'],          // 64-bit + 32-bit (single multi-arch NSIS installer)
+      oneClick:           true,        // no installer wizard, just installs immediately
+      desktopShortcut:    true,
+      startMenuShortcut:  true,
+      runAfterFinish:     true,
+      perMachine:         false,       // per-user install (required for oneClick:true)
+      // Code-signing strategy. Picked at workflow time to drive runner selection +
+      // job gating. See docs/signing.md.
+      //   self-hosted (default) — sign with signtool against an EV USB token (typically
+      //                           on an EM-managed self-hosted GH Actions runner)
+      //   cloud                 — shell to a cloud signing provider's CLI (Azure /
+      //                           SSL.com / DigiCert) — provider configured in cloud.provider
+      //   local                 — skip CI signing; developer signs manually on their box
+      signing: {
+        strategy: 'self-hosted',
+        cloud:    { provider: null, options: {} },
+      },
+    },
+    linux: {
+      arch: ['x64'],                   // amd64; ia32 is essentially extinct on Linux
+      // Snap publishing — disabled by default. Enable to add a `snap` target to the
+      // linux build and auto-publish to the Snap Store on release. Requires
+      // SNAPCRAFT_STORE_CREDENTIALS in your `.env` (run `snapcraft export-login -`
+      // locally to mint, then `mgr push-secrets` flows it to GH Actions).
+      snap: {
+        enabled:     false,
+        confinement: 'strict',
+        grade:       'stable',
+        autoStart:   true,
+        channels:    ['stable'],
+      },
+    },
   },
   // Auto-updater (electron-updater wrapper). Feed URL is auto-derived from `releases` (above).
   // Set `EM_DEV_UPDATE=available|unavailable|error` to simulate updates in dev.
@@ -90,12 +160,6 @@
   //   main      → { width: 1024, height: 720, hideOnClose: true,  view: 'main' }
   //   any other → { width: 800,  height: 600, hideOnClose: false, view: name   }
   // Add a `windows: {}` block here only if you want to override defaults persistently.
-  signing: {
-    windows: {
-      strategy: 'self-hosted',
-      cloud: { provider: null, options: {} },
-    },
-  },
   // Releases — public repo where built artifacts (and the auto-update feed) live.
   // The app repo can stay private; this one MUST be public for unauthenticated downloads + auto-updates.
   // owner defaults to the app repo's owner, so a single line `repo: 'update-server'` is usually all you need.

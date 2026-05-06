@@ -22,6 +22,7 @@ const ALIASES = {
   'push-secrets':   ['secrets', '--push-secrets'],
   'finalize-release': ['finalize', '--finalize-release'],
   runner:           ['--runner'],
+  launch:           ['open', '--launch'],
 };
 
 // Resolve command name from aliases

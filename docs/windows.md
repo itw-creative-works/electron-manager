@@ -1,6 +1,15 @@
 # Windows
 
-**Lazy named-window registry.** EM does NOT auto-create any window. Your `main.js` calls `manager.windows.create('main')` from inside `manager.initialize().then(() => { ... })` when UI should appear (or never, for agent / menubar apps). Use the registry for the common case (named, persistent, integrated windows). For one-off windows (a toast, a print preview), use `new BrowserWindow()` directly — `window-manager` doesn't get in the way.
+**Lazy named-window registry.** EM does NOT auto-create any window. Your `main.js` calls `manager.windows.create('main', { show: !startup.isLaunchHidden() })` from inside `manager.initialize().then(() => { ... })`. Always create `main` — its presence in the registry is what lets EM's `app.on('activate')` (macOS dock click) and `app.on('second-instance')` (win/linux re-launch) handlers surface UI when the user double-clicks the running app. In hidden launches, pass `show: false` to keep the window invisible until something explicitly calls `windows.show('main')`. Use the registry for the common case (named, persistent, integrated windows). For one-off windows (a toast, a print preview), use `new BrowserWindow()` directly — `window-manager` doesn't get in the way.
+
+## Re-surface on user re-launch
+
+When the user double-clicks a running app (or clicks its dock icon on macOS), EM transparently shows the main window — no consumer wiring needed.
+
+- **macOS** → `app.on('activate')` calls `windows.show('main')` if `main` is in the registry.
+- **Windows / Linux** → `app.on('second-instance')` does the same. (The OS spawns a duplicate process, the single-instance lock kills it, and the original instance receives the activation.)
+
+Both handlers are no-ops if `main` isn't in the registry. So consumers who genuinely never want a window can omit `windows.create('main', ...)`. Otherwise, the canonical pattern (`windows.create('main', { show: !isLaunchHidden() })`) gives CleanMyMac-style behavior: tray-only at login, full window when the user manually opens the app.
 
 ## API
 

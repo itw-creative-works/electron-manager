@@ -92,6 +92,81 @@ Useful for:
 - Programmatic log shipping (e.g. POSTing the file to your support backend)
 - Crash reporters that want to attach the runtime log
 
+## What EM logs automatically
+
+Beyond what you write yourself, EM emits a fixed set of high-signal lifecycle lines so post-mortem debugging works without redeploying:
+
+**At boot (`manager.initialize()`):**
+
+```
+(main)     Initializing electron-manager (main)... pid=12345 platform=darwin arch=arm64 packaged=true argv=["--em-launched-at-login"]
+(startup)  startup boot summary — RAW inputs:
+(startup)    process.argv:            ["--em-launched-at-login"]
+(startup)    process.platform:        darwin
+(startup)    process.arch:            arm64
+(startup)    app.isPackaged:          true
+(startup)    app.getLoginItemSettings(): {"status":"enabled","openAtLogin":true,"openAsHidden":false,"restoreState":false,"wasOpenedAtLogin":false,"wasOpenedAsHidden":false}
+(startup)    EM_/electron/node env:   {}
+(startup)  startup boot summary — RESOLVED values:
+(startup)    config.startup.mode:     normal
+(startup)    config.startup.openAtLogin: {enabled:true, mode:hidden}
+(startup)    isDev:                   false
+(startup)    hasLoginArg:             true
+(startup)    wasLaunchedAtLogin():    true (via argv-flag)
+(startup)    isLaunchHidden():        true
+```
+
+The boot summary has two parallel blocks: **RAW inputs** (what the OS / shell gave us) and **RESOLVED values** (what EM decided to act on). Use it to debug both directions:
+- "Why is EM behaving like X?" → check resolved values
+- "Why did EM decide X?" → check raw inputs
+
+The `via:` annotation on `wasLaunchedAtLogin()` distinguishes a real login launch (`via:macos-wasOpenedAtLogin`) from a flag-based simulation (`via:argv-flag` — i.e. the user passed `--em-launched-at-login`).
+
+**App lifecycle events** (logged from `main.js`):
+
+```
+app event: before-quit (entering quit sequence — close events bypass hide-on-close)
+app event: will-quit
+app event: quit code=0
+app event: window-all-closed
+app event: activate (macOS — dock click or app re-launch)
+app event: open-url url=myapp://auth/token?...
+app event: render-process-gone reason=crashed exitCode=139
+app event: child-process-gone type=GPU reason=killed exitCode=9
+process exit code=0
+uncaughtException: <stack>
+unhandledRejection: <stack>
+```
+
+**Window lifecycle events** (per named window, logged from `window-manager`):
+
+```
+createNamed: building "main" (show=false, hideOnClose=true)
+createNamed: loaded /path/to/app.asar/dist/views/main/index.html for "main"
+window "main": ready-to-show — staying invisible (show:false at create)
+window "main": ready-to-show — surfacing
+window "main": show event
+window "main": hide event
+window "main": focus event
+window "main": minimize event
+window "main": restore event
+window "main": close intercepted (hide-on-close) — hiding instead
+window "main": close allowed (hideOnClose=true, allowQuit=false, isQuitting=true, force=false)
+window "main": closed (destroyed)
+```
+
+**Re-surface handlers**:
+
+```
+activate (macOS) — surfacing main (visible=false, minimized=false)
+_ensureDockVisible — calling dock.show()
+_ensureDockVisible — dock already visible
+second-instance — argv=["..."] cwd=/...
+second-instance — surfacing main (visible=false, minimized=false)
+```
+
+These cover everything you'd want when debugging "why did the app go invisible / crash / fail to surface" without needing to attach a debugger.
+
 ## Log levels
 
 Standard: `log`, `info`, `warn`, `error`, `debug`. All levels are written to both transports by default.

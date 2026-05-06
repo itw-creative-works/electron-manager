@@ -88,11 +88,12 @@ module.exports = {
       },
     },
     {
-      name: 'has signing.windows block (not windows.signing)',
+      name: 'has targets.win.signing block (Windows-specific signing config)',
       run: (ctx) => {
-        ctx.expect(ctx.state.cfg.signing).toBeTruthy();
-        ctx.expect(ctx.state.cfg.signing.windows).toBeTruthy();
-        ctx.expect(['self-hosted', 'cloud', 'local']).toContain(ctx.state.cfg.signing.windows.strategy);
+        ctx.expect(ctx.state.cfg.targets).toBeTruthy();
+        ctx.expect(ctx.state.cfg.targets.win).toBeTruthy();
+        ctx.expect(ctx.state.cfg.targets.win.signing).toBeTruthy();
+        ctx.expect(['self-hosted', 'cloud', 'local']).toContain(ctx.state.cfg.targets.win.signing.strategy);
       },
     },
     {

@@ -27,16 +27,14 @@ module.exports = function serve(done) {
 
   logger.log(`Spawning electron: ${electronBin} ${projectRoot}`);
 
-  // Strip ELECTRON_RUN_AS_NODE if present — it makes electron run as plain Node (process.type
-  // becomes undefined, require('electron') returns the path string instead of the API). Our test
-  // runner sets it for build-layer suites and it can leak into the shell environment.
+  // ELECTRON_RUN_AS_NODE is already stripped by gulp/main.js at the gulp boundary, so the
+  // child env is clean — no extra delete here.
   const childEnv = Object.assign({}, process.env, {
     EM_LIVERELOAD_PORT: String(port),
     // Force chalk to keep colors when stdout is a pipe; the tee strips them before writing
     // to the log file but the terminal still gets colored output.
     FORCE_COLOR: '1',
   });
-  delete childEnv.ELECTRON_RUN_AS_NODE;
 
   // Pipe stdio (instead of 'inherit') so our parent-process attach-log-file tee can capture
   // electron's stdout/stderr too. We forward each chunk to process.stdout/stderr.write, which

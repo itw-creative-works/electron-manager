@@ -87,7 +87,10 @@ const contextMenu = {
     }
 
     // Conventional path. No config knob — disable() at runtime if you don't want a context menu.
-    const absPath = path.join(process.cwd(), 'src', 'integrations', 'context-menu', 'index.js');
+    // appRoot resolves to project dir in dev and asar mount in packaged apps — both contain
+    // src/integrations/* (electron-builder's `files: ['**/*']` packs the consumer's src/
+    // into the asar), so the existsSync + require below works in both modes.
+    const absPath = path.join(require('../utils/app-root.js')(), 'src', 'integrations', 'context-menu', 'index.js');
 
     if (fs.existsSync(absPath)) {
       const loadConsumerFile = require('../utils/load-consumer-file.js');

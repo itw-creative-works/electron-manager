@@ -99,18 +99,30 @@ Manager.prototype.initialize = async function (consumerConfig, options) {
   const self = this;
 
   // Accept either a parsed config object, a string path to a JSON5 file, or nothing.
-  // Default: load `config/electron-manager.json` from the app's working directory.
+  // Default config resolution order (when called with no arg):
+  //   1. EM_BUILD_JSON.config — injected at build time by webpack DefinePlugin. This is
+  //      authoritative in packaged apps because config/electron-manager.json is inside the
+  //      asar — not loadable as JSON5 from disk. EM_BUILD_JSON is a snapshot of that exact
+  //      file taken at build time.
+  //   2. <appRoot>/config/electron-manager.json — fallback for dev mode where EM is loaded
+  //      directly (no webpack bundling). appRoot resolves to the consumer's project dir.
   if (typeof consumerConfig === 'string') {
     consumerConfig = loadConfigFromFile(consumerConfig);
   } else if (!consumerConfig) {
-    const path = require('path');
-    consumerConfig = loadConfigFromFile(path.join(process.cwd(), 'config', 'electron-manager.json'));
+    // Try EM_BUILD_JSON (set by DefinePlugin in packaged builds) first.
+    if (typeof EM_BUILD_JSON !== 'undefined' && EM_BUILD_JSON?.config) {
+      consumerConfig = EM_BUILD_JSON.config;
+    } else {
+      const path = require('path');
+      const appRoot = require('./utils/app-root.js')();
+      consumerConfig = loadConfigFromFile(path.join(appRoot, 'config', 'electron-manager.json'));
+    }
   }
 
   self.config = consumerConfig || {};
   self._options = options || {};
 
-  self.logger.log('Initializing electron-manager (main)...');
+  self.logger.log(`Initializing electron-manager (main)... pid=${process.pid} platform=${process.platform} arch=${process.arch} packaged=${!!require('electron')?.app?.isPackaged} argv=${JSON.stringify(process.argv.slice(1))}`);
 
   // electron is a peer dep — require lazily so this file can be loaded outside Electron for tests
   let electron;
@@ -120,15 +132,38 @@ Manager.prototype.initialize = async function (consumerConfig, options) {
     self.logger.warn('electron not available — main Manager running in test/scaffold mode.');
   }
 
-  // Mark that the app is on its way out. `before-quit` fires for every quit path
-  // — Cmd+Q, the role:'quit' menu item, app.quit() programmatic, OS shutdown —
-  // so this is the canonical "the app is actually trying to die" signal. The
-  // window-manager's close handler reads this to skip hide-on-close. We do NOT
-  // set _allowQuit here (it has different semantics — a permission to die);
-  // _isQuitting is the live "we're in the act of dying" flag.
+  // Lifecycle event logging. These are the high-signal app-level events worth tracing
+  // when something goes wrong — quit reasons, window-all-closed, will-finish-launching,
+  // ready, render-process-gone, child-process-gone. All cheap to log; one line each.
   if (electron?.app?.on) {
-    electron.app.on('before-quit', () => { self._isQuitting = true; });
+    const app = electron.app;
+    app.on('before-quit', () => {
+      self._isQuitting = true;
+      self.logger.log('app event: before-quit (entering quit sequence — close events bypass hide-on-close)');
+    });
+    app.on('will-quit', () => self.logger.log('app event: will-quit'));
+    app.on('quit', (_e, exitCode) => self.logger.log(`app event: quit code=${exitCode}`));
+    app.on('window-all-closed', () => self.logger.log('app event: window-all-closed'));
+    app.on('render-process-gone', (_e, webContents, details) => self.logger.warn(`app event: render-process-gone reason=${details?.reason} exitCode=${details?.exitCode}`));
+    app.on('child-process-gone', (_e, details) => self.logger.warn(`app event: child-process-gone type=${details?.type} reason=${details?.reason} exitCode=${details?.exitCode}`));
+    app.on('activate', () => self.logger.log('app event: activate (macOS — dock click or app re-launch)'));
+    app.on('open-url', (_e, url) => self.logger.log(`app event: open-url url=${url}`));
+    app.on('open-file', (_e, p) => self.logger.log(`app event: open-file path=${p}`));
   }
+
+  // Process-level signals that bypass Electron's app events. Catches uncaught exceptions
+  // so we never crash silently — combined with electron-log file transport, this means
+  // ANY unhandled throw lands in runtime.log rather than disappearing into stderr.
+  process.on('uncaughtException', (e) => {
+    self.logger.error(`uncaughtException: ${e?.stack || e?.message || String(e)}`);
+  });
+  process.on('unhandledRejection', (reason) => {
+    self.logger.error(`unhandledRejection: ${reason?.stack || reason?.message || String(reason)}`);
+  });
+  process.on('exit', (code) => {
+    // electron-log's file transport flushes synchronously, so this last line lands.
+    self.logger.log(`process exit code=${code}`);
+  });
 
   // 1. Apply early startup-mode hide. For `mode: 'hidden'` we call app.dock.hide() *before*
   //    anything else so macOS spends as little time animating the dock entry as possible.
@@ -237,7 +272,10 @@ Manager.prototype.initialize = async function (consumerConfig, options) {
 
 function loadConfigFromFile(filepath) {
   const fs = require('fs');
-  const JSON5 = require('json5');
+  // json5 is bundled via webpack — handle both interop shapes (`.parse` vs `.default.parse`)
+  // depending on how webpack's __esModule wrapping resolves at the call site.
+  const json5Mod = require('json5');
+  const JSON5 = json5Mod.parse ? json5Mod : (json5Mod.default || json5Mod);
 
   if (!fs.existsSync(filepath)) {
     return {};

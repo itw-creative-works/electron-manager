@@ -60,6 +60,27 @@ const windowManager = {
       });
     }
 
+    // macOS: when the user clicks the dock icon or double-clicks the running app
+    // (e.g. CleanMyMac-style: launches hidden at login as tray-only, but double-clicking
+    // opens the main window), surface `main`. We only show — never create — so EM's "no
+    // auto-create" contract holds. The consumer is expected to have called
+    // `windows.create('main', { show: !startup.isLaunchHidden() })` at boot, which puts
+    // the window in the registry but invisible in hidden-mode launches.
+    if (process.platform === 'darwin') {
+      windowManager._electron.app.on('activate', () => {
+        const main = windowManager.get('main');
+        if (!main) {
+          logger.log('activate (macOS) — no main window in registry; ignoring. (consumer should call windows.create(\'main\', { show: false }) at boot to enable hidden-mode reopen)');
+          return;
+        }
+        logger.log(`activate (macOS) — surfacing main (visible=${main.isVisible()}, minimized=${main.isMinimized()})`);
+        if (main.isMinimized()) main.restore();
+        windowManager._ensureDockVisible();
+        main.show();
+        main.focus();
+      });
+    }
+
     logger.log('initialize');
   },
 
@@ -104,13 +125,15 @@ const windowManager = {
     const jsonConfig = manager?.config?.windows?.[name] || {};
     const config = { ...defaults, ...jsonConfig, ...overrides };
 
+    logger.log(`createNamed: building "${name}" (show=${config.show !== false}, hideOnClose=${config.hideOnClose})`);
+
     const persistBounds = config.persistBounds !== false;
-    const projectRoot = process.cwd();
+    const appRoot = require('../utils/app-root.js')();
     const viewName = config.view || name;
     // Built outputs live under dist/. window-manager always loads from there;
     // the gulp pipeline produces them.
-    const htmlPath = path.join(projectRoot, 'dist', 'views', viewName, 'index.html');
-    const preloadPath = path.join(projectRoot, 'dist', 'preload.bundle.js');
+    const htmlPath = path.join(appRoot, 'dist', 'views', viewName, 'index.html');
+    const preloadPath = path.join(appRoot, 'dist', 'preload.bundle.js');
 
     // Resolve initial bounds: saved bounds (if any + valid + persistBounds enabled)
     // override config defaults. `x` and `y` are passed through from config when set
@@ -206,10 +229,21 @@ const windowManager = {
     // Show when ready (unless config says otherwise).
     win.once('ready-to-show', () => {
       if (config.show !== false) {
+        logger.log(`window "${name}": ready-to-show — surfacing`);
         windowManager._ensureDockVisible();
         win.show();
+      } else {
+        logger.log(`window "${name}": ready-to-show — staying invisible (show:false at create)`);
       }
     });
+
+    // Visibility lifecycle — high-signal for debugging hidden-mode + hide-on-close.
+    win.on('show', () => logger.log(`window "${name}": show event`));
+    win.on('hide', () => logger.log(`window "${name}": hide event`));
+    win.on('focus', () => logger.log(`window "${name}": focus event`));
+    win.on('minimize', () => logger.log(`window "${name}": minimize event`));
+    win.on('restore', () => logger.log(`window "${name}": restore event`));
+    win.on('closed', () => logger.log(`window "${name}": closed (destroyed)`));
 
     // Bounds persistence — save on resize/move/maximize/unmaximize/enter|leave-fullscreen.
     if (persistBounds) {
@@ -248,7 +282,10 @@ const windowManager = {
 
       if (hideOnClose && !allowQuit && !isQuitting && !force) {
         event.preventDefault();
+        logger.log(`window "${name}": close intercepted (hide-on-close) — hiding instead`);
         win.hide();
+      } else {
+        logger.log(`window "${name}": close allowed (hideOnClose=${hideOnClose}, allowQuit=${allowQuit}, isQuitting=${isQuitting}, force=${force})`);
       }
     });
 
@@ -370,6 +407,7 @@ const windowManager = {
       logger.warn(`show: no window named "${name}"`);
       return;
     }
+    logger.log(`show("${name}") — visible=${win.isVisible()} → showing`);
     windowManager._ensureDockVisible();
     win.show();
     win.focus();
@@ -385,9 +423,15 @@ const windowManager = {
     if (!dock || typeof dock.show !== 'function') return;
     try {
       // dock.isVisible() exists from Electron 13+; fall back to always-call for older.
-      if (typeof dock.isVisible === 'function' && dock.isVisible()) return;
+      if (typeof dock.isVisible === 'function' && dock.isVisible()) {
+        logger.log('_ensureDockVisible — dock already visible');
+        return;
+      }
+      logger.log('_ensureDockVisible — calling dock.show()');
       dock.show();
-    } catch (_) { /* no-op; dock surface is best-effort */ }
+    } catch (e) {
+      logger.warn(`_ensureDockVisible — failed: ${e.message}`);
+    }
   },
 
   hide(name) {

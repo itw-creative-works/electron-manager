@@ -1,4 +1,15 @@
 #!/usr/bin/env node
+
+// Strip ELECTRON_RUN_AS_NODE — it leaks into our env from common parent processes
+// (e.g. VS Code's Claude Code extension runs as `node.mojom.NodeService` with the var
+// set, and propagates it to every shell it spawns). When it's present, any Electron
+// binary we shell to (electron-builder rebuild, mgr serve, mgr test, etc.) silently
+// runs as plain Node — no `app` API, no BrowserWindow, no window. The app exits
+// cleanly with code 0 and no error, just nothing. Strip it once at the CLI boundary
+// so every child mgr spawns gets a clean slate. Individual subsystems (gulp/serve,
+// test runners) also strip it belt-and-suspenders style.
+delete process.env.ELECTRON_RUN_AS_NODE;
+
 const argv = require('yargs')(process.argv.slice(2)).parseSync();
 const cli = new (require('../dist/cli.js'))(argv);
 (async function() {

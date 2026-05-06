@@ -37,23 +37,44 @@ Auto-loads tasks from `<EM>/dist/gulp/tasks/*.js` via `<EM>/dist/gulp/main.js`. 
 | `webpack` | real | Three parallel targets — main / preload / renderer |
 | `sass` | real | SCSS → `dist/assets/css/*` |
 | `html` | real | `src/views/**/index.html` → `dist/views/*` |
-| `build-config` | real | Materialize `dist/electron-builder.yml` from source + mode-dependent injections (`LSUIElement` for tray-only) |
-| `package` | stub | Run `electron-builder build --config dist/electron-builder.yml` |
-| `release` | stub | `electron-builder build --publish always` |
+| `build-config` | real | Materialize `dist/electron-builder.yml` from source + mode-dependent injections (`LSUIElement` for hidden mode) |
+| `package` | real | Run `electron-builder build --config dist/electron-builder.yml` (full DMG/zip/universal-mac, NSIS-win, deb+AppImage-linux) |
+| `package-quick` | real | Quick-package for host platform/arch only — `--dir` mode, no DMG/zip/universal/notarize. ~20-30s vs ~3min for full `package`. Output: `release/<platform>-<arch>/<ProductName>.app` (or `.exe`-folder/linux-unpacked) — directly launchable. Used for smoke-testing packaged-mode behavior locally. |
+| `release` | real | `electron-builder build --publish always` |
 | `audit` | real | Validate consumer config (required keys, valid enums, deep-link scheme format), ensure icon + entrypoints exist; in publish mode also requires `releases.repo` + `electron-builder.yml`. Throws with a numbered list of every problem found |
-| `serve` | stub | Spawns `electron .` against the build output, websocket on `EM_LIVERELOAD_PORT` |
+| `serve` | real | Spawns `electron .` against the build output, websocket on `EM_LIVERELOAD_PORT` |
 
 ### Composition
 
 ```js
+// `build` produces bundles only (dist/main.bundle.js, etc.) — no installer.
 exports.build = series(
-  exports.defaults, exports.distribute,
+  exports['hook:build:pre'],
+  exports.defaults,
+  exports.distribute,
   parallel(exports.sass, exports.webpack, exports.html),
   exports.audit,
-  exports.buildConfig,
-  exports.package,
+  exports['build-config'],
+  exports['hook:build:post'],
 );
-exports.default = series(exports.serve, exports.build);
+
+// `packageBuild` = build + electron-builder (full DMG/zip/universal). Slow (~3min on mac).
+exports.packageBuild = series(exports.build, exports.package);
+
+// `packageQuick` = build + electron-builder --dir for host platform/arch only.
+// Fast (~20-30s) — smoke-testing only.
+exports.packageQuick = series(exports.build, exports['package-quick']);
+
+// `publish` = build + sign + notarize + GH Release upload + mirror to download-server.
+exports.publish = series(
+  exports.build,
+  exports['hook:release:pre'],
+  exports.release,
+  exports['mirror-downloads'],
+  exports['hook:release:post'],
+);
+
+exports.default = series(exports.build, exports.serve);
 ```
 
 ## Webpack — three targets
@@ -74,13 +95,21 @@ DefinePlugin replaces the bare identifier `EM_BUILD_JSON` with the parsed config
 
 ## electron-builder
 
-Driven by `electron-builder.yml`. EM materializes `dist/electron-builder.yml` from the consumer's source via `gulp/build-config`, applying:
+EM **generates** `dist/electron-builder.yml` from `config/electron-manager.json` + EM defaults — the consumer never ships an `electron-builder.yml`. `gulp/build-config` does the materialization, applying:
 
-- `mac.extendInfo.LSUIElement: true` when `startup.mode === 'tray-only'` (zero-bounce production launches — see [startup.md](startup.md)).
+- App metadata: `appId`, `productName`, `copyright` (with `{YEAR}` token expansion to the current year)
+- App-level cross-platform fields: `category` mapping, `languages`, `darkModeSupport`
+- Per-target (per-platform) installer config from `targets.{mac,win,linux}`:
+  - **mac**: arch (default `universal`), MAS stubs (not implemented)
+  - **win**: arch (default `x64`+`ia32`), NSIS oneClick + shortcuts
+  - **linux**: arch, optional snap publishing
+- Mode-dependent injections like `mac.extendInfo.LSUIElement: true` when `startup.mode === 'hidden'` (zero-bounce production launches — see [startup.md](startup.md))
+- Generated entitlements + resolved icons + materialized publish + afterSign hook
+- Optional passthrough: `fileAssociations`, `protocols`
 
-The materialization is YAML-text-level (preserves comments, idempotent, merges with existing `extendInfo` blocks). The consumer's source `electron-builder.yml` is NEVER mutated.
+The full per-target reference (every config knob, default value, and what it produces in YAML) lives in **[installer-options.md](installer-options.md)**.
 
-`gulp/package` points electron-builder at `dist/electron-builder.yml` (falls back to source if dist version absent).
+`gulp/package` and `gulp/package-quick` both point electron-builder at the generated `dist/electron-builder.yml`. Consumer overrides via `config.electronBuilder.*` are merged on top of the generated config — see [installer-options.md § Raw `electronBuilder` overrides](installer-options.md#raw-electronbuilder-overrides-escape-hatch) for the escape hatch.
 
 ## Build modes
 
@@ -94,7 +123,7 @@ Environment variables (set by `npm run build` / `npm run release`):
 
 ## Windows code signing
 
-Strategy-pluggable via `signing.windows.strategy` (or `signing.windows.strategy` in config):
+Strategy-pluggable via `targets.win.signing.strategy` in `config/electron-manager.json`:
 
 | Strategy | Where signing runs | When to use |
 |---|---|---|
@@ -102,7 +131,7 @@ Strategy-pluggable via `signing.windows.strategy` (or `signing.windows.strategy`
 | `cloud` | `windows-latest` runner shells out to a cloud signing CLI (Azure Trusted Signing / SSL.com / DigiCert KeyLocker) | Future migration target |
 | `local` | Developer's Windows machine after CI uploads unsigned artifact | Fallback when no runner is available |
 
-The `gulp/build-config` task and `electron-builder.yml`'s `win.sign` hook both honor `signing.windows.strategy` so the same code path drives all three. Provider modules live in `src/lib/sign-providers/{ev,azure,sslcom,digicert}.js` (Pass 3).
+The `gulp/build-config` task and `electron-builder.yml`'s `win.sign` hook both honor `targets.win.signing.strategy` so the same code path drives all three. Provider modules live in `src/lib/sign-providers/{ev,azure,sslcom,digicert}.js` (Pass 3).
 
 ## GitHub Actions
 

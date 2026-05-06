@@ -55,7 +55,7 @@ const storage = {
       return;
     }
 
-    // Build the store. Filename is `config` by default (electron-store appends .json).
+    // Build the store. Filename is `em-storage.json` (electron-store appends .json).
     // Production name is read from electron's app.name (set automatically from package.productName).
     const projectName = manager?.config?.app?.productName || electron.app?.getName?.() || 'electron-manager-app';
 

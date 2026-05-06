@@ -30,8 +30,10 @@ module.exports = function buildConfig(done) {
     const config      = Manager.getConfig() || {};
     const startupMode = config?.startup?.mode || 'normal';
 
-    // 1. Generate entitlements.mac.plist into dist/build/.
-    const entitlementsPath = writeMacEntitlements(distRoot, config?.entitlements?.mac);
+    // 1. Generate entitlements.mac.plist into dist/build/. Consumer overrides live at
+    // `targets.mac.entitlements` (an object map of plist key → value, with `null` to
+    // remove an EM default). Top-level `entitlements.mac` is no longer read.
+    const entitlementsPath = writeMacEntitlements(distRoot, config?.targets?.mac?.entitlements);
     logger.log(`wrote ${entitlementsPath}`);
 
     // 2. Resolve + copy icons (3-tier waterfall) into dist/build/icons/.
@@ -95,9 +97,36 @@ module.exports = function buildConfig(done) {
   }).then(() => done(), done);
 };
 
+// Generic-category → per-platform mapping. Consumer sets `app.category` to one of these
+// keys; EM emits the corresponding mac UTI string and Linux freedesktop category.
+//
+// macOS: https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/LaunchServicesKeys.html#//apple_ref/doc/uid/TP40009250-SW8
+// Linux: https://specifications.freedesktop.org/menu-spec/latest/apa.html
+const CATEGORY_MAP = {
+  'productivity':    { mac: 'public.app-category.productivity',        linux: 'Utility' },
+  'developer-tools': { mac: 'public.app-category.developer-tools',     linux: 'Development' },
+  'utilities':       { mac: 'public.app-category.utilities',           linux: 'Utility' },
+  'media':           { mac: 'public.app-category.entertainment',       linux: 'AudioVideo' },
+  'social':          { mac: 'public.app-category.social-networking',   linux: 'Network' },
+  'network':         { mac: 'public.app-category.business',            linux: 'Network' },
+};
+
+function resolveCategory(category) {
+  return CATEGORY_MAP[category] || CATEGORY_MAP.productivity;
+}
+
+// Substitute the {YEAR} token in a copyright string with the current year. Idempotent
+// when no token is present. Called at YAML generation time so the year stays current
+// across releases without consumers ever editing config.
+function expandYear(str) {
+  if (typeof str !== 'string') return str;
+  return str.replace(/\{YEAR\}/g, String(new Date().getFullYear()));
+}
+
 // EM's canonical electron-builder config. Driven by the consumer's electron-manager.json
-// where it makes sense (appId, productName, copyright); everything else (signing, target
-// archs, file globs) is EM's opinionated default.
+// where it makes sense (appId, productName, copyright, category, languages, target archs,
+// installer flags); everything else (target list, file globs, signing) is EM's opinionated
+// default.
 //
 // Optional `extras` argument carries resolved icon paths + entitlements path from the
 // build-config task. When called from tests with no extras, the bare config is returned
@@ -106,7 +135,34 @@ module.exports = function buildConfig(done) {
 function baseConfig(config, extras = {}) {
   const appId       = config?.app?.appId       || 'com.itwcreativeworks.app';
   const productName = config?.app?.productName || 'App';
-  const copyright   = config?.app?.copyright   || '© ITW Creative Works';
+  const copyright   = expandYear(config?.app?.copyright || '© {YEAR}, ITW Creative Works');
+
+  // Generic category → per-platform values via lookup table. Default 'productivity' is
+  // a safe baseline that fits ~80% of business + utility apps.
+  const category   = resolveCategory(config?.app?.category || 'productivity');
+  const languages  = Array.isArray(config?.app?.languages) ? config.app.languages : ['en'];
+  const darkModeSupport = config?.app?.darkModeSupport !== false;  // default true
+
+  // Per-target config blocks. Each is fully optional — every key has a default.
+  const macTargetCfg   = config?.targets?.mac   || {};
+  const winTargetCfg   = config?.targets?.win   || {};
+  const linuxTargetCfg = config?.targets?.linux || {};
+
+  const macArch   = Array.isArray(macTargetCfg.arch)   && macTargetCfg.arch.length   ? macTargetCfg.arch   : ['universal'];
+  const winArch   = Array.isArray(winTargetCfg.arch)   && winTargetCfg.arch.length   ? winTargetCfg.arch   : ['x64', 'ia32'];
+  const linuxArch = Array.isArray(linuxTargetCfg.arch) && linuxTargetCfg.arch.length ? linuxTargetCfg.arch : ['x64'];
+
+  // NSIS installer UX. Defaults match Slack/Discord-style "no friction" install:
+  // one-click (no wizard), shortcut everywhere, launch on finish, per-user.
+  const nsisOneClick           = winTargetCfg.oneClick !== false;
+  const nsisDesktopShortcut    = winTargetCfg.desktopShortcut !== false;
+  const nsisStartMenuShortcut  = winTargetCfg.startMenuShortcut !== false;
+  const nsisRunAfterFinish     = winTargetCfg.runAfterFinish !== false;
+  const nsisPerMachine         = winTargetCfg.perMachine === true;
+
+  // Snap publishing — opt-in via targets.linux.snap.enabled.
+  const snapCfg = linuxTargetCfg.snap || {};
+  const snapEnabled = snapCfg.enabled === true;
 
   const { entitlementsPath, icons, distRoot, projectRoot } = extras;
   // Paths in dist/electron-builder.yml must be project-relative because electron-builder
@@ -125,6 +181,15 @@ function baseConfig(config, extras = {}) {
   // targets. Replacing spaces with hyphens up front gives consistent hyphenated names
   // across mac/win/linux that match what mirror-downloads produces on download-server.
   const safeProductName = String(productName).replace(/[^A-Za-z0-9._-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+
+  // Build linux target list — `deb` + `AppImage` always; `snap` if enabled.
+  const linuxTargets = [
+    { target: 'deb',      arch: linuxArch },
+    { target: 'AppImage', arch: linuxArch },
+  ];
+  if (snapEnabled) {
+    linuxTargets.push({ target: 'snap', arch: linuxArch });
+  }
 
   const out = {
     appId,
@@ -153,14 +218,16 @@ function baseConfig(config, extras = {}) {
     asar: true,
 
     mac: {
-      category: 'public.app-category.utilities',
+      category:          category.mac,
+      electronLanguages: languages,
+      darkModeSupport:   darkModeSupport,
       // Universal binary — one .dmg + one .zip that runs on both Intel and Apple
       // Silicon. Trade-off: ~2x file size (~225MB vs ~117MB single-arch), ~2x mac
       // build time (electron-builder builds both archs then stitches them with lipo).
       // Win: one user-facing download, no "which one do I pick?" choice for end users.
       target: [
-        { target: 'dmg', arch: ['universal'] },
-        { target: 'zip', arch: ['universal'] },
+        { target: 'dmg', arch: macArch },
+        { target: 'zip', arch: macArch },
       ],
       hardenedRuntime:    true,
       gatekeeperAssess:   false,
@@ -183,28 +250,58 @@ function baseConfig(config, extras = {}) {
 
     win: {
       target: [
-        { target: 'nsis', arch: ['x64'] },
+        { target: 'nsis', arch: winArch },
       ],
       signtoolOptions: {
         signingHashAlgorithms: ['sha256'],
       },
+      legalTrademarks: copyright,
     },
 
     nsis: {
       // NSIS-Setup form. version baked in so update-server keeps unique per-release
       // filenames. download-server mirror strips the version for stable URLs.
-      artifactName: `${safeProductName}-Setup-\${version}.\${ext}`,
+      artifactName:            `${safeProductName}-Setup-\${version}.\${ext}`,
+      oneClick:                nsisOneClick,
+      perMachine:              nsisPerMachine,
+      // `createDesktopShortcut: 'always'` ensures the icon is created even when the
+      // installer detects an upgrade (electron-builder's default is 'never' on upgrade).
+      createDesktopShortcut:   nsisDesktopShortcut ? 'always' : false,
+      createStartMenuShortcut: nsisStartMenuShortcut,
+      runAfterFinish:          nsisRunAfterFinish,
+      // Standard wizard mode: let the user pick install dir; one-click skips this.
+      allowToChangeInstallationDirectory: !nsisOneClick,
     },
 
     linux: {
-      target: [
-        { target: 'deb',      arch: ['x64'] },   // Ubuntu/Debian/Mint. (i386 dropped — extinct on modern distros.)
-        { target: 'AppImage', arch: ['x64'] },   // Fedora/Arch/openSUSE — distro-agnostic.
-      ],
-      category: 'Utility',
+      target:       linuxTargets,
+      category:     category.linux,
       artifactName: `${safeProductName}-\${version}-\${arch}.\${ext}`,
     },
   };
+
+  // Snap-specific block — only emitted when enabled to keep the YAML clean.
+  if (snapEnabled) {
+    out.snap = {
+      confinement: snapCfg.confinement || 'strict',
+      grade:       snapCfg.grade       || 'stable',
+      autoStart:   snapCfg.autoStart !== false,
+      publish:     {
+        provider: 'snapStore',
+        channels: Array.isArray(snapCfg.channels) && snapCfg.channels.length ? snapCfg.channels : ['stable'],
+      },
+    };
+  }
+
+  // fileAssociations + protocols passthrough. EM-side `protocols` is ADDITIVE — the
+  // brand.id:// scheme is registered automatically (handled by lib/protocol.js at runtime
+  // and by Info.plist generation at build time elsewhere); this is for additional schemes.
+  if (Array.isArray(config?.fileAssociations) && config.fileAssociations.length > 0) {
+    out.fileAssociations = config.fileAssociations;
+  }
+  if (Array.isArray(config?.protocols) && config.protocols.length > 0) {
+    out.protocols = config.protocols;
+  }
 
   // Wire entitlements.
   if (entitlementsPath) {
@@ -236,5 +333,8 @@ function deepMerge(a, b) {
 }
 
 // Exported for tests.
-module.exports.baseConfig = baseConfig;
-module.exports.deepMerge  = deepMerge;
+module.exports.baseConfig    = baseConfig;
+module.exports.deepMerge     = deepMerge;
+module.exports.expandYear    = expandYear;
+module.exports.resolveCategory = resolveCategory;
+module.exports.CATEGORY_MAP  = CATEGORY_MAP;

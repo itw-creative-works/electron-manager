@@ -8,19 +8,19 @@ manager.initialize()
     const { logger, ipc, storage, windows, tray, menu, contextMenu, deepLink, autoUpdater, webManager, appState, sentry, startup } = manager;
 
     // ─────────────────────────────────────────────────────────────────────────────
-    // 1. Surface the main window
+    // 1. Create the main window
     // ─────────────────────────────────────────────────────────────────────────────
-    // EM doesn't auto-create any windows — your app decides when (and if) UI
-    // appears. The typical pattern: create the main window unless we're in hidden
-    // launch mode (agent / menubar apps with `startup.mode = 'hidden'`).
-    if (!startup.isLaunchHidden()) {
-      windows.create('main');
-    }
+    // Always create `main` — EM uses its presence in the registry to surface UI when
+    // the user double-clicks the dock icon (macOS) or relaunches the app (win/linux).
+    // In hidden launches (agent / menubar apps with `startup.mode = 'hidden'`, or auto-
+    // launch at login), pass `show: false` so the window is registered but invisible:
+    // tray icon shows immediately, dock icon + window appear when something explicitly
+    // calls `windows.show('main')` (or the user double-clicks the running app).
+    windows.create('main', { show: !startup.isLaunchHidden() });
 
-    // Hidden / agent apps skip the create() above and surface UI later — typically
-    // from a tray click. Example:
+    // Hidden launches surface UI on demand. Example: a tray click that shows the window:
     //
-    //   tray.update('open', { click: () => windows.create('main') });
+    //   tray.update('open', { click: () => windows.show('main') });
 
     // ─── Window create() options (all optional; defaults shown) ───────────────────
     // windows.create('main', {

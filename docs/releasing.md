@@ -127,7 +127,7 @@ CI handles the cross-platform matrix. The default workflow (`.github/workflows/b
 ```
 build (matrix: macos-latest, windows-latest, ubuntu-latest)
   └─ npm ci → npx mgr setup → platform-specific signing
-windows-sign (only if signing.windows.strategy != "local")
+windows-sign (only if targets.win.signing.strategy != "local")
   └─ runs on a self-hosted runner with EV USB token (or hosted windows-latest for cloud strategy)
   └─ signs + uploads release artifacts
 ```
@@ -149,7 +149,7 @@ The workflow's `softprops/action-gh-release@v2` step uploads to the matching tag
 
 ## Windows signing strategies
 
-Set `signing.windows.strategy` in `.env` (and as a GitHub repo variable for CI):
+Set `targets.win.signing.strategy` in `config/electron-manager.json`:
 
 | Strategy | What runs | When to use |
 |---|---|---|

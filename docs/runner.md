@@ -111,9 +111,44 @@ If your token only has `repo` scope, runner registration will fail per-org with 
 npx mgr runner status         # show service state, registered orgs, last poll
 npx mgr runner start          # start services if stopped
 npx mgr runner stop           # stop services
+npx mgr runner monitor        # tail the live signing event log (see below)
 npx mgr runner self-update    # force an immediate npm i -g electron-manager@latest
 npx mgr runner uninstall      # full removal: deregister from every org, delete services
 ```
+
+## Live signing monitor
+
+`npx mgr runner monitor` pretty-prints a structured signing event log in real time so you can watch jobs flow through the signer without remoting into the GH Actions UI. Run it in a separate PowerShell / Windows Terminal tab on the signing box while a release is in flight.
+
+```powershell
+npx mgr runner monitor
+```
+
+```
+Watching: C:\actions-runners\em-signing.log
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2026-05-06 12:34:56.789] JOB START run=12345 workflow=Build & Release
+[2026-05-06 12:34:57.001] → sign MyApp-Setup-1.0.0.exe (79.4MB) mode=thumbprint
+[2026-05-06 12:35:00.512] ✓ signed MyApp-Setup-1.0.0.exe (3.5s)
+[2026-05-06 12:35:01.000] JOB END OK (4.2s)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+Events captured per job:
+- `JOB START` — workflow run id + workspace
+- `→ sign <file>` — signtool invocation begins (file size, thumbprint vs pfx mode)
+- `✓ signed <file>` / `✗ FAILED <file>` — signtool outcome + duration; failures show the underlying error
+- `JOB END OK` / `FAILED` — overall result + total duration
+
+The event log is a JSONL file at `<runner-workspace>/em-signing.log` (resolved from `RUNNER_WORKSPACE` / `RUNNER_TOOLSDIRECTORY`, falling back to cwd). Override path with `EM_SIGN_LOG=<path>`. Monitor flags:
+
+```powershell
+npx mgr runner monitor --follow-only      # only show NEW events (skip replay of pre-existing log)
+npx mgr runner monitor --file <path>      # watch a specific log file
+```
+
+The log persists across job runs and is the system of record for signing — so even after the GH Actions UI rolls off (90 days), you have a local trail.
 
 ## On-demand signing (the most useful command for debugging)
 
@@ -161,7 +196,7 @@ Standard mode. Used by the GH Actions workflow.
 | `WIN_CSC_KEY_PASSWORD` | Token password (cached in SafeNet client for unattended signing) |
 | `WIN_TIMESTAMP_URL` | Optional — defaults to `http://timestamp.sectigo.com` |
 | `SIGNTOOL_PATH` | Optional — explicit path to signtool.exe; defaults to `signtool` on PATH (requires Windows SDK or VS Build Tools) |
-| `signing.windows.strategy` | `self-hosted` (default) / `cloud` / `local` |
+| `targets.win.signing.strategy` (config) | `self-hosted` (default) / `cloud` / `local` |
 
 ## Adding a new org
 

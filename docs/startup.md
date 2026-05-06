@@ -24,13 +24,13 @@ The default behavior — `mode: 'normal'` + `openAtLogin: { enabled: true, mode:
 
 ### `normal` (default)
 
-Standard app behavior. Your `main.js` calls `manager.windows.create('main')` from inside `manager.initialize().then(...)` — typically gated on `if (!startup.isLaunchHidden())` so the same `main.js` works for both modes. Dock visible (macOS), taskbar entry (win/linux).
+Standard app behavior. Your `main.js` calls `windows.create('main', { show: !startup.isLaunchHidden() })` from inside `manager.initialize().then(...)`. In `normal` mode, `show` is `true` so the window appears immediately. Dock visible (macOS), taskbar entry (win/linux).
 
 ### `hidden`
 
 App launches **completely invisible**: no dock icon, no Cmd+Tab presence, no taskbar entry. Tray + notifications + networking + IPC + auto-update all still work — only the visible UI is suppressed. Production builds inject `LSUIElement: true` into `Info.plist` (via `gulp/build-config`) so macOS treats the process as a background agent from launch — **zero dock bounce**.
 
-When the consumer surfaces UI later via `manager.windows.create('main')` (from a tray click, deep-link, IPC event, or anything else), EM auto-runs `app.dock.show()` and the dock icon appears alongside the window. Reverse with `app.dock.hide()` to go back to invisible.
+The `main` window is still created (just with `show: false`) so it sits in EM's window registry. When the user double-clicks the running app's icon, EM's `app.on('activate')` (macOS) / `app.on('second-instance')` (win/linux) handler finds `main` in the registry and calls `windows.show('main')` — which auto-runs `app.dock.show()` so the dock icon appears alongside the window. Same thing happens when the consumer manually surfaces UI from a tray click / deep-link / IPC event via `windows.show('main')`.
 
 Use this for: menubar apps, agent apps (clipboard managers, time trackers, system monitors), apps that should be invisible at boot but available on demand.
 
@@ -57,13 +57,17 @@ manager.startup.isOpenAtLogin()            // read live OS state
 
 ```js
 manager.initialize().then(() => {
-  // Surface the main window unless we're in hidden launch mode.
-  if (!manager.startup.isLaunchHidden()) {
-    manager.windows.create('main');
-  }
-  // Hidden mode? UI surfaces from a tray click / deep-link / IPC event later.
+  // Always create the main window. In hidden launches, `show: false` keeps it
+  // invisible until something explicitly calls windows.show('main') — but it's
+  // in the registry, so EM's activate/second-instance handlers can find and
+  // surface it when the user double-clicks the running app.
+  manager.windows.create('main', {
+    show: !manager.startup.isLaunchHidden(),
+  });
 });
 ```
+
+Don't conditionally skip `create()` for hidden launches — without `main` in the registry, the dock-click / re-launch handlers have nothing to surface, and the user double-clicking the running app appears to do nothing.
 
 ## Boot order
 
@@ -80,9 +84,44 @@ EM handles this at build time:
 2. If `startup.mode === 'hidden'`, it injects `mac.extendInfo.LSUIElement: true` into the materialized `dist/electron-builder.yml`.
 3. `electron-builder` packages the app with that key in the final `Info.plist`.
 
-At runtime, when the consumer first calls `manager.windows.create()` or `manager.windows.show()`, EM calls `app.dock.show()` so the dock icon appears alongside the window. Reverses cleanly via `app.dock.hide()` if you want to go back to invisible.
+At runtime, when the consumer first calls `manager.windows.show()` (or the `windows.create()` call resolves with `show: true`), EM calls `app.dock.show()` so the dock icon appears alongside the window. Reverses cleanly via `app.dock.hide()` if you want to go back to invisible.
 
 The injection is YAML-text-level (preserves comments, idempotent, merges with existing `extendInfo`). See `src/gulp/tasks/build-config.js`.
+
+## Re-surfacing on user re-launch
+
+When the user double-clicks a running hidden-mode app (or clicks its dock icon on macOS), EM transparently surfaces the main window — no consumer wiring needed. Mechanisms:
+
+- **macOS**: `window-manager.initialize()` registers `app.on('activate')` which calls `windows.show('main')` if `main` is in the registry.
+- **Windows / Linux**: `deep-link.initialize()` registers `app.on('second-instance')` which does the same. (The OS spawns a duplicate process, the single-instance lock kills it, and forwards its argv to the original instance.)
+
+Both handlers are no-ops if `main` isn't in the registry, so consumers who genuinely never want a window can omit `windows.create('main', ...)` entirely. Otherwise, with the canonical pattern (`windows.create('main', { show: !isLaunchHidden() })`), hidden-mode apps come back to life on a second click — like CleanMyMac, Rectangle, etc.
+
+## Testing the login-launch path locally
+
+Pass `--em-launched-at-login` as a command-line arg when launching the .app; EM treats it identically to a real OS-driven login launch (`startup.wasLaunchedAtLogin()` returns `true`, with `via:argv-flag` in the boot summary log). Useful for testing hidden-mode behavior without configuring login items + rebooting.
+
+The easiest way is `mgr launch`, which auto-strips `ELECTRON_RUN_AS_NODE` and uses `open -n` under the hood:
+
+```bash
+# Auto-discover the most recent `mgr package:quick` build:
+npx mgr launch --args="--em-launched-at-login"
+
+# Or pass an explicit path:
+npx mgr launch /Applications/MyApp.app --args="--em-launched-at-login"
+```
+
+If you'd rather call `open` directly, remember to strip `ELECTRON_RUN_AS_NODE` first (the variable leaks into shells from common host processes like VS Code's Claude Code extension and silently breaks Electron):
+
+```bash
+unset ELECTRON_RUN_AS_NODE
+open -n /path/to/MyApp.app --args --em-launched-at-login
+
+# Windows / Linux — direct binary launch
+"/path/to/MyApp.exe" --em-launched-at-login
+```
+
+The boot summary log written by the `startup` lib distinguishes a real login launch (`via:macos-wasOpenedAtLogin`) from a flag-based simulation (`via:argv-flag`).
 
 ## Pairing with tray/window patterns
 
@@ -95,7 +134,7 @@ Hidden / agent apps usually want:
 And in `src/integrations/tray/index.js`:
 
 ```js
-tray.update('open', { click: () => manager.windows.create('main') });
+tray.update('open', { click: () => manager.windows.show('main') });
 ```
 
-The window doesn't exist at launch (no dock icon, no UI). When the user clicks the tray's "Open" item, `windows.create('main')` runs, EM calls `app.dock.show()`, and the user sees both the dock icon and the window appear together.
+The window is created at boot but invisible. When the user clicks the tray's "Open" item (or double-clicks the app icon), `windows.show('main')` runs, EM calls `app.dock.show()`, and the user sees both the dock icon and the window appear together.

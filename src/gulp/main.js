@@ -1,3 +1,7 @@
+// Strip ELECTRON_RUN_AS_NODE — see bin/electron-manager for the full story. Belt-and-suspenders
+// at the gulp boundary too because gulp can be invoked outside of mgr (e.g. `npx gulp build`).
+delete process.env.ELECTRON_RUN_AS_NODE;
+
 // Libraries
 const Manager = new (require('../build.js'));
 const logger = Manager.logger('main');

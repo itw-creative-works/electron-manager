@@ -56,9 +56,9 @@ module.exports = function audit(done) {
   if (config?.startup?.mode && !VALID_STARTUP_MODES.includes(config.startup.mode)) {
     errors.push(`config.startup.mode "${config.startup.mode}" is invalid (allowed: ${VALID_STARTUP_MODES.join(', ')})`);
   }
-  const winStrat = config?.signing?.windows?.strategy;
+  const winStrat = config?.targets?.win?.signing?.strategy;
   if (winStrat && !VALID_WIN_STRATEGIES.includes(winStrat)) {
-    errors.push(`config.signing.windows.strategy "${winStrat}" is invalid (allowed: ${VALID_WIN_STRATEGIES.join(', ')})`);
+    errors.push(`config.targets.win.signing.strategy "${winStrat}" is invalid (allowed: ${VALID_WIN_STRATEGIES.join(', ')})`);
   }
   // Deep-link scheme is auto-derived from brand.id. Validate brand.id matches the URL-scheme grammar.
   const brandId = config?.brand?.id;
@@ -78,6 +78,27 @@ module.exports = function audit(done) {
   // 5. Soft warnings — not fatal but worth surfacing.
   if (config?.brand?.id === 'myapp' || config?.brand?.name === 'MyApp') {
     warnings.push('config still uses the scaffold defaults ("myapp" / "MyApp") — set brand.id and brand.name before publishing.');
+  }
+
+  // app.category — validate against the known-mapped values; warn (don't fail) on
+  // unknown so consumers using a stable string can adopt it later without breaking.
+  const VALID_CATEGORIES = ['productivity', 'developer-tools', 'utilities', 'media', 'social', 'network'];
+  const cat = config?.app?.category;
+  if (cat && !VALID_CATEGORIES.includes(cat)) {
+    warnings.push(`config.app.category "${cat}" is not in the known list (${VALID_CATEGORIES.join(', ')}) — falling back to "productivity" defaults. Set targets.mac.category / targets.linux.category explicitly to override per-platform.`);
+  }
+
+  // MAS distribution — currently STUBBED. Surface a warning if a consumer tries to
+  // turn it on so they know it's not yet wired up.
+  if (config?.targets?.mac?.mas?.enabled === true) {
+    warnings.push('targets.mac.mas.enabled is true but Mac App Store distribution is not yet implemented in EM (the config keys are reserved for a future release). The standard mac DMG/zip targets will still build normally — the MAS variant is silently skipped.');
+  }
+
+  // Snap publishing — warn if enabled but the SNAPCRAFT_STORE_CREDENTIALS secret
+  // hasn't been set up. The build will still succeed locally, but `electron-builder publish`
+  // will fail at upload time without that credential. Catch it early.
+  if (config?.targets?.linux?.snap?.enabled === true && Manager.isPublishMode() && !process.env.SNAPCRAFT_STORE_CREDENTIALS) {
+    warnings.push('targets.linux.snap.enabled is true but SNAPCRAFT_STORE_CREDENTIALS is not set in env — snap publish will fail. Run `snapcraft export-login -` locally to mint, paste into .env, then `mgr push-secrets`.');
   }
 
   // Report.

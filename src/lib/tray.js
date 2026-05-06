@@ -85,7 +85,10 @@ const tray = {
     }
 
     // Conventional path. No config knob — disable() at runtime if you don't want a tray.
-    const absPath = path.join(process.cwd(), 'src', 'integrations', 'tray', 'index.js');
+    // appRoot resolves to project dir in dev and asar mount in packaged apps — both contain
+    // src/integrations/* (electron-builder's `files: ['**/*']` packs the consumer's src/
+    // into the asar), so the existsSync + require below works in both modes.
+    const absPath = path.join(require('../utils/app-root.js')(), 'src', 'integrations', 'tray', 'index.js');
 
     if (fs.existsSync(absPath)) {
       const loadConsumerFile = require('../utils/load-consumer-file.js');
@@ -145,7 +148,7 @@ const tray = {
     });
 
     return {
-      icon:       (p) => { tray._icon = path.isAbsolute(p) ? p : path.join(process.cwd(), p); },
+      icon:       (p) => { tray._icon = path.isAbsolute(p) ? p : path.join(require('../utils/app-root.js')(), p); },
       tooltip:    (t) => { tray._tooltip = t; },
       item:       (descriptor) => { tray._items.push(descriptor); },
       separator:  () => { tray._items.push({ type: 'separator' }); },
@@ -174,7 +177,7 @@ const tray = {
     const file = platform === 'macos' ? 'trayTemplate.png' : 'tray.png';
     const fallbackFile = 'icon.png'; // tray → app icon if absent
 
-    const projectRoot = process.cwd();
+    const projectRoot = require('../utils/app-root.js')();
     const m = tray._manager;
 
     // 1. Consumer config explicit path.
@@ -351,7 +354,7 @@ const tray = {
 
   // Direct mutators — handy for incremental updates.
   setIcon(p) {
-    tray._icon = path.isAbsolute(p) ? p : path.join(process.cwd(), p);
+    tray._icon = path.isAbsolute(p) ? p : path.join(require('../utils/app-root.js')(), p);
     tray._render();
   },
   setTooltip(t) {

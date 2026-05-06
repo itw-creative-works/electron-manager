@@ -194,9 +194,9 @@ function checkWindows(issues, strategy, config) {
   }
 
   if (strategy === 'cloud') {
-    const provider = process.env.WIN_CLOUD_SIGN_PROVIDER || config?.signing?.windows?.cloud?.provider;
+    const provider = config?.targets?.win?.signing?.cloud?.provider;
     if (!provider) {
-      issues.push({ severity: 'error', message: 'Cloud signing strategy selected but no provider set (config.signing.windows.cloud.provider or WIN_CLOUD_SIGN_PROVIDER).' });
+      issues.push({ severity: 'error', message: 'Cloud signing strategy selected but no provider set (config.targets.win.signing.cloud.provider).' });
       return;
     }
     const required = {

@@ -182,14 +182,14 @@ module.exports = {
       name: 'fails on invalid Windows signing strategy',
       run: async (ctx) => {
         const tmp = stageConsumer({
-          brand: { id: 'testapp' },
-          app:   { appId: 'com.test.app', productName: 'TestApp' },
-          signing: { windows: { strategy: 'banana' } },
+          brand:   { id: 'testapp', name: 'TestApp' },
+          app:     { appId: 'com.test.app', productName: 'TestApp' },
+          targets: { win: { signing: { strategy: 'banana' } } },
         });
         try {
           const err = await runAudit(tmp);
           ctx.expect(err).toBeDefined();
-          ctx.expect(err.message).toMatch(/signing\.windows\.strategy "banana" is invalid/);
+          ctx.expect(err.message).toMatch(/targets\.win\.signing\.strategy "banana" is invalid/);
         } finally {
           fs.rmSync(tmp, { recursive: true, force: true });
         }

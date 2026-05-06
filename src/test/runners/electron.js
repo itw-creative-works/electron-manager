@@ -32,13 +32,13 @@ function runElectronTests({ harnessEntry, suiteFiles, rendererSuiteFiles, filter
       args.push('--filter', filter);
     }
 
-    // Strip ELECTRON_RUN_AS_NODE — if set, Electron behaves as Node and our main-process tests can't run.
+    // ELECTRON_RUN_AS_NODE is already stripped by bin/mgr at the CLI boundary, so the child
+    // env is clean — no extra delete here.
     const childEnv = Object.assign({}, process.env, {
       EM_TEST_MODE:    '1',
       ELECTRON_NO_ATTACH_CONSOLE: '1',
       NODE_OPTIONS:    '',
     });
-    delete childEnv.ELECTRON_RUN_AS_NODE;
 
     const child = spawn(electronBin, args, {
       cwd: projectRoot,

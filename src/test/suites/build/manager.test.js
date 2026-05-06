@@ -97,13 +97,13 @@ module.exports = {
       },
     },
     {
-      name: 'getWindowsSignStrategy reads config.signing.windows.strategy',
+      name: 'getWindowsSignStrategy reads config.targets.win.signing.strategy',
       run: (ctx) => {
         const fs = require('fs'); const os = require('os'); const path = require('path');
         const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'em-strategy-'));
         fs.mkdirSync(path.join(tmp, 'config'), { recursive: true });
         fs.writeFileSync(path.join(tmp, 'config', 'electron-manager.json'),
-          `{ signing: { windows: { strategy: 'cloud' } } }`);
+          `{ targets: { win: { signing: { strategy: 'cloud' } } } }`);
         const orig = process.cwd();
         try {
           process.chdir(tmp);

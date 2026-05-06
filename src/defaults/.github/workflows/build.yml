@@ -148,8 +148,25 @@ jobs:
           APPLE_TEAM_ID:    ${{ secrets.APPLE_TEAM_ID }}
         run: npm run release:local
 
+      # Linux — install snapcraft only when the consumer's config opts into snap
+      # publishing (`targets.linux.snap.enabled === true`). The action installs
+      # snapcraft as a snap and authenticates against the Snap Store via the
+      # SNAPCRAFT_STORE_CREDENTIALS env var below. Skipped otherwise to keep
+      # Linux-builds-without-snap fast.
+      - name: Install Snapcraft (Linux, when snap enabled)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          if node -e 'const c = require("./node_modules/json5").parse(require("fs").readFileSync("config/electron-manager.json", "utf8")); process.exit(c?.targets?.linux?.snap?.enabled === true ? 0 : 1);'; then
+            sudo snap install snapcraft --classic
+            echo "Snapcraft installed."
+          else
+            echo "targets.linux.snap.enabled !== true — skipping snapcraft install."
+          fi
+
       # Linux — no signing
       - if: matrix.os == 'ubuntu-latest'
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
         run: npm run release:local
 
       # Windows — package (build + electron-builder package) unsigned. We do NOT publish
@@ -191,14 +208,14 @@ jobs:
       - run: npm ci
       - id: resolve
         run: |
-          STRATEGY=$(node -e "const fs=require('fs'),JSON5=require('json5');const c=JSON5.parse(fs.readFileSync('config/electron-manager.json','utf8'));console.log(c?.signing?.windows?.strategy || 'self-hosted');")
+          STRATEGY=$(node -e "const fs=require('fs'),JSON5=require('json5');const c=JSON5.parse(fs.readFileSync('config/electron-manager.json','utf8'));console.log(c?.targets?.win?.signing?.strategy || 'self-hosted');")
           echo "strategy=$STRATEGY" >> "$GITHUB_OUTPUT"
           echo "Resolved Windows signing strategy: $STRATEGY"
 
   windows-sign:
     name: Sign Windows
     needs: [setup, build, windows-strategy]
-    # Strategy comes from config.signing.windows.strategy (read by windows-strategy job).
+    # Strategy comes from config.targets.win.signing.strategy (read by windows-strategy job).
     #   self-hosted (default) — runs on a self-hosted runner with EV USB token attached
     #   cloud                 — runs on hosted windows-latest, calls cloud signing provider
     #   local                 — skip this job; sign locally via `npx mgr sign-windows`

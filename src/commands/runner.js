@@ -64,8 +64,9 @@ module.exports = async function (options) {
     case 'uninstall':       return uninstall(options);
     case 'set-credentials': return setCredentials(options);
     case 'self-update':     return selfUpdate(options);
+    case 'monitor':         return monitor(options);
     default:
-      logger.error(`Unknown subcommand: "${sub}". Try one of: install, register-org, start, stop, status, uninstall, self-update.`);
+      logger.error(`Unknown subcommand: "${sub}". Try one of: install, register-org, start, stop, status, uninstall, self-update, monitor.`);
       throw new Error(`Unknown runner subcommand: ${sub}`);
   }
 };
@@ -1076,6 +1077,139 @@ function saveConfig(data) {
   const file = path.join(RUNNER_HOME, 'config.json');
   const cur  = readConfig();
   jetpack.write(file, { ...cur, ...data });
+}
+
+// ─── monitor ────────────────────────────────────────────────────────────────────
+//
+// `npx mgr runner monitor` — pretty-prints the JSONL signing event log in real time.
+//
+// Reads the same path `sign-windows` writes to:
+//   1. EM_SIGN_LOG env var (override) — wins if set
+//   2. <RUNNER_TOOLSDIRECTORY>/em-signing.log — when on the GH Actions runner box
+//   3. <process.cwd()>/em-signing.log — fallback
+//
+// Designed to run from a regular PowerShell / cmd / Windows Terminal session on the
+// signing box. Reads the file, prints existing events first (so you see context if
+// signing already started), then watches for new lines via fs.watchFile + offset
+// tracking. No fancy deps.
+async function monitor(options) {
+  options = options || {};
+  const signEvents = require('../lib/sign-helpers/sign-events.js');
+  const file = options.file || signEvents.getLogPath();
+  const followOnly = !!options['follow-only'];
+
+  logger.log(`Watching: ${file}`);
+  if (!fs.existsSync(file)) {
+    logger.log('(file does not exist yet — waiting for first sign event...)');
+  }
+
+  // Track byte offset so we only print new lines on each poll. Initialize to either
+  // 0 (replay everything) or the file's current size (--follow-only — only show new
+  // events).
+  let pos = followOnly && fs.existsSync(file)
+    ? fs.statSync(file).size
+    : 0;
+
+  let inFlight = false;
+  let buffer = '';
+
+  function pump() {
+    if (inFlight) return;
+    if (!fs.existsSync(file)) return;
+    inFlight = true;
+    const stream = fs.createReadStream(file, { start: pos });
+    stream.on('data', (chunk) => {
+      buffer += chunk.toString('utf8');
+      let nl;
+      while ((nl = buffer.indexOf('\n')) !== -1) {
+        const line = buffer.slice(0, nl);
+        buffer = buffer.slice(nl + 1);
+        if (line.trim()) renderLine(line);
+        pos += Buffer.byteLength(line, 'utf8') + 1;
+      }
+    });
+    stream.on('end', () => { inFlight = false; });
+    stream.on('error', (e) => {
+      inFlight = false;
+      logger.warn(`monitor read failed: ${e.message}`);
+    });
+  }
+
+  pump();
+
+  // Watch for size changes. fs.watchFile polls (default 5s) which is fine here —
+  // we don't need sub-second latency on a sign-monitor.
+  fs.watchFile(file, { interval: 500 }, (curr, prev) => {
+    // File rotated / truncated — reset.
+    if (curr.size < pos) {
+      pos = 0;
+      buffer = '';
+      logger.log('(log truncated — replaying from start)');
+    }
+    if (curr.size > pos) pump();
+  });
+
+  // Keep alive forever.
+  await new Promise(() => {});
+}
+
+function renderLine(jsonLine) {
+  let evt;
+  try {
+    evt = JSON.parse(jsonLine);
+  } catch (_) {
+    process.stdout.write(`[??] ${jsonLine}\n`);
+    return;
+  }
+
+  const ts = (evt.ts || '').replace('T', ' ').replace('Z', '');
+  const dur = typeof evt.duration_ms === 'number' ? ` (${formatDuration(evt.duration_ms)})` : '';
+  const fmt = logger.format || {};
+  const c = (col, str) => (fmt[col] ? fmt[col](str) : str);
+
+  switch (evt.event) {
+    case 'job-start':
+      process.stdout.write(`\n${c('cyan', '━'.repeat(60))}\n`);
+      process.stdout.write(`${c('cyan', `[${ts}] JOB START`)}`);
+      if (evt.github_run_id)   process.stdout.write(c('gray', ` run=${evt.github_run_id}`));
+      if (evt.github_workflow) process.stdout.write(c('gray', ` workflow=${evt.github_workflow}`));
+      if (evt.runner_workspace) process.stdout.write(c('gray', ` workspace=${evt.runner_workspace}`));
+      process.stdout.write('\n');
+      break;
+    case 'job-end':
+      const ok = evt.ok ? c('green', 'OK') : c('red', 'FAILED');
+      process.stdout.write(`${c('cyan', `[${ts}] JOB END ${ok}${dur}`)}\n`);
+      if (evt.error) process.stdout.write(`  ${c('red', evt.error)}\n`);
+      process.stdout.write(`${c('cyan', '━'.repeat(60))}\n`);
+      break;
+    case 'sign-start':
+      process.stdout.write(`[${ts}] ${c('yellow', '→')} sign ${c('white', evt.file)}`);
+      if (typeof evt.bytes === 'number') process.stdout.write(c('gray', ` (${formatBytes(evt.bytes)})`));
+      process.stdout.write(c('gray', ` mode=${evt.mode}`));
+      process.stdout.write('\n');
+      break;
+    case 'sign-done':
+      process.stdout.write(`[${ts}] ${c('green', '✓')} signed ${c('white', evt.file)}${c('gray', dur)}\n`);
+      break;
+    case 'sign-fail':
+      process.stdout.write(`[${ts}] ${c('red', '✗')} FAILED ${c('white', evt.file)} ${c('gray', `(phase:${evt.phase}${dur})`)}\n`);
+      if (evt.error) process.stdout.write(`  ${c('red', evt.error)}\n`);
+      break;
+    default:
+      process.stdout.write(`[${ts}] ${evt.event} ${JSON.stringify(evt)}\n`);
+  }
+}
+
+function formatBytes(n) {
+  if (n < 1024) return `${n}B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`;
+  return `${(n / 1024 / 1024).toFixed(1)}MB`;
+}
+
+function formatDuration(ms) {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${Math.floor(ms / 60000)}m${Math.floor((ms % 60000) / 1000)}s`;
 }
 
 // Exports for testing.

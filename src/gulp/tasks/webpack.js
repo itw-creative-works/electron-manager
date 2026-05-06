@@ -110,13 +110,10 @@ function makeMainConfig(buildJson, isProd) {
     },
     externals: {
       electron: 'commonjs2 electron',
-      // Pure-Node libs that have ESM/CJS interop quirks under webpack — leave them as runtime
-      // require()s so Node resolves them natively (same as `electron` itself).
-      json5:           'commonjs2 json5',
       // electron-store is ESM-only and loaded via dynamic import via the path resolved by Node's
       // require.resolve. Bundling it makes the resolve return a webpack contextual lookup, which
       // can't find the module at runtime. Stay external so Node resolves it from EM's installed
-      // node_modules location.
+      // node_modules location (consumer must `npm i electron-store` — it's listed as a peer dep).
       'electron-store': 'commonjs2 electron-store',
       // Native modules — consumer can extend via config.em.webpack.externals
       ...resolveNativeExternals(),

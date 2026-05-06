@@ -5,7 +5,7 @@ Cross-platform code signing reference. Covers macOS (sign + notarize), Windows (
 ## tl;dr
 
 - **macOS production**: Developer ID Application cert + notarization API key. Files in `build/certs/`. Env vars point at them.
-- **Windows production**: EV USB token (self-hosted runner now) or cloud signing (future, pluggable via `signing.windows.strategy`).
+- **Windows production**: EV USB token (self-hosted runner now) or cloud signing (future, pluggable via `targets.win.signing.strategy`).
 - **Linux**: No signing for AppImage/deb. Snap/Flatpak have their own pipelines.
 
 ## Where files live
@@ -108,11 +108,11 @@ Buy an EV code-signing cert from Sectigo, DigiCert, SSL.com, etc. Get a physical
 
 ### Cloud signing (future migration)
 
-Once the framework's cloud strategy is finalized, set:
+Once the framework's cloud strategy is finalized, set the provider in `config/electron-manager.json`:
 ```
-# config: { signing: { windows: { strategy: 'cloud' } } }
-WIN_CLOUD_SIGN_PROVIDER=azure         # or sslcom | digicert
-# Provider-specific creds in Custom Values section of .env
+# config: { targets: { win: { signing: { strategy: 'cloud', cloud: { provider: 'azure' } } } } }
+# provider: 'azure' | 'sslcom' | 'digicert'
+# Provider-specific creds (secrets) live in .env Custom Values section.
 ```
 
 Provider modules will live in `src/lib/sign-providers/{azure,sslcom,digicert}.js` (Pass 3 work).
@@ -213,7 +213,7 @@ The workflow base64-decodes secrets into temp files inside `build/certs/` at job
 
 ### Windows: "SignTool Error: No certificates were found"
 - Token unplugged or middleware not running.
-- For cloud: verify `WIN_CLOUD_SIGN_PROVIDER` matches the provider whose creds are in `.env`.
+- For cloud: verify `targets.win.signing.cloud.provider` in `config/electron-manager.json` matches the provider whose creds are in `.env`.
 
 ## What lives in `build/`
 

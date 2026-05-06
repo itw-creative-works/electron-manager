@@ -1,6 +1,6 @@
 // Strategy-aware Windows code signer.
 //
-// Reads strategy from config.signing.windows.strategy:
+// Reads strategy from config.targets.win.signing.strategy:
 //   self-hosted — sign with signtool against an EV USB token (typically on a self-hosted runner)
 //   cloud       — shell out to a cloud signing provider's CLI (Azure / SSL.com / DigiCert)
 //   local       — no-op (developer signs manually on their own Windows box)
@@ -25,10 +25,31 @@ const Manager = new (require('../build.js'));
 const logger = Manager.logger('sign-windows');
 const { startAutoUnlock } = require('../lib/sign-helpers/auto-unlock.js');
 const { writeUpdateInfo } = require('../lib/sign-helpers/update-info.js');
+const signEvents = require('../lib/sign-helpers/sign-events.js');
 
 module.exports = async function (options) {
   options = options || {};
 
+  const jobStart = Date.now();
+  signEvents.emit('job-start', {
+    options:        Object.fromEntries(Object.entries(options).filter(([k]) => k !== '_')),
+    runner_workspace: process.env.RUNNER_WORKSPACE || null,
+    github_run_id:    process.env.GITHUB_RUN_ID || null,
+    github_workflow:  process.env.GITHUB_WORKFLOW || null,
+  });
+  logger.log(`Signing event log: ${signEvents.getLogPath()}`);
+
+  try {
+    const result = await runSignCommand(options);
+    signEvents.emit('job-end', { ok: true, duration_ms: Date.now() - jobStart });
+    return result;
+  } catch (e) {
+    signEvents.emit('job-end', { ok: false, duration_ms: Date.now() - jobStart, error: e?.message || String(e) });
+    throw e;
+  }
+};
+
+async function runSignCommand(options) {
   // Smoke test mode: create a 1-byte .exe in a temp dir, sign it, verify it, clean up.
   // This is the fastest possible end-to-end check that the EV token, drivers, signtool,
   // and password cache are all working — no EM build required.
@@ -79,16 +100,16 @@ module.exports = async function (options) {
   }
 
   if (strategy === 'cloud') {
-    const provider = process.env.WIN_CLOUD_SIGN_PROVIDER || config?.signing?.windows?.cloud?.provider;
+    const provider = config?.targets?.win?.signing?.cloud?.provider;
     if (!provider) {
-      throw new Error('strategy=cloud but no provider set (WIN_CLOUD_SIGN_PROVIDER or config.signing.windows.cloud.provider).');
+      throw new Error('strategy=cloud but no provider set (config.targets.win.signing.cloud.provider).');
     }
     await signWithCloudProvider(provider, targets, inDir, outDir);
     return;
   }
 
   throw new Error(`Unknown Windows signing strategy: ${strategy}`);
-};
+}
 
 // signtool path (Windows SDK). Falls back to plain `signtool` on PATH.
 function getSigntoolPath() {
@@ -154,17 +175,48 @@ async function signWithSigntool(targets, inDir, outDir) {
 
     logger.log(`Signing ${path.relative(projectRoot, outPath)}${useThumbprint ? ' (thumbprint mode)' : ''}...`);
 
+    const fileBytes = (() => { try { return fs.statSync(outPath).size; } catch (_) { return null; } })();
+    signEvents.emit('sign-start', {
+      file: path.basename(outPath),
+      out_path: outPath,
+      bytes: fileBytes,
+      mode:  useThumbprint ? 'thumbprint' : 'pfx',
+    });
+
     // In thumbprint mode against a SafeNet/eToken cert, signtool triggers a
     // "Token Logon" dialog. Start a watcher that types the password into it.
     const unlock = useThumbprint ? startAutoUnlock({ password, logger }) : { stop: () => {} };
+    const fileStart = Date.now();
     try {
       await execute(cmd, { log: false });
+    } catch (e) {
+      signEvents.emit('sign-fail', {
+        file: path.basename(outPath),
+        duration_ms: Date.now() - fileStart,
+        phase: 'signtool',
+        error: e?.message || String(e),
+      });
+      throw e;
     } finally {
       unlock.stop();
     }
 
     const verifyCmd = `"${signtool}" verify /pa "${outPath}"`;
-    await execute(verifyCmd, { log: false });
+    try {
+      await execute(verifyCmd, { log: false });
+    } catch (e) {
+      signEvents.emit('sign-fail', {
+        file: path.basename(outPath),
+        duration_ms: Date.now() - fileStart,
+        phase: 'verify',
+        error: e?.message || String(e),
+      });
+      throw e;
+    }
+    signEvents.emit('sign-done', {
+      file: path.basename(outPath),
+      duration_ms: Date.now() - fileStart,
+    });
     logger.log(logger.format.green(`✓ Signed: ${path.relative(projectRoot, outPath)}`));
 
     if (outPath.toLowerCase().endsWith('.exe')) {

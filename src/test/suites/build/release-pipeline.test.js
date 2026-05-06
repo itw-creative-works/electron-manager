@@ -7,14 +7,16 @@ const fs      = require('fs');
 const os      = require('os');
 
 // Helper: stage a consumer dir with config/electron-manager.json containing the given
-// signing.windows.strategy. Returns the abs path to the temp dir; caller is responsible
+// targets.win.signing.strategy. Returns the abs path to the temp dir; caller is responsible
 // for chdir'ing into it and cleaning up.
-function stageStrategyConfig({ strategy }) {
+function stageStrategyConfig({ strategy, cloudProvider }) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'em-sign-'));
   fs.mkdirSync(path.join(tmp, 'config'), { recursive: true });
+  const signing = { strategy };
+  if (cloudProvider) signing.cloud = { provider: cloudProvider };
   fs.writeFileSync(
     path.join(tmp, 'config', 'electron-manager.json'),
-    JSON.stringify({ signing: { windows: { strategy } } }),
+    JSON.stringify({ targets: { win: { signing } } }),
   );
   return tmp;
 }
@@ -95,13 +97,11 @@ module.exports = {
       name: 'sign-windows: cloud strategy with unknown provider throws a clear error',
       run: async (ctx) => {
         const signWindows = require(path.join(__dirname, '..', '..', '..', 'commands', 'sign-windows.js'));
-        // Stage a consumer dir with strategy='cloud' in electron-manager.json, chdir there.
-        const tmp = stageStrategyConfig({ strategy: 'cloud' });
+        // Stage a consumer dir with strategy='cloud' + a bogus provider in config.
+        const tmp = stageStrategyConfig({ strategy: 'cloud', cloudProvider: 'imaginary-provider-xyz' });
         fs.writeFileSync(path.join(tmp, 'fake.exe'), 'fake');
 
-        const origCwd      = process.cwd();
-        const origProvider = process.env.WIN_CLOUD_SIGN_PROVIDER;
-        process.env.WIN_CLOUD_SIGN_PROVIDER = 'imaginary-provider-xyz';
+        const origCwd = process.cwd();
         process.chdir(tmp);
 
         try {
@@ -115,8 +115,6 @@ module.exports = {
           ctx.expect(threw.message).toMatch(/imaginary-provider-xyz|not yet implemented/);
         } finally {
           process.chdir(origCwd);
-          if (origProvider !== undefined) process.env.WIN_CLOUD_SIGN_PROVIDER = origProvider;
-          else delete process.env.WIN_CLOUD_SIGN_PROVIDER;
           fs.rmSync(tmp, { recursive: true, force: true });
         }
       },
@@ -128,9 +126,7 @@ module.exports = {
         const tmp = stageStrategyConfig({ strategy: 'cloud' });
         fs.writeFileSync(path.join(tmp, 'fake.exe'), 'fake');
 
-        const origCwd      = process.cwd();
-        const origProvider = process.env.WIN_CLOUD_SIGN_PROVIDER;
-        delete process.env.WIN_CLOUD_SIGN_PROVIDER;
+        const origCwd = process.cwd();
         process.chdir(tmp);
 
         try {
@@ -144,7 +140,6 @@ module.exports = {
           ctx.expect(threw.message).toMatch(/no provider set/);
         } finally {
           process.chdir(origCwd);
-          if (origProvider !== undefined) process.env.WIN_CLOUD_SIGN_PROVIDER = origProvider;
           fs.rmSync(tmp, { recursive: true, force: true });
         }
       },

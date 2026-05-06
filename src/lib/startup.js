@@ -84,8 +84,48 @@ const startup = {
       }
     }
 
-    logger.log(`initialize — mode=${mode}, openAtLogin=${isDev ? 'OFF (dev — config ignored)' : `{enabled:${loginEnabled}, mode:${loginMode}}`}, launchedAtLogin=${startup.wasLaunchedAtLogin()}`);
+    // Boot summary — RAW inputs (what the OS/shell gave us) + RESOLVED values (what EM
+    // decided to act on). Two parallel blocks so you can debug in either direction:
+    //   "Why is EM behaving like X?" → check resolved values
+    //   "Why did EM decide X?" → check raw inputs
+    const macLogin = (process.platform === 'darwin' && startup._electron?.app?.getLoginItemSettings)
+      ? (() => { try { return startup._electron.app.getLoginItemSettings(); } catch (_) { return null; } })()
+      : null;
+    const emEnv = Object.fromEntries(
+      Object.entries(process.env).filter(([k]) => k.startsWith('EM_') || k === 'ELECTRON_RUN_AS_NODE' || k === 'NODE_ENV')
+    );
+    const launchedAtLogin = startup.wasLaunchedAtLogin();
+    const launchedAtLoginVia = startup._launchedAtLoginVia();
+    const isHidden = startup.isLaunchHidden();
+
+    logger.log('startup boot summary — RAW inputs:');
+    logger.log(`  process.argv:            ${JSON.stringify(process.argv.slice(1))}`);
+    logger.log(`  process.platform:        ${process.platform}`);
+    logger.log(`  process.arch:            ${process.arch}`);
+    logger.log(`  app.isPackaged:          ${!!startup._electron?.app?.isPackaged}`);
+    logger.log(`  app.getLoginItemSettings(): ${macLogin ? JSON.stringify(macLogin) : '(not macOS or unavailable)'}`);
+    logger.log(`  EM_/electron/node env:   ${JSON.stringify(emEnv)}`);
+
+    logger.log('startup boot summary — RESOLVED values:');
+    logger.log(`  config.startup.mode:     ${mode}`);
+    logger.log(`  config.startup.openAtLogin: ${isDev ? 'OFF (dev — config ignored)' : `{enabled:${loginEnabled}, mode:${loginMode}}`}`);
+    logger.log(`  isDev:                   ${isDev}`);
+    logger.log(`  hasLoginArg:             ${process.argv.includes(LOGIN_ARG)}`);
+    logger.log(`  wasLaunchedAtLogin():    ${launchedAtLogin}${launchedAtLogin ? ` (via ${launchedAtLoginVia})` : ''}`);
+    logger.log(`  isLaunchHidden():        ${isHidden}`);
     startup._initialized = true;
+  },
+
+  // Internal: report HOW we determined this launch was at login. Used by initialize logging
+  // to distinguish "fake login via --em-launched-at-login flag" from "real macOS at-login".
+  _launchedAtLoginVia() {
+    if (process.argv.includes(LOGIN_ARG)) return 'argv-flag';
+    if (process.platform === 'darwin' && startup._electron?.app?.getLoginItemSettings) {
+      try {
+        if (startup._electron.app.getLoginItemSettings().wasOpenedAtLogin) return 'macos-wasOpenedAtLogin';
+      } catch (_) { /* ignore */ }
+    }
+    return 'none';
   },
 
   // Dev detection: app.isPackaged is the canonical "are we running a packaged build" flag.
