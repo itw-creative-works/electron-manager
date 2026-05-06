@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.31 — `mgr runner monitor` JOB START banner now calls out org/repo
+
+`sign-windows` now records `github_owner` + `github_repo` (split from
+`GITHUB_REPOSITORY`) in the `job-start` event, and the monitor renderer prints
+them right after `JOB START` in yellow as `<org>/<repo>`. Falls back to parsing
+the runner-workspace path when those env vars aren't set (e.g. local smoke tests).
+
 ## 1.2.30 — fix: `mgr runner monitor` org listing — filter + correct task lookup
 
 Two bugs in the 1.2.29 banner:

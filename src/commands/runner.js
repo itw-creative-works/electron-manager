@@ -1213,8 +1213,21 @@ function renderLine(jsonLine) {
     case 'job-start':
       process.stdout.write(`\n${c('cyan', '━'.repeat(60))}\n`);
       process.stdout.write(`${c('cyan', `[${ts}] JOB START`)}`);
-      if (evt.github_run_id)   process.stdout.write(c('gray', ` run=${evt.github_run_id}`));
+      // Org/repo callout: prefer GH-provided env, fall back to parsing the workspace path
+      // (C:\actions-runners\actions-runner-<org>\_work\<repo>\<repo>) when running outside
+      // a GH Actions context (e.g. local smoke tests).
+      let org  = evt.github_owner || null;
+      let repo = evt.github_repo  || null;
+      if (!org && evt.runner_workspace) {
+        const m = /actions-runner-([^\\/]+)[\\/]_work[\\/]([^\\/]+)/i.exec(evt.runner_workspace);
+        if (m) { org = m[1]; repo = repo || m[2]; }
+      }
+      if (org || repo) {
+        const label = [org, repo].filter(Boolean).join('/');
+        process.stdout.write(' ' + c('yellow', label));
+      }
       if (evt.github_workflow) process.stdout.write(c('gray', ` workflow=${evt.github_workflow}`));
+      if (evt.github_run_id)   process.stdout.write(c('gray', ` run=${evt.github_run_id}`));
       if (evt.runner_workspace) process.stdout.write(c('gray', ` workspace=${evt.runner_workspace}`));
       process.stdout.write('\n');
       break;

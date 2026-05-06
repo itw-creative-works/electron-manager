@@ -31,11 +31,19 @@ module.exports = async function (options) {
   options = options || {};
 
   const jobStart = Date.now();
+  // GITHUB_REPOSITORY is "<owner>/<repo>" inside a GH Actions runner — split for the
+  // monitor banner. GITHUB_REPOSITORY_OWNER is the same thing as the owner half but is
+  // sometimes the better source on org-vs-user runs. Both are provided automatically by
+  // actions/runner; only present when invoked from a workflow job.
+  const repoFull = process.env.GITHUB_REPOSITORY || '';
+  const [ghOwner, ghRepo] = repoFull.includes('/') ? repoFull.split('/') : [process.env.GITHUB_REPOSITORY_OWNER || null, null];
   signEvents.emit('job-start', {
     options:        Object.fromEntries(Object.entries(options).filter(([k]) => k !== '_')),
     runner_workspace: process.env.RUNNER_WORKSPACE || null,
     github_run_id:    process.env.GITHUB_RUN_ID || null,
     github_workflow:  process.env.GITHUB_WORKFLOW || null,
+    github_owner:     ghOwner || null,
+    github_repo:      ghRepo  || null,
   });
   logger.log(`Signing event log: ${signEvents.getLogPath()}`);
 
