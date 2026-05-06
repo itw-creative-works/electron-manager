@@ -1099,7 +1099,33 @@ async function monitor(options) {
   const followOnly = !!options['follow-only'];
 
   logger.log(`Watching: ${file}`);
-  logger.log('(monitoring ALL signing requests across every org/repo on this machine)');
+
+  // List the registered orgs (and per-org runner tasks + state) so the user can see
+  // exactly which orgs the monitor will pick up signing events from.
+  const cfg = readConfig();
+  const orgs = cfg.registeredOrgs || [];
+  if (orgs.length === 0) {
+    logger.log('(no orgs registered yet — run `npx mgr runner install` first)');
+  } else {
+    logger.log(`Monitoring signing requests across ${orgs.length} org(s):`);
+    const tasks = listEmRunnerTasks();
+    const taskByOrg = new Map();
+    for (const t of tasks) {
+      // task name format: em-runner-<host>-<org>
+      const m = /^em-runner-[^-]+-(.+)$/.exec(t);
+      if (m) taskByOrg.set(m[1].toLowerCase(), { name: t, state: taskState(t) });
+    }
+    for (const org of orgs) {
+      const task = taskByOrg.get(org.toLowerCase());
+      if (task) {
+        const symbol = task.state === 'RUNNING' ? '✓' : task.state === 'READY' ? '·' : '?';
+        logger.log(`  ${symbol} ${org} (task: ${task.name} — ${task.state})`);
+      } else {
+        logger.log(`  · ${org} (no Logon Task — runner may be offline)`);
+      }
+    }
+  }
+
   if (!fs.existsSync(file)) {
     // Make sure the parent dir exists so events written before monitor sees the file
     // don't fail (sign-events.js handles its own write errors, but pre-creating the dir

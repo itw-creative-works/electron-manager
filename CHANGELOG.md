@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.29 — `mgr runner monitor` lists registered orgs at startup
+
+Banner now prints the list of registered orgs (read from `<EM_RUNNER_HOME>/config.json`)
+along with each org's Logon Task name + state (RUNNING / READY / missing). Lets you
+see at a glance which orgs the monitor will pick up signing events from before you
+sit there waiting.
+
 ## 1.2.28 — fix: `mgr runner monitor` defaults to a machine-wide signing log
 
 `mgr runner monitor` was watching `<cwd>/em-signing.log` while `mgr sign-windows`
