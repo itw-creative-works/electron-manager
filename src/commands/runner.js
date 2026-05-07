@@ -1,9 +1,10 @@
 // `npx mgr runner <subcommand>` — Windows EV-token signing runner manager.
 //
-// Lives outside any consumer project (run from a globally-installed EM on the Windows box).
-// `install` downloads actions/runner, registers as a Windows service, and kicks off the
-// em-runner-watcher daemon. Watcher polls GH for orgs the user is admin in, auto-registers
-// runners for any new org so the user never touches the Windows box after install.
+// v1.2.36+: install runs entirely at user privilege (RUNNER_HOME is in
+// %LOCALAPPDATA%, no admin prompts, no UAC), and at end of install the
+// runner foregrounds in the calling terminal so its output is streamed
+// where the user invoked the command. Auto-restart at next logon is wired
+// up via a .cmd file in the user's Startup folder.
 //
 // Subcommands:
 //   install              Idempotent setup: install actions/runner + watcher service.
@@ -39,13 +40,18 @@ const RUNNER_LABELS = ['self-hosted', 'windows', 'ev-token'];
 function runnerTaskName(org) {
   return `em-runner-${os.hostname().toLowerCase()}-${org.toLowerCase()}`.slice(0, 64);
 }
-// Runner files default to C:\actions-runners on Windows so the runner service (running
-// as NT AUTHORITY\NETWORK SERVICE) can read them without icacls gymnastics. User-profile
-// paths (C:\Users\<user>\...) deny NETWORK SERVICE by default, and actions/runner walks
-// the FULL path hierarchy at startup checking traversal — denying anywhere kills it.
-// Override via EM_RUNNER_HOME if you want them somewhere else.
+// Runner files live under %LOCALAPPDATA%\em-runner — a per-user path that
+// doesn't need admin to read/write. v1.2.16-v1.2.35 used C:\actions-runners
+// (root C:) which forced UAC elevation for every install/uninstall + spawned
+// the runner in a separate elevated cmd window. With per-user storage we drop
+// elevation entirely: install, register-org, start, and uninstall all run in
+// the user's normal terminal, the runner foregrounds in that same terminal,
+// and Ctrl+C stops it cleanly. Set EM_RUNNER_HOME to override.
 function defaultRunnerHome() {
-  if (process.platform === 'win32') return 'C:\\actions-runners';
+  if (process.platform === 'win32') {
+    const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
+    return path.join(localAppData, 'em-runner');
+  }
   return path.join(process.cwd(), '.gh-runners');
 }
 const RUNNER_HOME = process.env.EM_RUNNER_HOME || defaultRunnerHome();
@@ -75,7 +81,10 @@ module.exports = async function (options) {
 async function install(options) {
   ensureWindows();
   ensureGhToken();
-  ensureWindowsAdmin(options);
+  // No more ensureWindowsAdmin: RUNNER_HOME is per-user (%LOCALAPPDATA%\em-runner),
+  // config.cmd registers without --runasservice (so no SCM access), and the
+  // Startup folder shortcut goes in the user's profile. Net: install runs in
+  // the calling terminal at normal user privilege.
 
   // Idempotent by replacement: always tear down any prior install before starting.
   if (jetpack.exists(RUNNER_HOME)) {
@@ -181,8 +190,33 @@ async function install(options) {
     return;
   }
 
-  logger.log('Install complete. The watcher will auto-register new orgs as they become available.');
-  logger.log(`Run 'npx mgr runner status' any time to check service health.`);
+  logger.log('Install complete. Auto-restart at next logon is wired up via the Startup folder shortcut.');
+
+  // 7. Hand off to the runner: take over the calling terminal (`stdio: inherit`
+  // streams the listener's output here, Ctrl+C stops it). For non-interactive
+  // contexts (CI, scripts, schtasks-launched) we do NOT block — the Startup
+  // folder shortcut will spawn the runner at the next interactive logon.
+  // Single-org foreground for now: if multiple orgs registered, we foreground
+  // the first and rely on the Startup shortcuts to bring the rest up at next
+  // logon. (For our current use case there's only one org per host.)
+  if (process.stdin.isTTY && succeeded.length > 0) {
+    const firstOrg     = succeeded[0];
+    const orgRunnerDir = path.join(RUNNER_HOME, `actions-runner-${firstOrg.toLowerCase()}`);
+    const runCmd       = path.join(orgRunnerDir, 'run.cmd');
+    if (succeeded.length > 1) {
+      logger.log(`Note: ${succeeded.length} orgs registered; foregrounding ${firstOrg} now. Other runner(s) will auto-start at next logon.`);
+    }
+    logger.log('');
+    logger.log(`Starting runner for ${firstOrg} in this terminal — press Ctrl+C to stop.`);
+    logger.log('');
+    const { spawnSync } = require('child_process');
+    spawnSync('cmd.exe', ['/c', runCmd], {
+      cwd: process.env.WINDIR || 'C:\\Windows',
+      stdio: 'inherit',
+    });
+  } else {
+    logger.log(`Run 'npx mgr runner start' to bring the runner online now, or log out + back in.`);
+  }
 }
 
 // ─── set-credentials ────────────────────────────────────────────────────────────
@@ -326,31 +360,20 @@ async function registerOrg(options) {
     throw new Error(`config.cmd succeeded but .runner / .credentials are missing in ${orgRunnerDir}. The runner is not configured.`);
   }
 
-  // Two-pronged auto-start:
+  // Write the .cmd shortcut in the user's Startup folder so Explorer auto-runs
+  // it at every interactive logon (Session 1). No Task Scheduler, no admin
+  // needed for the trigger. The runner name is intentionally the same as
+  // older versions used for the Logon Task — keeps debugging hooks
+  // consistent across upgrades.
   //
-  //   (1) Write a .cmd shortcut in the user's Startup folder so the runner
-  //       auto-spawns at every interactive logon (Session 1, no Task
-  //       Scheduler, no admin needed for the trigger).
-  //
-  //   (2) Spawn run.cmd as a detached child process right now so the runner
-  //       is online before this command returns — no logout/login dance
-  //       required after fresh install. UAC-elevated install spawns into
-  //       Session 1 because UAC only changes the token, not the session;
-  //       confirmed empirically and noted on spawnRunnerDetached().
-  //
-  // The runner name (used for the Startup file basename + as the GitHub
-  // runner name) intentionally matches what older versions used for the
-  // Logon Task — keeps debugging hooks consistent.
+  // We do NOT spawn the runner here. install() (when invoked interactively)
+  // foregrounds run.cmd in the calling terminal AFTER the registration loop
+  // completes, so the user sees its output streaming in their own shell.
+  // For non-interactive invocations (e.g. someone calling register-org
+  // directly from a script) the runner stays dormant until the next logon
+  // fires the Startup shortcut, or until `mgr runner start` is invoked.
   const runnerNameForShortcut = runnerTaskName(org);
   writeRunnerStartupShortcut({ runnerName: runnerNameForShortcut, runnerDir: orgRunnerDir });
-
-  const startResult = spawnRunnerDetached(orgRunnerDir);
-  if (startResult.ok) {
-    logger.log(`  ✓ Spawned runner detached (cmd PID=${startResult.pid}) — Runner.Listener.exe will appear in Session 1 within ~5s`);
-  } else {
-    logger.warn(`  ✗ Could not spawn runner immediately: ${startResult.message}`);
-    logger.warn(`    Runner is still registered + will start at next logon. To start now: run "${path.join(orgRunnerDir, 'run.cmd')}" in any cmd window, or log out and back in.`);
-  }
 
   // Track in our config.
   const cfg = readConfig();
@@ -366,19 +389,42 @@ async function startServices() {
   const shortcuts = listRunnerStartupShortcuts();
   if (shortcuts.length === 0) {
     logger.warn('No em-runner-* Startup shortcuts installed. Run `npx mgr runner install` first.');
+    return;
   }
-  for (const runnerName of shortcuts) {
-    // Map shortcut name back to its runner dir. The naming convention is
-    // em-runner-<host>-<org>; the org dir is actions-runner-<org>.
-    const m = /^em-runner-[^-]+-(.+)$/i.exec(runnerName);
-    const orgDirName = m ? `actions-runner-${m[1].toLowerCase()}` : null;
-    const runnerDir = orgDirName ? path.join(RUNNER_HOME, orgDirName) : null;
-    if (!runnerDir || !jetpack.exists(runnerDir)) {
-      logger.warn(`✗ start ${runnerName} — could not resolve runner dir from shortcut name`);
-      continue;
-    }
+  // Map the first shortcut name back to its runner dir. The shortcut naming
+  // convention is em-runner-<host>-<org>; the org dir is actions-runner-<org>.
+  // Hostname can contain dashes (e.g. desktop-ifl07vg), so we strip a known
+  // host prefix rather than assume the host segment is dash-free.
+  const runnerName = shortcuts[0];
+  const hostPrefix = `em-runner-${os.hostname().toLowerCase()}-`;
+  let orgName = null;
+  if (runnerName.toLowerCase().startsWith(hostPrefix)) {
+    orgName = runnerName.slice(hostPrefix.length);
+  }
+  const runnerDir = orgName ? path.join(RUNNER_HOME, `actions-runner-${orgName.toLowerCase()}`) : null;
+  if (!runnerDir || !jetpack.exists(runnerDir)) {
+    logger.warn(`✗ Could not resolve runner dir from shortcut name ${runnerName}`);
+    return;
+  }
+  if (shortcuts.length > 1) {
+    logger.log(`Note: ${shortcuts.length} runners registered; foregrounding ${runnerName} now. Others auto-start at next logon via their Startup shortcuts.`);
+  }
+  const runCmd = path.join(runnerDir, 'run.cmd');
+  if (process.stdin.isTTY) {
+    // Foreground: take over the calling terminal so the user sees the listener
+    // output and can Ctrl+C to stop. Same UX as `npm start` etc.
+    logger.log(`Starting runner ${runnerName} in this terminal — press Ctrl+C to stop.`);
+    logger.log('');
+    const { spawnSync } = require('child_process');
+    spawnSync('cmd.exe', ['/c', runCmd], {
+      cwd: process.env.WINDIR || 'C:\\Windows',
+      stdio: 'inherit',
+    });
+  } else {
+    // Non-TTY (script / scheduled task / piped invocation): detach so the
+    // caller doesn't block forever.
     const r = spawnRunnerDetached(runnerDir);
-    logger.log(`${r.ok ? '✓' : '✗'} start ${runnerName}${r.ok ? ` (cmd PID=${r.pid})` : ` — ${r.message}`}`);
+    logger.log(`${r.ok ? '✓' : '✗'} start ${runnerName}${r.ok ? ` (PID=${r.pid})` : ` — ${r.message}`}`);
   }
 }
 
@@ -463,7 +509,11 @@ async function statusServices() {
 // ─── uninstall ──────────────────────────────────────────────────────────────────
 async function uninstall(options) {
   ensureWindows();
-  ensureWindowsAdmin(options);
+  // No more ensureWindowsAdmin. Per-user RUNNER_HOME removal, killing your own
+  // Runner.Listener.exe processes, and deleting Startup-folder shortcuts all
+  // work without admin. Legacy cleanup paths (watcher service, Logon Tasks)
+  // still need admin to delete fully — when not admin we attempt them anyway
+  // and simply log warnings on failure rather than blocking the uninstall.
 
   // Stop + delete em-runner-watcher service. node-windows knows its own service
   // metadata (script, name, etc.) — let it do the removal cleanly. This handles
@@ -815,10 +865,27 @@ async function downloadActionsRunner(runnerDir) {
   }
   logger.log(`Downloaded ${(stat.size / 1024 / 1024).toFixed(1)} MB → extracting…`);
 
-  // Extract via tar (BSD tar ships with Windows 10+ and macOS — handles zip natively).
-  const t = spawnSync('tar', ['-xf', zipPath, '-C', runnerDir], { stdio: 'inherit' });
-  if (t.status !== 0) {
-    throw new Error(`Failed to extract actions-runner.zip (tar exit ${t.status}). On Windows ensure tar.exe is on PATH (it is by default on Windows 10+).`);
+  // Extract via PowerShell's Expand-Archive instead of `tar`. On Windows the
+  // System32 tar.exe (bsdtar) handles `C:\...` paths fine, but if the user's
+  // PATH front-loads Git for Windows' tar (GNU tar), it interprets `C:\...`
+  // as `host:path` and fails with "Cannot connect to C: resolve failed".
+  // Expand-Archive is built into PowerShell 5.1+ on every supported Windows
+  // and has none of those quirks.
+  if (process.platform === 'win32') {
+    const ps = spawnSync('powershell', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      `Expand-Archive -Path '${zipPath}' -DestinationPath '${runnerDir}' -Force`,
+    ], { stdio: 'inherit' });
+    if (ps.status !== 0) {
+      throw new Error(`Failed to extract actions-runner.zip via PowerShell Expand-Archive (exit ${ps.status}).`);
+    }
+  } else {
+    const t = spawnSync('tar', ['-xf', zipPath, '-C', runnerDir], { stdio: 'inherit' });
+    if (t.status !== 0) {
+      throw new Error(`Failed to extract actions-runner.zip (tar exit ${t.status}).`);
+    }
   }
   jetpack.remove(zipPath);
   logger.log(`Extracted actions/runner → ${runnerDir}`);

@@ -1,5 +1,77 @@
 # Changelog
 
+## 1.2.36 — `mgr runner install` runs entirely at user privilege; runner foregrounds in calling terminal
+
+The big UX shift: no more UAC prompt, no more separate elevated cmd window
+opening when you run `npx mgr runner install`. The whole flow stays in your
+calling terminal at normal user privilege, and at the end of install the
+runner takes over that same terminal in the foreground so its "Listening for
+Jobs" output streams where you invoked the command.
+
+### What changed
+
+**`RUNNER_HOME`: `C:\actions-runners` → `%LOCALAPPDATA%\em-runner`.**
+The previous root-C: location forced UAC for create/write. The per-user
+location needs no admin. Set `EM_RUNNER_HOME` to override.
+
+**`ensureWindowsAdmin` removed from `install` / `uninstall` / `start`.**
+None of them need elevation anymore: setup writes to your user profile,
+config.cmd registers without `--runasservice` (no SCM access), Startup
+shortcut goes in `%APPDATA%`, killing your own `Runner.Listener.exe`
+processes is user-allowed.
+
+**End of `install` foregrounds the runner.**
+When `process.stdin.isTTY` is true, install does
+`spawnSync('cmd.exe', ['/c', runCmd], { stdio: 'inherit', cwd: %WINDIR% })`
+after registration completes — so the listener's output streams in the
+calling terminal and Ctrl+C stops it cleanly. For non-interactive
+contexts (scripts, schtasks-launched, piped output) install just registers
+and exits, and the Startup folder shortcut handles the next-logon spawn.
+
+**`mgr runner start` mirrors `install`'s end behavior.**
+Foreground exec in TTY, detached spawn otherwise.
+
+**`register-org` no longer auto-spawns the runner.**
+Spawning is now centralized in `install()`'s end-of-flow, so multi-org
+installs don't fire N runners — only the first one foregrounds, the rest
+auto-start at next logon via their Startup shortcuts.
+
+**Extraction switched from `tar` to PowerShell `Expand-Archive`.**
+On Windows the System32 `tar.exe` (bsdtar) handles `C:\…` paths fine, but
+if Git for Windows' `tar` (GNU tar) sits earlier on PATH it interprets
+`C:\…` as `host:path` and fails with "Cannot connect to C: resolve failed".
+Expand-Archive ships with PowerShell 5.1+ on every supported Windows and
+has none of those quirks.
+
+**Hostname parsing in shortcut→org mapping fixed.**
+The shortcut name format is `em-runner-<host>-<org>`. The previous regex
+`^em-runner-[^-]+-(.+)$` assumed a dash-free hostname; on a host like
+`desktop-ifl07vg` it incorrectly extracted `ifl07vg-<org>` as the org name
+and then couldn't find the runner dir. v1.2.36 strips a known
+`em-runner-${os.hostname()}-` prefix instead.
+
+### Net behavior
+
+```
+[VSCode terminal] $ npx mgr runner install
+… downloads, registers, writes Startup shortcut
+… Successfully registered: 1/1 orgs
+… Starting runner for deployment-playground in this terminal — Ctrl+C to stop.
+…
+… 2026-05-07 21:18:30Z: Listening for Jobs   ← runner streaming here, not in a separate window
+```
+
+Close the terminal or Ctrl+C → runner stops. Next logon → Startup folder
+shortcut auto-respawns it (currently still as a minimized cmd window;
+if/when we ship a "fully hidden" autostart, that'll be a follow-up).
+
+### Migration note
+
+If you had a v1.2.16-v1.2.35 install at `C:\actions-runners`, that path is
+now orphaned. v1.2.36 doesn't touch it (and doesn't need admin to operate),
+so you can either leave it (harmless) or remove it manually:
+`rmdir /S /Q C:\actions-runners` from an elevated cmd.
+
 ## 1.2.35 — `mgr runner install` is one-shot end-to-end: drops Logon Task, drops watcher, switches to Startup folder
 
 This is the version where `npx mgr runner install` actually does what its name
