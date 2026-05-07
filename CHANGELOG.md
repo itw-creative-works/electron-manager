@@ -1,5 +1,64 @@
 # Changelog
 
+## 1.2.37 — runner cwd fix (`update.finished`); duplicate-runner guard; kill cmd.exe wrappers on uninstall
+
+Fixes a real-world failure introduced by 1.2.36 plus two adjacent UX cleanups.
+
+### `update.finished` access denied — fixed
+
+1.2.36 set the runner spawn's cwd to `%WINDIR%` to avoid the cmd.exe wrapper
+holding the runner dir as cwd (which had blocked uninstall with EPERM in
+earlier versions). But actions/runner's auto-update path writes a marker
+file `update.finished` to its **current working directory** — `%WINDIR%`
+isn't user-writable, so writes failed with `Access to the path
+'C:\WINDOWS\update.finished' is denied.` and the runner cycled into a
+"retryable error, re-launch in 5 seconds" loop forever.
+
+1.2.37 sets cwd back to the per-org runner dir (which is what
+actions/runner expects). The cwd-lock-on-uninstall side effect is now
+handled by a stronger kill helper — see below.
+
+Spots fixed:
+- `spawnRunnerDetached` — used by `mgr runner start` in non-TTY contexts
+  and by the (removed in 1.2.35) post-install auto-spawn.
+- The TTY foreground spawn at the end of `install()` — was hard-coded to
+  `%WINDIR%` AND used a `runnerDir` identifier that wasn't even in scope
+  (would have thrown ReferenceError; only didn't because no one noticed).
+- The TTY foreground spawn in `startServices()` — same.
+- The Startup folder shortcut now uses `start "" /min /D "<runnerDir>"`
+  so logon-triggered respawn lands in the right cwd too.
+
+### `killRunnerProcessesUnderHome` (was `killRunnerListenerProcessesUnderHome`)
+
+1.2.34 only killed `Runner.Listener.exe` instances under RUNNER_HOME, with
+`taskkill /F /T`. `/T` kills children but NOT parents — so the cmd.exe
+wrapper running run.cmd survived, and its inherited cwd kept blocking
+disk cleanup. 1.2.37 expands the helper to also enumerate cmd.exe
+wrappers (`CommandLine` references run.cmd under RUNNER_HOME) and
+`Runner.Worker.exe` instances, killing the entire process tree in one
+sweep. Old name kept as alias for any internal callers.
+
+### Duplicate-runner guard
+
+`mgr runner start` and `install`'s foreground hand-off now check for an
+existing `Runner.Listener.exe` under the same runner dir and refuse to
+spawn a duplicate:
+
+```
+A runner under …\actions-runner-deployment-playground is already running:
+  · PID=18352 session=1 …\bin\Runner.Listener.exe
+Refusing to start a duplicate. Use 'npx mgr runner stop' to kill it first.
+```
+
+Without this, a second listener with the same registration causes a
+session-takeover storm against the GitHub side (each kicks the other off,
+both reconnect, repeat).
+
+### Verified
+
+Tested live: install → runner came up, auto-updated 2.319.1 → 2.334.0
+cleanly without DENIED errors, returned to "Listening for Jobs" stably.
+
 ## 1.2.36 — `mgr runner install` runs entirely at user privilege; runner foregrounds in calling terminal
 
 The big UX shift: no more UAC prompt, no more separate elevated cmd window

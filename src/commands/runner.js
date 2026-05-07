@@ -206,12 +206,23 @@ async function install(options) {
     if (succeeded.length > 1) {
       logger.log(`Note: ${succeeded.length} orgs registered; foregrounding ${firstOrg} now. Other runner(s) will auto-start at next logon.`);
     }
+    // Don't fight an existing live runner. Two Runner.Listener.exe processes
+    // with the same registration cause a session-takeover storm against the
+    // GitHub side (each kicks the other off, both reconnect, repeat).
+    const existing = listRunnerListenerProcessesUnder(orgRunnerDir);
+    if (existing.length > 0) {
+      logger.log('');
+      logger.warn(`Skipping foreground start: a runner under ${orgRunnerDir} is already alive.`);
+      for (const { pid, sessionId } of existing) logger.warn(`  · PID=${pid} session=${sessionId}`);
+      logger.warn(`Use 'npx mgr runner stop' to kill it, then 'npx mgr runner start' to bring up a fresh one in this terminal.`);
+      return;
+    }
     logger.log('');
     logger.log(`Starting runner for ${firstOrg} in this terminal — press Ctrl+C to stop.`);
     logger.log('');
     const { spawnSync } = require('child_process');
     spawnSync('cmd.exe', ['/c', runCmd], {
-      cwd: process.env.WINDIR || 'C:\\Windows',
+      cwd: orgRunnerDir,
       stdio: 'inherit',
     });
   } else {
@@ -409,6 +420,19 @@ async function startServices() {
   if (shortcuts.length > 1) {
     logger.log(`Note: ${shortcuts.length} runners registered; foregrounding ${runnerName} now. Others auto-start at next logon via their Startup shortcuts.`);
   }
+  // Don't fight an existing live runner. Two Runner.Listener.exe processes
+  // with the same registration cause a session-takeover storm against GitHub.
+  const existing = listRunnerListenerProcessesUnder(runnerDir);
+  if (existing.length > 0) {
+    logger.warn(`A runner under ${runnerDir} is already running:`);
+    for (const { pid, sessionId, execPath } of existing) {
+      const pathStr = execPath || '(path unavailable)';
+      logger.warn(`  · PID=${pid} session=${sessionId} ${pathStr}`);
+    }
+    logger.warn(`Refusing to start a duplicate. Use 'npx mgr runner stop' to kill it first, or 'npx mgr runner status' to inspect.`);
+    process.exitCode = 1;
+    return;
+  }
   const runCmd = path.join(runnerDir, 'run.cmd');
   if (process.stdin.isTTY) {
     // Foreground: take over the calling terminal so the user sees the listener
@@ -417,7 +441,7 @@ async function startServices() {
     logger.log('');
     const { spawnSync } = require('child_process');
     spawnSync('cmd.exe', ['/c', runCmd], {
-      cwd: process.env.WINDIR || 'C:\\Windows',
+      cwd: runnerDir,
       stdio: 'inherit',
     });
   } else {
@@ -656,65 +680,77 @@ async function removeRunnerHomeWithRetry() {
   }
 }
 
-// Find Runner.Listener.exe instances and force-kill them with `taskkill /F /T`
-// (the /T also kills Runner.Worker.exe children from in-flight jobs).
-// Critical for uninstall — without this, jetpack.remove(RUNNER_HOME) fails
-// with EPERM whenever a Runner.Listener has open file handles in the dir.
+// Force-kill every process whose execution path lives under RUNNER_HOME, with
+// `taskkill /F /T` so each process's children die too. Critical for uninstall:
+// without it, the cmd.exe wrapper that runs run.cmd holds the runner dir as
+// cwd for the lifetime of the listener, and jetpack.remove(RUNNER_HOME) fails
+// with EPERM. Killing only Runner.Listener.exe wasn't enough — `/T` kills its
+// children but NOT its parent cmd.exe, so the wrapper survives + keeps the
+// cwd lock. v1.2.37: we now also enumerate cmd.exe wrappers (CommandLine
+// references run.cmd from RUNNER_HOME) so the entire process tree is killed
+// in one pass.
 //
-// Path filter: when Get-CimInstance can read the process's ExecutablePath, we
-// skip anything OUTSIDE RUNNER_HOME so unrelated runner installs aren't
-// touched. When ExecutablePath comes back empty — which happens for processes
-// owned by NETWORK SERVICE / LocalSystem even from an elevated query, since
-// those tokens don't grant ProcessVmRead by default — we kill anyway. Those
-// path-unavailable instances are almost always zombies left by the v1.2.16-
-// v1.2.34 watcher service (which spawned register-org subprocesses as
-// NETWORK SERVICE), and during uninstall we want them gone.
-function killRunnerListenerProcessesUnderHome() {
+// Path-unavailable Runner.Listener.exe instances (NETWORK SERVICE / Local
+// System-owned, ExecutablePath comes back empty even from elevated queries)
+// are killed too — they're almost always v1.2.16-v1.2.34 watcher zombies and
+// uninstall should clean them up.
+function killRunnerProcessesUnderHome() {
   if (process.platform !== 'win32') return;
   const { spawnSync } = require('child_process');
 
-  // Get-CimInstance is the modern wmic replacement. ProcessId | ExecutablePath
-  // gives us both fields in one shot, separated by '|' for easy parsing.
-  const r = spawnSync('powershell', [
-    '-NoProfile',
-    '-NonInteractive',
-    '-Command',
-    `Get-CimInstance Win32_Process -Filter "Name='Runner.Listener.exe'" | ForEach-Object { "$($_.ProcessId)|$($_.ExecutablePath)" }`,
-  ], { encoding: 'utf8' });
+  // Single PowerShell call gets both Runner.Listener.exe AND cmd.exe wrappers
+  // (any cmd.exe whose CommandLine references run.cmd under RUNNER_HOME).
+  // PID|ExecutablePath|Name|MatchedAs — '|' separators, easy to parse.
+  const homeLower = RUNNER_HOME.toLowerCase().replace(/'/g, "''");
+  const ps = `
+    $home_lc = '${homeLower}';
+    Get-CimInstance Win32_Process -Filter "Name='Runner.Listener.exe' OR Name='cmd.exe' OR Name='Runner.Worker.exe'" | ForEach-Object {
+      $name = $_.Name;
+      $cl = if ($_.CommandLine) { $_.CommandLine.ToLower() } else { '' };
+      $ep = if ($_.ExecutablePath) { $_.ExecutablePath.ToLower() } else { '' };
+      $matched = $false; $tag = '';
+      if ($name -eq 'Runner.Listener.exe' -or $name -eq 'Runner.Worker.exe') {
+        if ($ep.StartsWith($home_lc) -or $ep -eq '') { $matched = $true; $tag = 'listener' }
+      } elseif ($name -eq 'cmd.exe') {
+        if ($cl -like ('*' + $home_lc + '*') -and $cl -like '*run.cmd*') { $matched = $true; $tag = 'wrapper' }
+      }
+      if ($matched) { "$($_.ProcessId)|$($_.ExecutablePath)|$($_.Name)|$tag" }
+    }
+  `;
+  const r = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { encoding: 'utf8' });
   if (r.status !== 0) return;
 
   const targets = [];
   for (const rawLine of (r.stdout || '').split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!line) continue;
-    const idx = line.indexOf('|');
-    if (idx < 0) continue;
-    const pid = line.slice(0, idx);
-    const execPath = line.slice(idx + 1);
+    const parts = line.split('|');
+    if (parts.length < 4) continue;
+    const [pid, execPath, name, tag] = parts;
     if (!/^\d+$/.test(pid)) continue;
-    if (!execPath) {
-      // Path unavailable (typically NETWORK SERVICE / LocalSystem-owned).
-      // Still a Runner.Listener.exe by WMI filter, kill it during uninstall.
-      targets.push({ pid, execPath: '(path unavailable — likely NETWORK SERVICE-owned)' });
-      continue;
-    }
-    if (execPath.toLowerCase().startsWith(RUNNER_HOME.toLowerCase())) {
-      targets.push({ pid, execPath });
-    }
+    targets.push({ pid, execPath: execPath || '(path unavailable)', name, tag });
   }
 
   if (targets.length === 0) return;
 
-  logger.log(`Killing ${targets.length} Runner.Listener.exe process(es) before disk cleanup…`);
-  for (const { pid, execPath } of targets) {
+  logger.log(`Killing ${targets.length} runner-related process(es) before disk cleanup…`);
+  for (const { pid, execPath, name, tag } of targets) {
     const k = spawnSync('taskkill', ['/F', '/PID', pid, '/T'], { encoding: 'utf8' });
     if (k.status === 0) {
-      logger.log(`  ✓ Killed PID ${pid} ${execPath}`);
+      logger.log(`  ✓ Killed PID ${pid} (${name} ${tag}) ${execPath}`);
     } else {
-      logger.warn(`  ✗ taskkill ${pid} failed (exit ${k.status}): ${(k.stderr || '').trim().slice(0, 200)}`);
+      // Non-fatal: process may already be dead from a /T tree-kill of a
+      // sibling target. Only warn on truly unexpected codes.
+      const msg = (k.stderr || '').trim().slice(0, 200);
+      if (!/not found|There are no/.test(msg)) {
+        logger.warn(`  ✗ taskkill ${pid} failed (exit ${k.status}): ${msg}`);
+      }
     }
   }
 }
+
+// Backwards-compatible alias — old name used in uninstall code paths.
+const killRunnerListenerProcessesUnderHome = killRunnerProcessesUnderHome;
 
 // Identify the processes currently holding handles inside `targetPath` via
 // Sysinternals handle.exe. Used as a diagnostic when removeRunnerHomeWithRetry
@@ -1064,18 +1100,15 @@ function writeRunnerStartupShortcut({ runnerName, runnerDir }) {
   }
   jetpack.dir(STARTUP_DIR);
   const file = runnerStartupFile(runnerName);
-  // We DO use run.cmd (so its self-update relaunch loop fires when
-  // Runner.Listener exits with code 3 = update needed). The trick: the
-  // wrapper cmd.exe must run with cwd OUTSIDE RUNNER_HOME, otherwise it
-  // holds the runner dir as cwd for the lifetime of the listener and every
-  // subsequent uninstall hits EPERM. We `cd /d %WINDIR%` first so the
-  // launched cmd.exe inherits %WINDIR% as cwd. Runner.Listener uses its
-  // binary location (not cwd) to find .runner / .credentials, so this is
-  // safe — verified against actions/runner v2.319.x.
+  // /D <runnerDir> sets the new process's cwd to the runner dir itself.
+  // actions/runner's auto-update writes its `update.finished` marker to
+  // cwd — if cwd is anywhere not user-writable (we tried %WINDIR% earlier),
+  // the write fails with Access Denied and the runner reconnect-loops
+  // forever. The runner dir is the documented expected cwd. uninstall has
+  // killRunnerProcessesUnderHome to clear the cwd lock when needed.
   const body = [
     '@echo off',
-    `cd /d "%WINDIR%"`,
-    `start "" /min "${runCmd}"`,
+    `start "" /min /D "${runnerDir}" "${runCmd}"`,
     '',
   ].join('\r\n');
   jetpack.write(file, body);
@@ -1124,13 +1157,15 @@ function spawnRunnerDetached(runnerDir) {
   }
   const { spawn } = require('child_process');
   try {
-    // cwd is intentionally OUTSIDE RUNNER_HOME (we use %WINDIR%): the cmd.exe
-    // wrapper that runs run.cmd holds its cwd for the lifetime of the listener,
-    // and a long-lived cmd.exe with cwd inside the runner dir blocks every
-    // subsequent uninstall with EPERM. Runner.Listener.exe uses its binary
-    // location (not cwd) to find config, so this is safe.
+    // cwd is the runner dir itself. actions/runner's auto-update path writes
+    // a marker file `update.finished` to cwd; if cwd is %WINDIR% the write
+    // fails with Access Denied and the runner enters a 5-second reconnect
+    // loop forever. The runner dir is the documented expected cwd. The
+    // tradeoff — that the cmd.exe wrapper holds the dir handle for the
+    // lifetime of the listener — is handled in uninstall via
+    // killRunnerProcessesUnderHome which kills the wrapper too.
     const child = spawn('cmd.exe', ['/c', runCmd], {
-      cwd: process.env.WINDIR || 'C:\\Windows',
+      cwd: runnerDir,
       detached: true,
       stdio: 'ignore',
       windowsHide: true,
