@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.2.34 — `runner uninstall` kills Runner.Listener.exe holders before disk cleanup
+
+`mgr runner uninstall` was failing on `removeRunnerHomeWithRetry` with `EPERM,
+Permission denied: \\?\C:\actions-runners` whenever a Runner.Listener.exe
+process from a legacy "double-click run.cmd" workflow (or a stale Logon Task
+instance racing a `schtasks /End`) was still alive. Those processes hold open
+file handles inside the runner directories, so jetpack.remove can't delete the
+tree, and the next `mgr runner install` then crashes when it tries to re-clone
+the actions/runner template into a still-existing org dir.
+
+Fix: just before `removeRunnerHomeWithRetry`, enumerate all
+`Runner.Listener.exe` processes via `Get-CimInstance`, filter to those whose
+`ExecutablePath` lives under `RUNNER_HOME` (so we don't touch unrelated
+runners on the same box), and force-kill each with `taskkill /F /PID <pid>
+/T`. The `/T` flag also kills any `Runner.Worker.exe` children spawned by an
+in-flight job. After the kill pass the directory unlocks and gets removed
+cleanly.
+
+Bonus: when `removeRunnerHomeWithRetry` does still give up after 5 attempts,
+it now shells out to Sysinternals `handle.exe` (if on PATH) to name the
+offending process. Without `handle.exe` available it surfaces a tip pointing
+to the download, so the next failure here can be debugged without guessing.
+
 ## 1.2.33 — auto-updater: idle-aware install (no more surprise quit-and-install)
 
 Replaces the flat 5s background-install delay with an idle-aware watcher. When

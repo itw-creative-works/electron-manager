@@ -466,6 +466,15 @@ async function uninstall(options) {
     }
   }
 
+  // Kill any Runner.Listener.exe processes whose path lives under RUNNER_HOME
+  // BEFORE we try to remove the directory. These are usually leftovers from the
+  // legacy "double-click run.cmd" workflow (foreground runners not registered as
+  // a Scheduled Task or service) — uninstall otherwise has no way to know about
+  // them, and their open file handles inside the runner dirs will fail
+  // jetpack.remove with EPERM. Also catches Runner.Listener instances spawned by
+  // a currently-running Logon Task that `schtasks /End` (above) may have raced.
+  killRunnerListenerProcessesUnderHome();
+
   // Now safe to remove disk state. Retry a few times if files are still locked
   // (services release file handles asynchronously after stop).
   await removeRunnerHomeWithRetry();
@@ -545,11 +554,94 @@ async function removeRunnerHomeWithRetry() {
     } catch (e) {
       if (i === 4) {
         logger.warn(`Could not fully remove ${RUNNER_HOME} after 5 attempts: ${e.message}`);
-        logger.warn('Some files may be locked by other processes. Reboot Windows and re-run install if this persists.');
+        // Try to name the offending process. Sysinternals handle.exe (if on PATH)
+        // gives us the holder. Otherwise we tell the user how to install it for
+        // next time, so failures here don't keep being "files may be locked" with
+        // no actionable info.
+        identifyHandleHolders(RUNNER_HOME);
         return;
       }
       await new Promise((r) => setTimeout(r, 1000 * (i + 1)));
     }
+  }
+}
+
+// Find any Runner.Listener.exe instances whose ExecutablePath lives under
+// RUNNER_HOME and force-kill them (with /T so any Runner.Worker.exe children
+// from an in-flight job are also killed). Critical for uninstall: legacy
+// foreground runners (started by double-clicking run.cmd) hold open file
+// handles inside the runner dirs and will fail jetpack.remove with EPERM.
+// Filtering by path (not just by process name) is intentional — it avoids
+// touching unrelated Runner.Listener.exe processes that might run from other
+// install paths on the same box.
+function killRunnerListenerProcessesUnderHome() {
+  if (process.platform !== 'win32') return;
+  const { spawnSync } = require('child_process');
+
+  // Get-CimInstance is the modern wmic replacement. ProcessId | ExecutablePath
+  // gives us both fields in one shot, separated by '|' for easy parsing.
+  const r = spawnSync('powershell', [
+    '-NoProfile',
+    '-NonInteractive',
+    '-Command',
+    `Get-CimInstance Win32_Process -Filter "Name='Runner.Listener.exe'" | ForEach-Object { "$($_.ProcessId)|$($_.ExecutablePath)" }`,
+  ], { encoding: 'utf8' });
+  if (r.status !== 0) return;
+
+  const targets = [];
+  for (const rawLine of (r.stdout || '').split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const idx = line.indexOf('|');
+    if (idx < 0) continue;
+    const pid = line.slice(0, idx);
+    const execPath = line.slice(idx + 1);
+    if (!/^\d+$/.test(pid) || !execPath) continue;
+    if (execPath.toLowerCase().startsWith(RUNNER_HOME.toLowerCase())) {
+      targets.push({ pid, execPath });
+    }
+  }
+
+  if (targets.length === 0) return;
+
+  logger.log(`Killing ${targets.length} foreground Runner.Listener.exe process(es) under ${RUNNER_HOME} (legacy double-click run.cmd holders + any Logon Task instances) before disk cleanup…`);
+  for (const { pid, execPath } of targets) {
+    const k = spawnSync('taskkill', ['/F', '/PID', pid, '/T'], { encoding: 'utf8' });
+    if (k.status === 0) {
+      logger.log(`  ✓ Killed PID ${pid} (${execPath})`);
+    } else {
+      logger.warn(`  ✗ taskkill ${pid} failed (exit ${k.status}): ${(k.stderr || '').trim().slice(0, 200)}`);
+    }
+  }
+}
+
+// Identify the processes currently holding handles inside `targetPath` via
+// Sysinternals handle.exe. Used as a diagnostic when removeRunnerHomeWithRetry
+// gives up — turns "files may be locked" into "PID 1234 (Runner.Listener.exe)
+// is holding C:\actions-runners\actions-runner-foo\bin\Runner.Listener.exe".
+// handle.exe isn't bundled with Windows; if it isn't on PATH we surface a tip
+// instead so the next failure has a path to actionable info.
+function identifyHandleHolders(targetPath) {
+  if (process.platform !== 'win32') return;
+  const { spawnSync } = require('child_process');
+
+  const probe = spawnSync('where', ['handle.exe'], { stdio: ['ignore', 'pipe', 'ignore'] });
+  if (probe.status !== 0) {
+    logger.warn(`Tip: install Sysinternals handle.exe (https://learn.microsoft.com/sysinternals/downloads/handle) and add it to PATH so future failures here can name the offending process.`);
+    logger.warn(`Some files may be locked. Reboot Windows and re-run install if this persists.`);
+    return;
+  }
+
+  // -accepteula bypasses the one-time EULA prompt that handle.exe shows on
+  // first run; -nobanner suppresses the version banner so the output is
+  // straight to per-handle lines.
+  const r = spawnSync('handle.exe', ['-accepteula', '-nobanner', targetPath], { encoding: 'utf8' });
+  const out = (r.stdout || '').trim();
+  if (out) {
+    logger.warn(`Processes holding handles under ${targetPath}:`);
+    for (const line of out.split(/\r?\n/).slice(0, 30)) logger.warn(`  ${line}`);
+  } else {
+    logger.warn(`handle.exe ran but reported no holders for ${targetPath}. The lock may be at the directory level (e.g. another shell's cwd is set inside it) — try closing all cmd windows and re-running.`);
   }
 }
 
