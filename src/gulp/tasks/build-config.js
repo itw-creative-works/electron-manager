@@ -160,9 +160,17 @@ function baseConfig(config, extras = {}) {
   const nsisRunAfterFinish     = winTargetCfg.runAfterFinish !== false;
   const nsisPerMachine         = winTargetCfg.perMachine === true;
 
-  // Snap publishing — opt-in via targets.linux.snap.enabled.
+  // Snap publishing — enabled by default; auto-skipped if SNAPCRAFT_STORE_CREDENTIALS
+  // isn't set in the environment (so a fresh project doesn't fail CI before the user
+  // wires up snapcraft auth). Set targets.linux.snap.enabled:false to skip the snap
+  // target entirely regardless of credentials.
   const snapCfg = linuxTargetCfg.snap || {};
-  const snapEnabled = snapCfg.enabled === true;
+  const snapConfigEnabled = snapCfg.enabled !== false;   // default true
+  const haveSnapCreds = !!process.env.SNAPCRAFT_STORE_CREDENTIALS;
+  const snapEnabled = snapConfigEnabled && haveSnapCreds;
+  if (snapConfigEnabled && !haveSnapCreds) {
+    logger.log('Snap target enabled in config but SNAPCRAFT_STORE_CREDENTIALS not set — skipping snap target. Run `snapcraft export-login -` and add to .env to enable.');
+  }
 
   const { entitlementsPath, icons, distRoot, projectRoot } = extras;
   // Paths in dist/electron-builder.yml must be project-relative because electron-builder

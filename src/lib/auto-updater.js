@@ -25,24 +25,24 @@ const logger = new LoggerLite('auto-updater');
 
 const STORAGE_KEY = 'autoUpdater';
 
-// Idle-aware install constants — hardcoded for now (not config-shaped). Tune here.
+// Idle-aware install constant — hardcoded for now (not config-shaped). Tune here.
 //
-// A downloaded update no longer auto-installs after a flat 5s delay. Instead:
-//   1. Any UI activity (mouse / keyboard / window focus / IPC traffic / tray click /
-//      menu invocation / deep-link arrival) bumps `_lastActivityAt = Date.now()`.
-//   2. Once an update is downloaded, an idle-watcher polls every minute. If the user
-//      has been idle for `IDLE_INSTALL_THRESHOLD_MS` it fires `installNow()`.
-//   3. If they're active when the update lands, EM prompts ONCE via electron's
-//      native dialog ("Restart now / Later"). Dismissal is "not now" — the watcher
-//      keeps polling so it'll auto-install whenever the user eventually walks away.
-//      We never re-prompt for the same version (tracked via `_promptedForVersion`).
+// A downloaded update no longer auto-installs after a flat 5s delay. Instead, the
+// existing periodic tick (every `DEFAULTS.intervalMs`) makes the install decision:
+//   1. Any UI activity (mouse / keyboard / wheel / touch / window focus) bumps
+//      `_lastActivityAt = Date.now()`.
+//   2. The periodic tick checks `state.code === 'downloaded'`:
+//        - If user idle ≥ IDLE_INSTALL_THRESHOLD_MS → installNow().
+//        - Else if we haven't prompted for this version yet → native dialog (once).
+//   3. Dismissal ("Later") is "not now" — the periodic tick keeps polling and the
+//      install fires whenever the user eventually walks away. We never re-prompt
+//      for the same version (tracked via `_promptedForVersion`).
 //
 // Consumer hook: `manager.autoUpdater.markActive()` lets app code force-bump the
 // activity timestamp from anywhere (e.g. just received an auth event, finished a
 // long-running renderer task, etc.). Use sparingly — the built-in signals cover
 // 99% of real activity.
 const IDLE_INSTALL_THRESHOLD_MS = 15 * 60 * 1000;   // 15 min
-const IDLE_WATCHER_INTERVAL_MS  = 60 * 1000;        // re-check every minute
 
 const DEFAULTS = {
   enabled:       true,
@@ -78,7 +78,6 @@ const autoUpdater = {
 
   // Idle-aware install state.
   _lastActivityAt:     Date.now(),     // bumped by markActive(); seed to "now" so we don't auto-install the instant we boot
-  _idleWatcherId:      null,           // setInterval handle for the post-download watcher
   _promptedForVersion: null,           // version string we've already prompted about — never prompt twice for the same version
   _activityHooksWired: false,          // guard: only wire main-side activity listeners once per process
 
@@ -135,15 +134,29 @@ const autoUpdater = {
       autoUpdater.checkNow({ userInitiated: false }).catch((e) => logger.warn(`startup check failed: ${e.message}`));
     }, startupDelay));
 
-    // 5. Schedule periodic check.
+    // 5. Schedule periodic tick — single timer that handles ALL install-decision logic:
+    //    a) Re-check the feed (so we discover new updates).
+    //    b) Enforce the 30-day pending-update gate (force install if too old).
+    //    c) Evaluate idle-install readiness (auto-install if user idle, prompt if active).
+    //    Centralizing means one timer, one decision flow, no race between "post-download"
+    //    triggers and watcher ticks.
     if (autoUpdater._options.intervalMs > 0) {
-      autoUpdater._intervalId = setInterval(() => {
-        autoUpdater.checkNow({ userInitiated: false }).catch((e) => logger.warn(`periodic check failed: ${e.message}`));
-        autoUpdater._enforceMaxAgeGate();
-      }, autoUpdater._options.intervalMs);
+      autoUpdater._intervalId = setInterval(() => autoUpdater._periodicTick(), autoUpdater._options.intervalMs);
     }
 
-    logger.log(`auto-updater initialized (interval=${autoUpdater._options.intervalMs}ms, maxAge=${autoUpdater._options.maxAgeMs}ms)`);
+    logger.log(`auto-updater initialized (interval=${autoUpdater._options.intervalMs}ms, maxAge=${autoUpdater._options.maxAgeMs}ms, idle-install threshold=${IDLE_INSTALL_THRESHOLD_MS / 60000}min)`);
+  },
+
+  // Single periodic decision point. Runs every intervalMs. All install-readiness logic
+  // lives here so there's no second timer racing with the first.
+  async _periodicTick() {
+    try {
+      await autoUpdater.checkNow({ userInitiated: false });
+    } catch (e) {
+      logger.warn(`periodic check failed: ${e.message}`);
+    }
+    if (autoUpdater._enforceMaxAgeGate()) return;   // forced install — no further evaluation needed
+    autoUpdater._evaluateIdleInstall();
   },
 
   // Public API ─────────────────────────────────────────────────────────────────────
@@ -220,11 +233,9 @@ const autoUpdater = {
 
   // Lifecycle teardown — used by tests.
   shutdown() {
-    if (autoUpdater._intervalId)   clearInterval(autoUpdater._intervalId);
-    if (autoUpdater._idleWatcherId) clearInterval(autoUpdater._idleWatcherId);
+    if (autoUpdater._intervalId) clearInterval(autoUpdater._intervalId);
     autoUpdater._pendingTimers.forEach((t) => clearTimeout(t));
     autoUpdater._intervalId  = null;
-    autoUpdater._idleWatcherId = null;
     autoUpdater._pendingTimers = [];
     autoUpdater._initialized   = false;
     autoUpdater._library       = null;
@@ -273,50 +284,24 @@ const autoUpdater = {
     autoUpdater._state = { ...autoUpdater._state, ...patch };
     autoUpdater._broadcastStatus();
 
-    // Idle-aware install — when an update finishes downloading via a background poll
-    // (NOT a user-initiated check), kick off the idle watcher. Watcher polls every
-    // minute; only auto-installs when the user has been idle ≥ IDLE_INSTALL_THRESHOLD_MS.
-    // If active when the update lands, prompts once via electron's native dialog and
-    // never re-prompts for the same version — but the watcher keeps polling so the
-    // install eventually fires whenever the user steps away.
-    //
-    // User-initiated checks skip all this; the consumer's UI is expected to surface a
-    // "Restart to update" affordance (the menu/tray check-for-updates item already does
-    // this label-wise — see _menuItemFieldsForState).
-    if (
-      patch.code === 'downloaded'
-      && prevCode !== 'downloaded'
-      && !autoUpdater._userInitiated
-      && !autoUpdater._isDevMode()
-    ) {
-      autoUpdater._startIdleInstallWatcher();
-    }
+    // No post-download install trigger here. All install-decision logic lives in the
+    // periodic tick (`_evaluateIdleInstall`) so there's a single decision point. The
+    // tick runs every intervalMs; first evaluation happens on the next tick after
+    // download completes (gives a user who's currently active a chance to reach a
+    // natural pause before any prompt fires).
   },
 
-  // Start (or restart) the idle-install watcher. Called when an update transitions to
-  // 'downloaded' from a non-user-initiated check. Idempotent — clears any prior watcher
-  // first. The watcher tick runs every IDLE_WATCHER_INTERVAL_MS:
-  //   - If now - _lastActivityAt >= IDLE_INSTALL_THRESHOLD_MS → installNow() (which exits)
-  //   - Else if we haven't prompted for this version yet → show the dialog
-  //   - Else: do nothing this tick, check again next tick
-  _startIdleInstallWatcher() {
-    if (autoUpdater._idleWatcherId) clearInterval(autoUpdater._idleWatcherId);
-    logger.log(`Update downloaded — starting idle-install watcher (threshold=${IDLE_INSTALL_THRESHOLD_MS / 60000}min, tick=${IDLE_WATCHER_INTERVAL_MS / 1000}s).`);
-    // Run one tick immediately so a downloaded update during a long idle stretch installs
-    // promptly instead of waiting another full interval.
-    autoUpdater._idleInstallTick();
-    autoUpdater._idleWatcherId = setInterval(() => autoUpdater._idleInstallTick(), IDLE_WATCHER_INTERVAL_MS);
-  },
-
-  _idleInstallTick() {
-    if (autoUpdater._state.code !== 'downloaded') {
-      // Update was applied or cleared — stop the watcher.
-      if (autoUpdater._idleWatcherId) {
-        clearInterval(autoUpdater._idleWatcherId);
-        autoUpdater._idleWatcherId = null;
-      }
-      return;
-    }
+  // Evaluate whether to auto-install or prompt. Called from the periodic tick (and
+  // skipped when the 30-day gate already forced an install).
+  //   - Only runs when state.code === 'downloaded' (i.e. an update is sitting ready).
+  //   - Skips if the original check was user-initiated (consumer UI handles that path).
+  //   - If user idle ≥ IDLE_INSTALL_THRESHOLD_MS → installNow().
+  //   - Else if we haven't prompted for this version yet → show native dialog.
+  //   - Else: do nothing this tick. Try again next tick.
+  _evaluateIdleInstall() {
+    if (autoUpdater._state.code !== 'downloaded') return;
+    if (autoUpdater._userInitiated) return;        // user-initiated path — consumer UI owns the install affordance
+    if (autoUpdater._isDevMode()) return;          // dev simulator never really installs
 
     const idleMs = Date.now() - autoUpdater._lastActivityAt;
     if (idleMs >= IDLE_INSTALL_THRESHOLD_MS) {

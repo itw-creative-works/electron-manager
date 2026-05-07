@@ -1,5 +1,53 @@
 # Changelog
 
+## 1.2.38 — snap default-on with cred auto-skip + auto-updater idle-install centralized into periodic tick
+
+### Snap publishing now defaults to ON, auto-skips when no creds
+
+`targets.linux.snap.enabled` now defaults to `true` in the EM scaffold. Previously
+default-off, which meant new consumers had to discover + flip a config bool to get
+snap publishing — but flipping it without `SNAPCRAFT_STORE_CREDENTIALS` set caused
+their next CI release to fail at the snap publish step.
+
+New behavior: snap is on by default, but EM auto-skips the snap target at build
+time when `SNAPCRAFT_STORE_CREDENTIALS` is missing. Result:
+
+- New consumers: build produces `.deb` + `.AppImage` cleanly with no snap target,
+  no failure. Add `SNAPCRAFT_STORE_CREDENTIALS` to `.env` (run `snapcraft export-login -`
+  to mint, then `mgr push-secrets`) and the next release publishes to the Snap
+  Store automatically — no config flip needed.
+- Existing consumers who never want snap: set `targets.linux.snap.enabled: false`
+  to explicitly opt out (skips the target regardless of credentials).
+
+Workflow's snapcraft install step now also gates on the credential being non-empty,
+matching the build-config-side behavior. So a consumer with snap enabled in config
+but no creds in CI sees a clean "skipping snapcraft install" log line, no failure.
+
+Both gates use `=== false` checks so missing/unset = enabled = the new default.
+
+### auto-updater idle-install — centralized into the existing periodic tick
+
+The 1.2.33 idle-aware install used a SECOND `setInterval` that started when an
+update finished downloading and ran the same 60s cadence as the existing periodic
+feed-check timer. Two timers, same interval, separate decision flows — easy to
+get out of sync. Refactored into a single `_periodicTick()` that handles all
+install decisions in one pass:
+
+1. Re-check the feed (so we discover new updates).
+2. Enforce the 30-day pending-update gate.
+3. Evaluate idle-install readiness (auto-install if user idle ≥ 15min, prompt
+   once per version if active).
+
+Side benefit: the install decision now waits for the next periodic tick (up to
+60s) after download completes, instead of firing immediately. So a user who's
+typing the moment the download finishes gets up to 60s to reach a natural pause
+before any "Restart Now / Later" prompt appears. Tunable via the existing
+`DEFAULTS.intervalMs`; idle threshold via the existing `IDLE_INSTALL_THRESHOLD_MS`
+constant at the top of `lib/auto-updater.js`.
+
+No behavioral change to user-initiated checks, dev simulation, or the 30-day
+gate. All 437 tests still passing.
+
 ## 1.2.37 — runner cwd fix (`update.finished`); duplicate-runner guard; kill cmd.exe wrappers on uninstall
 
 Fixes a real-world failure introduced by 1.2.36 plus two adjacent UX cleanups.

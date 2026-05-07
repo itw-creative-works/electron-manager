@@ -98,12 +98,12 @@
     },
     linux: {
       arch: ['x64'],                   // amd64; ia32 is essentially extinct on Linux
-      // Snap publishing — disabled by default. Enable to add a `snap` target to the
-      // linux build and auto-publish to the Snap Store on release. Requires
-      // SNAPCRAFT_STORE_CREDENTIALS in your `.env` (run `snapcraft export-login -`
-      // locally to mint, then `mgr push-secrets` flows it to GH Actions).
+      // Snap publishing — enabled by default. Adds a `snap` target to the linux build
+      // and auto-publishes to the Snap Store on release. Requires SNAPCRAFT_STORE_CREDENTIALS
+      // in your `.env` (run `snapcraft export-login -` locally to mint, then `mgr push-secrets`
+      // flows it to GH Actions). Set enabled:false here to skip the snap target entirely.
       snap: {
-        enabled:     false,
+        enabled:     true,
         confinement: 'strict',
         grade:       'stable',
         autoStart:   true,

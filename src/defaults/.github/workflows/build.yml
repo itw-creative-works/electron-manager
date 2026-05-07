@@ -148,19 +148,34 @@ jobs:
           APPLE_TEAM_ID:    ${{ secrets.APPLE_TEAM_ID }}
         run: npm run release:local
 
-      # Linux — install snapcraft only when the consumer's config opts into snap
-      # publishing (`targets.linux.snap.enabled === true`). The action installs
-      # snapcraft as a snap and authenticates against the Snap Store via the
-      # SNAPCRAFT_STORE_CREDENTIALS env var below. Skipped otherwise to keep
-      # Linux-builds-without-snap fast.
-      - name: Install Snapcraft (Linux, when snap enabled)
+      # Linux — install snapcraft when (a) the consumer hasn't explicitly disabled snap
+      # in their config (`targets.linux.snap.enabled !== false`; default is true) AND
+      # (b) SNAPCRAFT_STORE_CREDENTIALS is set as a repo secret. Without the secret we
+      # skip snapcraft install entirely — build-config.js auto-skips the snap target on
+      # the same condition, so the build still produces .deb + .AppImage cleanly with
+      # no snap publish attempt and no failure.
+      - name: Install Snapcraft (Linux, when snap enabled + creds present)
         if: matrix.os == 'ubuntu-latest'
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
         run: |
-          if node -e 'const c = require("./node_modules/json5").parse(require("fs").readFileSync("config/electron-manager.json", "utf8")); process.exit(c?.targets?.linux?.snap?.enabled === true ? 0 : 1);'; then
+          # (a) Config check — explicit `enabled: false` opts out; missing/true opts in.
+          if node -e 'const c = require("./node_modules/json5").parse(require("fs").readFileSync("config/electron-manager.json", "utf8")); process.exit(c?.targets?.linux?.snap?.enabled === false ? 1 : 0);'; then
+            CONFIG_OK=1
+          else
+            CONFIG_OK=0
+            echo "targets.linux.snap.enabled === false — skipping snapcraft install."
+          fi
+          # (b) Credentials check — empty secret means no publish creds available.
+          if [ -n "$SNAPCRAFT_STORE_CREDENTIALS" ]; then
+            CREDS_OK=1
+          else
+            CREDS_OK=0
+            echo "SNAPCRAFT_STORE_CREDENTIALS not set — skipping snapcraft install. Run 'snapcraft export-login -' and add the blob to .env, then 'mgr push-secrets'."
+          fi
+          if [ "$CONFIG_OK" = 1 ] && [ "$CREDS_OK" = 1 ]; then
             sudo snap install snapcraft --classic
             echo "Snapcraft installed."
-          else
-            echo "targets.linux.snap.enabled !== true — skipping snapcraft install."
           fi
 
       # Linux — no signing
