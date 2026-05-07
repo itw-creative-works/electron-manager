@@ -141,8 +141,16 @@ async function install(options) {
     }
   }
 
-  // 4. Install the em-runner-watcher service.
-  await installWatcherService();
+  // 4. The em-runner-watcher service is intentionally NOT installed in v1.2.35+.
+  // The watcher's job was to auto-register new admin orgs by shelling
+  // `mgr runner register-org <org>` on a 1-minute tick — but it runs as
+  // NT AUTHORITY\NETWORK SERVICE in Session 0, which means:
+  //   - its detached `run.cmd` spawns inherit Session 0 (no cert visibility)
+  //   - the Startup folder shortcuts it writes go to NETWORK SERVICE's
+  //     profile, not the user's — so they never trigger at user logon
+  // Both make it actively harmful to the v1.2.35 design. Adding new orgs is
+  // now a manual `mgr runner install` away. uninstall() still tears down any
+  // leftover watcher service from older installs.
 
   // 5. Save install metadata.
   saveConfig({
@@ -318,34 +326,30 @@ async function registerOrg(options) {
     throw new Error(`config.cmd succeeded but .runner / .credentials are missing in ${orgRunnerDir}. The runner is not configured.`);
   }
 
-  // Create the Scheduled Task that runs `run.cmd` in the user's interactive session
-  // at logon. /SC ONLOGON + /RU <user> binds the task to that user's logon session
-  // (Session 1+, with desktop access) — exactly what's needed for signtool to see
-  // the EV cert and for automately to type the SafeNet PIN. /RL HIGHEST runs with
-  // the user's elevated token (matches what an "Run as administrator" cmd would
-  // get) which is needed for some npm/electron-builder operations.
-  const taskName = runnerTaskName(org);
-  createRunnerLogonTask({
-    taskName,
-    runnerDir: orgRunnerDir,
-    account:   taskAccount,
-    password:  (logonCreds && logonCreds.password) || null,
-  });
+  // Two-pronged auto-start:
+  //
+  //   (1) Write a .cmd shortcut in the user's Startup folder so the runner
+  //       auto-spawns at every interactive logon (Session 1, no Task
+  //       Scheduler, no admin needed for the trigger).
+  //
+  //   (2) Spawn run.cmd as a detached child process right now so the runner
+  //       is online before this command returns — no logout/login dance
+  //       required after fresh install. UAC-elevated install spawns into
+  //       Session 1 because UAC only changes the token, not the session;
+  //       confirmed empirically and noted on spawnRunnerDetached().
+  //
+  // The runner name (used for the Startup file basename + as the GitHub
+  // runner name) intentionally matches what older versions used for the
+  // Logon Task — keeps debugging hooks consistent.
+  const runnerNameForShortcut = runnerTaskName(org);
+  writeRunnerStartupShortcut({ runnerName: runnerNameForShortcut, runnerDir: orgRunnerDir });
 
-  // Fire the task immediately so the runner is online RIGHT NOW. Without this,
-  // ONLOGON tasks stay in "Ready, not Running" state until the user logs out
-  // and back in — which means every fresh `mgr runner install` leaves the
-  // runner offline on GH for hours. schtasks /Run uses the same elevation we
-  // already verified via ensureWindowsAdmin() in the install() entry point, so
-  // no extra prompts. We log a warning (not throw) on failure: registration is
-  // still valid; the user can recover with `schtasks /Run /TN <name>` or by
-  // logging out and back in.
-  const startResult = runTask(taskName);
+  const startResult = spawnRunnerDetached(orgRunnerDir);
   if (startResult.ok) {
-    logger.log(`  ✓ Started Logon Task: ${taskName}`);
+    logger.log(`  ✓ Spawned runner detached (cmd PID=${startResult.pid}) — Runner.Listener.exe will appear in Session 1 within ~5s`);
   } else {
-    logger.warn(`  ✗ Could not start Logon Task ${taskName} (exit ${startResult.exitCode}): ${startResult.message}`);
-    logger.warn(`    Run 'schtasks /Run /TN ${taskName}' manually from an elevated cmd, or log out and back in.`);
+    logger.warn(`  ✗ Could not spawn runner immediately: ${startResult.message}`);
+    logger.warn(`    Runner is still registered + will start at next logon. To start now: run "${path.join(orgRunnerDir, 'run.cmd')}" in any cmd window, or log out and back in.`);
   }
 
   // Track in our config.
@@ -353,38 +357,50 @@ async function registerOrg(options) {
   cfg.registeredOrgs = Array.from(new Set([...(cfg.registeredOrgs || []), org]));
   saveConfig(cfg);
 
-  logger.log(`✓ Registered runner + Logon Task '${taskName}' created and started for ${org}`);
+  logger.log(`✓ Registered runner '${runnerNameForShortcut}' for ${org} (auto-starts at logon via Startup folder)`);
 }
 
 // ─── start / stop / status ──────────────────────────────────────────────────────
 async function startServices() {
   ensureWindows();
-  const tasks = listEmRunnerTasks();
-  if (tasks.length === 0) {
-    logger.warn('No em-runner-* Logon Tasks installed. Run `npx mgr runner install` first.');
+  const shortcuts = listRunnerStartupShortcuts();
+  if (shortcuts.length === 0) {
+    logger.warn('No em-runner-* Startup shortcuts installed. Run `npx mgr runner install` first.');
   }
-  for (const name of tasks) {
-    const r = runTask(name);
-    logger.log(`${r.ok ? '✓' : '✗'} start ${name}${r.ok ? '' : ` — ${r.message}`}`);
-  }
-  // Watcher remains a service for now (it lives in Session 0 and just orchestrates
-  // org registration; it doesn't sign anything itself).
-  const watcher = scControl('start', WATCHER_SERVICE_NAME);
-  if (watcher.exitCode !== 1060) {
-    logger.log(`${watcher.ok ? '✓' : '✗'} start ${WATCHER_SERVICE_NAME}${watcher.ok ? '' : ` — ${watcher.message}`}`);
+  for (const runnerName of shortcuts) {
+    // Map shortcut name back to its runner dir. The naming convention is
+    // em-runner-<host>-<org>; the org dir is actions-runner-<org>.
+    const m = /^em-runner-[^-]+-(.+)$/i.exec(runnerName);
+    const orgDirName = m ? `actions-runner-${m[1].toLowerCase()}` : null;
+    const runnerDir = orgDirName ? path.join(RUNNER_HOME, orgDirName) : null;
+    if (!runnerDir || !jetpack.exists(runnerDir)) {
+      logger.warn(`✗ start ${runnerName} — could not resolve runner dir from shortcut name`);
+      continue;
+    }
+    const r = spawnRunnerDetached(runnerDir);
+    logger.log(`${r.ok ? '✓' : '✗'} start ${runnerName}${r.ok ? ` (cmd PID=${r.pid})` : ` — ${r.message}`}`);
   }
 }
 
 async function stopServices() {
   ensureWindows();
-  const tasks = listEmRunnerTasks();
-  for (const name of tasks) {
-    const r = endTask(name);
-    logger.log(`${r.ok ? '✓' : '✗'} stop ${name}${r.ok ? '' : ` — ${r.message}`}`);
-  }
-  const watcher = scControl('stop', WATCHER_SERVICE_NAME);
-  if (watcher.exitCode !== 1060) {
-    logger.log(`${watcher.ok ? '✓' : '✗'} stop ${WATCHER_SERVICE_NAME}${watcher.ok ? '' : ` — ${watcher.message}`}`);
+  // Stopping = killing all Runner.Listener.exe processes whose path lives
+  // under RUNNER_HOME. /T also kills any Runner.Worker.exe children mid-job.
+  // Startup shortcuts are left in place so a logout/login still re-spawns;
+  // for a permanent stop, run `mgr runner uninstall`.
+  const procs = listRunnerListenerProcessesUnder(RUNNER_HOME);
+  if (procs.length === 0) {
+    logger.log('No Runner.Listener.exe processes under RUNNER_HOME — already stopped.');
+  } else {
+    const { spawnSync } = require('child_process');
+    for (const { pid, execPath } of procs) {
+      const k = spawnSync('taskkill', ['/F', '/PID', String(pid), '/T'], { encoding: 'utf8' });
+      if (k.status === 0) {
+        logger.log(`  ✓ Killed PID ${pid} (${execPath})`);
+      } else {
+        logger.warn(`  ✗ taskkill ${pid} (exit ${k.status}): ${(k.stderr || '').trim().slice(0, 200)}`);
+      }
+    }
   }
 }
 
@@ -397,34 +413,51 @@ async function statusServices() {
   logger.log(`Registered orgs: ${(cfg.registeredOrgs || []).join(', ') || '(none)'}`);
   logger.log('');
 
-  // Per-org runner Logon Tasks.
-  const tasks = listEmRunnerTasks();
-  if (tasks.length === 0) {
-    logger.warn('No em-runner-* Logon Tasks installed.');
+  // Per-org Startup shortcuts (auto-start at every logon).
+  const shortcuts = listRunnerStartupShortcuts();
+  if (shortcuts.length === 0) {
+    logger.warn('No em-runner-* Startup shortcuts installed.');
     logger.warn('Run `npx mgr runner install` to create them — registration alone is not enough.');
   } else {
-    logger.log(`Runner Logon Tasks (${tasks.length}):`);
-    for (const name of tasks) {
-      const state = taskState(name);
-      const symbol = state === 'RUNNING' ? '✓' : state === 'READY' ? '·' : '?';
-      logger.log(`  ${symbol} ${name} — ${state}`);
+    logger.log(`Runner Startup shortcuts (${shortcuts.length}):`);
+    for (const name of shortcuts) {
+      logger.log(`  · ${name}.cmd → ${runnerStartupFile(name)}`);
     }
   }
 
-  // Surface any leftover legacy services so users can clean them up.
-  const legacy = listActionsRunnerServices();
-  if (legacy.length > 0) {
-    logger.log('');
-    logger.warn(`Legacy actions.runner.* services detected (${legacy.length}). These are leftovers from the old service-mode runner and should be removed via 'npx mgr runner uninstall'.`);
-    for (const name of legacy) logger.log(`  · ${name}`);
+  // Currently-running Runner.Listener.exe processes under RUNNER_HOME.
+  logger.log('');
+  const procs = listRunnerListenerProcessesUnder(RUNNER_HOME);
+  if (procs.length === 0) {
+    logger.warn('No Runner.Listener.exe processes are running under RUNNER_HOME.');
+    logger.warn('Run `npx mgr runner start` to spawn them, or log out and back in.');
+  } else {
+    logger.log(`Running runners (${procs.length}):`);
+    for (const { pid, sessionId, execPath } of procs) {
+      const symbol = sessionId === 0 ? '⚠' : '✓';
+      const pathStr = execPath || '(path unavailable — likely NETWORK SERVICE zombie from older watcher)';
+      logger.log(`  ${symbol} PID=${pid} session=${sessionId} ${pathStr}`);
+    }
+    if (procs.some((p) => p.sessionId === 0)) {
+      logger.warn('  ⚠ Runner in Session 0 cannot see CurrentUser\\My cert store. Kill it (`mgr runner stop`) and re-spawn from Session 1.');
+    }
   }
 
-  // Watcher service.
+  // Surface leftover legacy services so users can clean them up.
+  const legacyServices = listActionsRunnerServices();
+  if (legacyServices.length > 0) {
+    logger.log('');
+    logger.warn(`Legacy actions.runner.* services detected (${legacyServices.length}). Run 'npx mgr runner uninstall' to remove them.`);
+    for (const name of legacyServices) logger.log(`  · ${name}`);
+  }
+
+  // Surface a leftover watcher service if one is still installed from older
+  // EM versions — v1.2.35+ doesn't install it, but upgraders may have one.
   const watcherState = scState(WATCHER_SERVICE_NAME);
-  const watcherSymbol = watcherState === 'RUNNING' ? '✓' : watcherState === 'STOPPED' ? '·' : '?';
-  logger.log('');
-  logger.log(`Watcher service:`);
-  logger.log(`  ${watcherSymbol} ${WATCHER_SERVICE_NAME} — ${watcherState}`);
+  if (watcherState !== 'NOT_INSTALLED') {
+    logger.log('');
+    logger.warn(`Legacy watcher service detected: ${WATCHER_SERVICE_NAME} (${watcherState}). v1.2.35+ doesn't use it. Run 'npx mgr runner uninstall' to remove.`);
+  }
 }
 
 // ─── uninstall ──────────────────────────────────────────────────────────────────
@@ -437,8 +470,18 @@ async function uninstall(options) {
   // the lock-on-files issue better than raw `sc delete`.
   await uninstallWatcherService();
 
-  // End + delete each em-runner-<host>-<org> Logon Task.
-  await uninstallActionsRunnerTasks();
+  // Delete each em-runner-<host>-<org>.cmd file in the user's Startup folder
+  // so the runner doesn't auto-spawn at next logon.
+  const shortcuts = listRunnerStartupShortcuts();
+  for (const runnerName of shortcuts) {
+    const removed = removeRunnerStartupShortcut(runnerName);
+    if (removed) logger.log(`  ✓ Removed Startup shortcut: ${runnerName}.cmd`);
+  }
+
+  // Idempotent legacy cleanup: any em-runner-* Scheduled Tasks left over from
+  // v1.2.16–v1.2.34 (which used Logon Tasks) still need to be removed so they
+  // don't keep spawning Session 0 zombies after upgrade.
+  await uninstallLegacyLogonTasks();
 
   // Stop + delete any leftover legacy actions.runner.* services from old EM
   // versions that registered runners as Windows services. Idempotent — no-op
@@ -486,43 +529,40 @@ async function uninstallWatcherService() {
   const exists = await scQueryExists(WATCHER_SERVICE_NAME);
   if (!exists) return;
 
-  // Use node-windows' own uninstall — it handles both "stop" and "delete" plus the
-  // daemon dir cleanup that raw `sc delete` doesn't touch.
-  let Service;
-  try {
-    Service = require('node-windows').Service;
-  } catch (e) {
-    // No node-windows here? Fall back to raw sc.
-    await runScCommand('stop',   WATCHER_SERVICE_NAME);
-    await runScCommand('delete', WATCHER_SERVICE_NAME);
-    return;
+  const { spawnSync } = require('child_process');
+
+  // CRITICAL: clear the failure-action config FIRST. node-windows configures
+  // the watcher with restart-on-failure, so a plain `sc stop` triggers SCM
+  // to immediately respawn it, defeating the uninstall. We blank the restart
+  // policy first, THEN stop, THEN kill any stragglers, THEN delete.
+  // (We used to use node-windows' own svc.uninstall(), but it left the
+  // service running in v1.2.34, kept spawning rogue Runner.Listener.exe in
+  // Session 0, and the recursive uninstall called from install() then hit
+  // EPERM trying to remove RUNNER_HOME.)
+  spawnSync('sc', ['failure', WATCHER_SERVICE_NAME, 'reset=', '0', 'actions='], { stdio: 'ignore' });
+  spawnSync('sc', ['stop', WATCHER_SERVICE_NAME], { stdio: 'ignore' });
+
+  // The watcher's wrapper executable is `emrunnerwatcher.exe` (node-windows
+  // names the daemon after the service). Force-kill any process by that
+  // name + any node.exe child whose CommandLine references watcher.js, in
+  // case SCM's stop didn't fully take.
+  spawnSync('taskkill', ['/F', '/IM', 'emrunnerwatcher.exe', '/T'], { stdio: 'ignore' });
+  const r = spawnSync('powershell', [
+    '-NoProfile', '-NonInteractive', '-Command',
+    `Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -like '*watcher.js*' } | ForEach-Object { $_.ProcessId }`,
+  ], { encoding: 'utf8' });
+  if (r.status === 0) {
+    for (const line of (r.stdout || '').split(/\r?\n/)) {
+      const pid = line.trim();
+      if (/^\d+$/.test(pid)) {
+        spawnSync('taskkill', ['/F', '/PID', pid, '/T'], { stdio: 'ignore' });
+      }
+    }
   }
 
-  const watcherDir = path.join(RUNNER_HOME, 'watcher');
-  const svc = new Service({
-    name:        WATCHER_SERVICE_NAME,
-    description: 'electron-manager runner watcher',
-    script:      path.join(watcherDir, 'watcher.js'),
-  });
-
-  return new Promise((resolve) => {
-    let done = false;
-    const finish = () => { if (!done) { done = true; resolve(); } };
-    svc.on('uninstall', finish);
-    svc.on('alreadyuninstalled', finish);
-    svc.on('error', (e) => {
-      logger.warn(`watcher service uninstall warning: ${e.message}`);
-      finish();
-    });
-    try {
-      svc.uninstall();
-    } catch (e) {
-      logger.warn(`watcher service uninstall threw: ${e.message}`);
-      finish();
-    }
-    // Hard timeout — don't hang forever if events don't fire.
-    setTimeout(finish, 15000);
-  });
+  // Now safe to delete the service definition.
+  spawnSync('sc', ['delete', WATCHER_SERVICE_NAME], { stdio: 'ignore' });
+  logger.log(`  ✓ Removed legacy watcher service: ${WATCHER_SERVICE_NAME}`);
 }
 
 async function uninstallActionsRunnerServices() {
@@ -566,14 +606,19 @@ async function removeRunnerHomeWithRetry() {
   }
 }
 
-// Find any Runner.Listener.exe instances whose ExecutablePath lives under
-// RUNNER_HOME and force-kill them (with /T so any Runner.Worker.exe children
-// from an in-flight job are also killed). Critical for uninstall: legacy
-// foreground runners (started by double-clicking run.cmd) hold open file
-// handles inside the runner dirs and will fail jetpack.remove with EPERM.
-// Filtering by path (not just by process name) is intentional — it avoids
-// touching unrelated Runner.Listener.exe processes that might run from other
-// install paths on the same box.
+// Find Runner.Listener.exe instances and force-kill them with `taskkill /F /T`
+// (the /T also kills Runner.Worker.exe children from in-flight jobs).
+// Critical for uninstall — without this, jetpack.remove(RUNNER_HOME) fails
+// with EPERM whenever a Runner.Listener has open file handles in the dir.
+//
+// Path filter: when Get-CimInstance can read the process's ExecutablePath, we
+// skip anything OUTSIDE RUNNER_HOME so unrelated runner installs aren't
+// touched. When ExecutablePath comes back empty — which happens for processes
+// owned by NETWORK SERVICE / LocalSystem even from an elevated query, since
+// those tokens don't grant ProcessVmRead by default — we kill anyway. Those
+// path-unavailable instances are almost always zombies left by the v1.2.16-
+// v1.2.34 watcher service (which spawned register-org subprocesses as
+// NETWORK SERVICE), and during uninstall we want them gone.
 function killRunnerListenerProcessesUnderHome() {
   if (process.platform !== 'win32') return;
   const { spawnSync } = require('child_process');
@@ -596,7 +641,13 @@ function killRunnerListenerProcessesUnderHome() {
     if (idx < 0) continue;
     const pid = line.slice(0, idx);
     const execPath = line.slice(idx + 1);
-    if (!/^\d+$/.test(pid) || !execPath) continue;
+    if (!/^\d+$/.test(pid)) continue;
+    if (!execPath) {
+      // Path unavailable (typically NETWORK SERVICE / LocalSystem-owned).
+      // Still a Runner.Listener.exe by WMI filter, kill it during uninstall.
+      targets.push({ pid, execPath: '(path unavailable — likely NETWORK SERVICE-owned)' });
+      continue;
+    }
     if (execPath.toLowerCase().startsWith(RUNNER_HOME.toLowerCase())) {
       targets.push({ pid, execPath });
     }
@@ -604,11 +655,11 @@ function killRunnerListenerProcessesUnderHome() {
 
   if (targets.length === 0) return;
 
-  logger.log(`Killing ${targets.length} foreground Runner.Listener.exe process(es) under ${RUNNER_HOME} (legacy double-click run.cmd holders + any Logon Task instances) before disk cleanup…`);
+  logger.log(`Killing ${targets.length} Runner.Listener.exe process(es) before disk cleanup…`);
   for (const { pid, execPath } of targets) {
     const k = spawnSync('taskkill', ['/F', '/PID', pid, '/T'], { encoding: 'utf8' });
     if (k.status === 0) {
-      logger.log(`  ✓ Killed PID ${pid} (${execPath})`);
+      logger.log(`  ✓ Killed PID ${pid} ${execPath}`);
     } else {
       logger.warn(`  ✗ taskkill ${pid} failed (exit ${k.status}): ${(k.stderr || '').trim().slice(0, 200)}`);
     }
@@ -904,140 +955,185 @@ function escapeRegExp(s) {
 //   /RL HIGHEST       — run with the user's elevated token (matches admin cmd)
 //   /F                — force overwrite if a task with this name already exists
 //   /TR "..."         — the action to run; we wrap run.cmd so cwd is set correctly
-function createRunnerLogonTask({ taskName, runnerDir, account, password }) {
-  if (process.platform !== 'win32') return;
-  const { spawnSync } = require('child_process');
+// ─── Startup folder runner management (replaces Logon Tasks) ──────────────
+//
+// v1.2.35+ registers the per-org runner as a .cmd file in the user's Startup
+// folder instead of as a Scheduled Task. Reason: Task Scheduler runs ONLOGON
+// tasks in its own (Session 0) context regardless of the /IT flag, leaving
+// the runner blind to the user's CurrentUser\My cert store and unable to host
+// the SafeNet Token Logon PIN dialog. Files in the Startup folder are
+// auto-run by Explorer at every interactive logon (Session 1), no Task
+// Scheduler middleman, no admin needed for the auto-start trigger.
+//
+// File layout:
+//   %APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\<runnerName>.cmd
+//
+// Content:
+//   @echo off
+//   start "" /min "C:\actions-runners\actions-runner-<org>\run.cmd"
+//
+// `start "" /min` launches run.cmd in a minimized window and returns
+// immediately, so subsequent startup items aren't blocked. The empty `""` is
+// start.exe's title parameter — required when the next argument is quoted,
+// otherwise start interprets the quoted path as a console title.
 
+const STARTUP_DIR = process.platform === 'win32'
+  ? path.join(
+      process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
+      'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup',
+    )
+  : null;
+
+function runnerStartupFile(runnerName) {
+  if (!STARTUP_DIR) return null;
+  return path.join(STARTUP_DIR, `${runnerName}.cmd`);
+}
+
+function writeRunnerStartupShortcut({ runnerName, runnerDir }) {
+  if (process.platform !== 'win32') return;
   const runCmd = path.join(runnerDir, 'run.cmd');
   if (!jetpack.exists(runCmd)) {
-    throw new Error(`Cannot create Logon Task — run.cmd not found at ${runCmd}.`);
+    throw new Error(`Cannot write Startup shortcut — run.cmd not found at ${runCmd}.`);
   }
-
-  // /TR is the action to execute. We exec run.cmd directly (no `cmd /c` wrapper,
-  // no `cd /d` — actions/runner's run.cmd uses %~dp0 to find its own helpers, so
-  // cwd doesn't matter). Wrapping in `cmd /c "...&&..."` was the obvious thing
-  // to try first, but schtasks's /TR parser eats the `&&` even when fully
-  // quoted, so we keep it simple. The path is double-quoted to handle spaces.
-  const tr = `"${runCmd}"`;
-
-  // /IT is critical: marks the task as INTERACTIVE, meaning it binds to the
-  // /RU user's existing logged-on interactive session at run time instead of
-  // creating a fresh non-interactive batch logon for them. Without /IT, the
-  // task spawns in a separate non-interactive session that has its own (empty)
-  // view of the user's cert store — signtool then fails with "No certificates
-  // were found that met all the given criteria" even though the same cert is
-  // visible in the user's actual desktop session. /IT also ensures the
-  // SafeNet eToken Token Logon dialog, when triggered, renders on the user's
-  // visible desktop where automately can find and type into it.
-  // Cost: the task only runs while the user is logged on. With Windows
-  // auto-logon configured (one-time), this is a non-issue on a dedicated box.
-  //
-  // /RL HIGHEST is intentionally omitted: signtool, npm install, electron-builder,
-  // and automately keystroke injection don't require elevated tokens, and /RL
-  // HIGHEST is what triggers schtasks's "Access is denied" without explicit
-  // admin elevation at install time. ensureWindowsAdmin() still requires admin
-  // to create ONLOGON tasks at all (Windows policy), but we don't escalate
-  // beyond that.
-  const args = [
-    '/Create',
-    '/TN', taskName,
-    '/SC', 'ONLOGON',
-    '/RU', account,
-    '/IT',
-    '/TR', tr,
-    '/F',
-  ];
-  // Password is only needed if the task's RU differs from the invoking user, OR
-  // if you want the task to be runnable when no one is interactively logged in
-  // (which we don't — ONLOGON inherently requires a logon event). Pass it when
-  // we have it for safety, omit otherwise.
-  if (password) {
-    args.push('/RP', password);
-  }
-
-  const r = spawnSync('schtasks', args, { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' });
-  if (r.status !== 0) {
-    const msg = (r.stderr || r.stdout || '').trim().slice(0, 500);
-    throw new Error(`schtasks /Create failed (exit ${r.status}) for ${taskName}: ${msg}`);
-  }
-  logger.log(`  ✓ Logon Task created: ${taskName} (RU=${account}, runs run.cmd in ${runnerDir})`);
+  jetpack.dir(STARTUP_DIR);
+  const file = runnerStartupFile(runnerName);
+  // We DO use run.cmd (so its self-update relaunch loop fires when
+  // Runner.Listener exits with code 3 = update needed). The trick: the
+  // wrapper cmd.exe must run with cwd OUTSIDE RUNNER_HOME, otherwise it
+  // holds the runner dir as cwd for the lifetime of the listener and every
+  // subsequent uninstall hits EPERM. We `cd /d %WINDIR%` first so the
+  // launched cmd.exe inherits %WINDIR% as cwd. Runner.Listener uses its
+  // binary location (not cwd) to find .runner / .credentials, so this is
+  // safe — verified against actions/runner v2.319.x.
+  const body = [
+    '@echo off',
+    `cd /d "%WINDIR%"`,
+    `start "" /min "${runCmd}"`,
+    '',
+  ].join('\r\n');
+  jetpack.write(file, body);
+  logger.log(`  ✓ Startup shortcut: ${file}`);
 }
 
-// Run a task immediately (don't wait for the next logon trigger). Useful for
-// `mgr runner start` and for the initial install so the user doesn't have to
-// log out + log back in before jobs are picked up.
-function runTask(taskName) {
-  if (process.platform !== 'win32') return { ok: false, message: 'not-windows' };
-  const { spawnSync } = require('child_process');
-  const r = spawnSync('schtasks', ['/Run', '/TN', taskName], { encoding: 'utf8' });
-  return {
-    ok: r.status === 0,
-    message: (r.stderr || r.stdout || '').trim().split('\n').slice(-2).join(' ').trim() || `exit ${r.status}`,
-    exitCode: r.status,
-  };
-}
-
-// End a running task instance. Used by `mgr runner stop`. Note: this terminates
-// the current run; if the user logs out + back in, the task fires again per its
-// ONLOGON trigger. To prevent that, the task itself must be deleted (uninstall).
-function endTask(taskName) {
-  if (process.platform !== 'win32') return { ok: false, message: 'not-windows' };
-  const { spawnSync } = require('child_process');
-  const r = spawnSync('schtasks', ['/End', '/TN', taskName], { encoding: 'utf8' });
-  return {
-    ok: r.status === 0,
-    message: (r.stderr || r.stdout || '').trim().split('\n').slice(-2).join(' ').trim() || `exit ${r.status}`,
-    exitCode: r.status,
-  };
-}
-
-// Returns 'RUNNING' | 'READY' | 'NOT_INSTALLED' | 'UNKNOWN'.
-// schtasks /Query /TN <name> /FO LIST prints "Status:  Running" or "Ready" etc.
-function taskState(taskName) {
-  if (process.platform !== 'win32') return 'UNKNOWN';
-  const { spawnSync } = require('child_process');
-  const r = spawnSync('schtasks', ['/Query', '/TN', taskName, '/FO', 'LIST'], { encoding: 'utf8' });
-  if (r.status !== 0) {
-    const msg = (r.stderr || '').toLowerCase();
-    if (msg.includes('cannot find') || msg.includes('does not exist')) return 'NOT_INSTALLED';
-    return 'UNKNOWN';
+function removeRunnerStartupShortcut(runnerName) {
+  if (process.platform !== 'win32') return false;
+  const file = runnerStartupFile(runnerName);
+  if (jetpack.exists(file)) {
+    jetpack.remove(file);
+    return true;
   }
-  const out = r.stdout || '';
-  const m = /^Status:\s*(\w+)/m.exec(out);
-  return m ? m[1].toUpperCase() : 'UNKNOWN';
+  return false;
 }
 
-// Enumerate all em-runner-* Logon Tasks. Uses schtasks /Query /FO CSV /NH which
-// gives us TaskName,Next Run Time,Status — we just need the first column.
-function listEmRunnerTasks() {
+// Names of all `em-runner-*` shortcuts in the Startup folder (sans `.cmd`).
+function listRunnerStartupShortcuts() {
+  if (process.platform !== 'win32') return [];
+  if (!jetpack.exists(STARTUP_DIR)) return [];
+  return (jetpack.list(STARTUP_DIR) || [])
+    .filter((name) => /^em-runner-.+\.cmd$/i.test(name))
+    .map((name) => name.replace(/\.cmd$/i, ''))
+    .sort();
+}
+
+// Spawn Runner.Listener.exe as a fully detached background process. We exec
+// the listener directly (NOT via run.cmd) because run.cmd is a cmd.exe batch
+// wrapper that blocks for the lifetime of the listener with cwd = runnerDir;
+// a long-lived cmd.exe holding cwd inside RUNNER_HOME blocks every later
+// uninstall with EPERM. Bypassing run.cmd loses its self-update relaunch
+// path, but `mgr runner install` refreshing the runner binary is the
+// preferred update mechanism in EM anyway.
+//
+// Detached + windowsHide + ignored stdio = no console window flashes during
+// install and the listener survives the install command's exit. UAC-
+// elevated parents still spawn into Session 1 because UAC only changes the
+// token, not the session — confirmed empirically.
+function spawnRunnerDetached(runnerDir) {
+  if (process.platform !== 'win32') {
+    return { ok: false, message: 'not-windows', pid: null };
+  }
+  const runCmd = path.join(runnerDir, 'run.cmd');
+  if (!jetpack.exists(runCmd)) {
+    return { ok: false, message: `run.cmd not found at ${runCmd}`, pid: null };
+  }
+  const { spawn } = require('child_process');
+  try {
+    // cwd is intentionally OUTSIDE RUNNER_HOME (we use %WINDIR%): the cmd.exe
+    // wrapper that runs run.cmd holds its cwd for the lifetime of the listener,
+    // and a long-lived cmd.exe with cwd inside the runner dir blocks every
+    // subsequent uninstall with EPERM. Runner.Listener.exe uses its binary
+    // location (not cwd) to find config, so this is safe.
+    const child = spawn('cmd.exe', ['/c', runCmd], {
+      cwd: process.env.WINDIR || 'C:\\Windows',
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    child.unref();
+    return { ok: true, pid: child.pid };
+  } catch (e) {
+    return { ok: false, message: e.message, pid: null };
+  }
+}
+
+// Enumerate Runner.Listener.exe processes whose ExecutablePath lives under
+// `targetDir`. Used by status (visibility) and stop (kill targets). Returns
+// [{ pid, sessionId, execPath }, ...]. Path-unavailable processes (NETWORK
+// SERVICE-owned zombies) are surfaced too with execPath = null so callers
+// can decide what to do with them — status warns, stop kills.
+function listRunnerListenerProcessesUnder(targetDir) {
   if (process.platform !== 'win32') return [];
   const { spawnSync } = require('child_process');
-  const r = spawnSync('schtasks', ['/Query', '/FO', 'CSV', '/NH'], { encoding: 'utf8' });
+  const r = spawnSync('powershell', [
+    '-NoProfile', '-NonInteractive', '-Command',
+    `Get-CimInstance Win32_Process -Filter "Name='Runner.Listener.exe'" | ForEach-Object { "$($_.ProcessId)|$($_.SessionId)|$($_.ExecutablePath)" }`,
+  ], { encoding: 'utf8' });
   if (r.status !== 0) return [];
-  const names = new Set();
+  const out = [];
   for (const rawLine of (r.stdout || '').split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!line) continue;
-    // CSV first field — strip leading quote, take up to next quote.
-    const m = /^"([^"]+)"/.exec(line);
-    if (!m) continue;
-    // schtasks output prefixes task path with "\" if at root: e.g. \em-runner-...
-    const tn = m[1].replace(/^\\/, '');
-    if (/^em-runner-/i.test(tn)) names.add(tn);
+    const parts = line.split('|');
+    if (parts.length !== 3) continue;
+    const [pid, sessionId, execPath] = parts;
+    if (!/^\d+$/.test(pid)) continue;
+    if (!execPath) {
+      // Path unavailable — almost certainly a NETWORK SERVICE-owned zombie.
+      // Surface it so status can call it out and stop can kill it.
+      out.push({ pid: parseInt(pid, 10), sessionId: parseInt(sessionId, 10), execPath: null });
+      continue;
+    }
+    if (execPath.toLowerCase().startsWith(String(targetDir).toLowerCase())) {
+      out.push({ pid: parseInt(pid, 10), sessionId: parseInt(sessionId, 10), execPath });
+    }
   }
-  return [...names].sort();
+  return out;
 }
 
-async function uninstallActionsRunnerTasks() {
-  const tasks = listEmRunnerTasks();
-  if (tasks.length === 0) return;
+// Idempotent cleanup of any em-runner-* Scheduled Tasks left over from
+// v1.2.16–v1.2.34, which registered runners as Logon Tasks. v1.2.35+ moved
+// to Startup folder shortcuts; this runs during uninstall so upgraders'
+// leftover tasks get pruned without manual schtasks juggling.
+async function uninstallLegacyLogonTasks() {
+  if (process.platform !== 'win32') return;
   const { spawnSync } = require('child_process');
+  const r = spawnSync('schtasks', ['/Query', '/FO', 'CSV', '/NH'], { encoding: 'utf8' });
+  if (r.status !== 0) return;
+  const tasks = [];
+  for (const rawLine of (r.stdout || '').split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const m = /^"([^"]+)"/.exec(line);
+    if (!m) continue;
+    const tn = m[1].replace(/^\\/, '');
+    if (/^em-runner-/i.test(tn)) tasks.push(tn);
+  }
+  if (tasks.length === 0) return;
   for (const name of tasks) {
-    logger.log(`Removing Logon Task ${name}…`);
-    spawnSync('schtasks', ['/End',    '/TN', name],          { stdio: 'ignore' }); // best-effort end
-    const r = spawnSync('schtasks', ['/Delete', '/TN', name, '/F'], { encoding: 'utf8' });
-    if (r.status !== 0) {
-      logger.warn(`  schtasks /Delete failed for ${name} (exit ${r.status}): ${(r.stderr || '').trim().slice(0, 200)}`);
+    logger.log(`Removing legacy Logon Task ${name}…`);
+    spawnSync('schtasks', ['/End',    '/TN', name],          { stdio: 'ignore' });
+    const d = spawnSync('schtasks', ['/Delete', '/TN', name, '/F'], { encoding: 'utf8' });
+    if (d.status !== 0) {
+      logger.warn(`  schtasks /Delete failed for ${name} (exit ${d.status}): ${(d.stderr || '').trim().slice(0, 200)}`);
     } else {
       logger.log(`  ✓ Deleted ${name}`);
     }

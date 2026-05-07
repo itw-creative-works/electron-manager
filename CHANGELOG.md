@@ -1,5 +1,89 @@
 # Changelog
 
+## 1.2.35 — `mgr runner install` is one-shot end-to-end: drops Logon Task, drops watcher, switches to Startup folder
+
+This is the version where `npx mgr runner install` actually does what its name
+says — a fresh install ends with the runner online in the user's interactive
+Session 1, and every subsequent logon auto-respawns it. No follow-up commands,
+no logout/login dance, no manual `schtasks /Run` workarounds.
+
+### What changed and why
+
+**Logon Task (`/SC ONLOGON /IT`) → Startup folder `.cmd` shortcut.**
+The Task Scheduler approach turned out to be fundamentally incompatible with
+this design. `schtasks /Run` from elevated UAC reliably failed with "Element
+not found", and even when the real ONLOGON event fired, Task Scheduler ran
+the task in its own Session 0 context regardless of `/IT` — leaving the
+runner blind to `CurrentUser\My` certs and unable to host the SafeNet PIN
+dialog. v1.2.35 writes
+`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\<runnerName>.cmd`,
+which Explorer auto-executes at every logon in Session 1 with no Task
+Scheduler middleman.
+
+**Detached spawn at install time.**
+`registerOrg` now invokes `cmd.exe /c <runCmd>` as a fully detached child
+(`detached: true, stdio: 'ignore', windowsHide: true`) so the runner is
+online before `mgr runner install` returns. UAC-elevated install processes
+spawn into Session 1 because UAC only changes the token, not the session.
+
+**Wrapper cwd bug — runner spawn uses `cwd: %WINDIR%`.**
+The cmd.exe wrapper that runs `run.cmd` blocks for the lifetime of
+`Runner.Listener.exe`. If we set its cwd to the runner dir, that long-lived
+cmd.exe locks the dir and every subsequent `mgr runner uninstall` fails with
+`EPERM, Permission denied: \\?\C:\actions-runners\actions-runner-<org>`.
+Setting cwd to `%WINDIR%` instead breaks the lock — `Runner.Listener.exe`
+finds its config via its binary location, not cwd, so this is safe.
+
+**`em-runner-watcher` service: removed from install path.**
+The watcher polled GH for new admin orgs every minute and shelled
+`mgr runner register-org <org>` for each. It ran as `NT AUTHORITY\NETWORK
+SERVICE` in Session 0, which means (a) any runner it spawned inherited
+Session 0 (no cert visibility) and (b) Startup folder shortcuts it wrote
+landed in NETWORK SERVICE's profile (never triggered for the desktop user).
+Plus its `node-windows`-managed restart-on-failure config made it survive
+both `sc stop` and `svc.uninstall()` — so on every fresh install the v1.2.34
+watcher would respawn dozens of Session 0 zombie listeners that locked
+RUNNER_HOME against the next uninstall. v1.2.35 doesn't install it anymore;
+adding new orgs is a manual `mgr runner install` away.
+
+**`uninstallWatcherService` hardened.**
+Bypasses node-windows entirely. Clears the SCM failure-action policy first
+(`sc failure ... reset= 0 actions=`), then `sc stop`, then nuclear `taskkill
+/F /IM emrunnerwatcher.exe`, then `taskkill /F` for any `node.exe` whose
+CommandLine references `watcher.js`, then `sc delete`. Idempotent — handles
+the upgrade path from v1.2.16-v1.2.34 where the watcher was installed.
+
+**`killRunnerListenerProcessesUnderHome` handles NETWORK SERVICE-owned zombies.**
+Previously skipped any `Runner.Listener.exe` whose `ExecutablePath` came back
+empty from `Get-CimInstance` — but that's exactly what NETWORK SERVICE-owned
+processes look like even from an elevated query, since those tokens don't
+grant ProcessVmRead by default. v1.2.35 kills them anyway during uninstall:
+the WMI filter already proved they're listeners, and uninstall is a clean-up.
+
+**Legacy cleanup paths:**
+- `uninstallLegacyLogonTasks()` removes any `em-runner-*` Scheduled Tasks
+  left over from v1.2.16-v1.2.34 (idempotent).
+- Old `actions.runner.*` services are still nuked by
+  `uninstallActionsRunnerServices()`.
+- The watcher service (if installed by an older EM) is fully torn down by
+  the hardened `uninstallWatcherService()`.
+
+### Net behavior
+
+```
+$ npx mgr runner install              # ONE command, UAC prompt, that's it
+... Successfully registered: 1/1 orgs
+... ✓ Startup shortcut: ...em-runner-<host>-<org>.cmd
+... ✓ Spawned runner detached (cmd PID=...) — Runner.Listener.exe in Session 1
+
+# Verify
+$ npx mgr runner status
+... ✓ PID=... session=1 ...Runner.Listener.exe (running, signs work)
+```
+
+At next logon, the Startup `.cmd` fires automatically; no further user action
+needed. Adding a new admin org? Re-run `mgr runner install` (it's idempotent).
+
 ## 1.2.34 — `runner uninstall` kills Runner.Listener.exe holders before disk cleanup
 
 `mgr runner uninstall` was failing on `removeRunnerHomeWithRetry` with `EPERM,
