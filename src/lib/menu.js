@@ -329,7 +329,10 @@ const menu = {
         label: `${brandName} Home`,
         click: () => {
           const { shell } = require('electron');
-          shell.openExternal(brandUrl);
+          // Route through getWebsiteUrl() so dev runs open localhost:4000 instead
+          // of punching out to the live brand site.
+          const url = (typeof m?.getWebsiteUrl === 'function') ? m.getWebsiteUrl() : brandUrl;
+          shell.openExternal(url);
         },
       });
     }

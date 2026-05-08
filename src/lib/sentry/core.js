@@ -52,20 +52,13 @@ function normalizeUser(user, opts = {}) {
   return Object.keys(out).length === 0 ? null : out;
 }
 
-// Resolve the app version from electron, package.json, or null.
+// Resolve the app version. Routes through the cross-context `manager.getVersion()`
+// helper (src/utils/mode-helpers.js — `app.getVersion()` first, then package.json
+// fallback). Manager arg may be undefined in odd init paths; in that case fall back
+// to the same helper as a static via the build-time Manager.
 function resolveRelease(manager) {
-  try {
-    const electron = require('electron');
-    if (electron && electron.app && typeof electron.app.getVersion === 'function') {
-      return electron.app.getVersion();
-    }
-  } catch (e) { /* not in electron main */ }
-  try {
-    const path = require('path');
-    const pkg = require(path.join(process.cwd(), 'package.json'));
-    return pkg && pkg.version;
-  } catch (e) { /* ignore */ }
-  return null;
+  if (typeof manager?.getVersion === 'function') return manager.getVersion();
+  return require('../../build.js').getVersion();
 }
 
 module.exports = {

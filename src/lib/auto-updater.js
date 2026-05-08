@@ -42,7 +42,15 @@ const STORAGE_KEY = 'autoUpdater';
 // activity timestamp from anywhere (e.g. just received an auth event, finished a
 // long-running renderer task, etc.). Use sparingly — the built-in signals cover
 // 99% of real activity.
-const IDLE_INSTALL_THRESHOLD_MS = 15 * 60 * 1000;   // 15 min
+//
+// Test mode: when `manager.isTesting()` is true, the threshold collapses to 3s so
+// integration tests can drive a real download → idle wait → install in ~5s instead
+// of 15min. The intervalMs (periodic tick cadence) likewise drops to 500ms in tests
+// so the watcher actually fires inside a test run. Both wired in `idleThresholdMs()`
+// and `_periodicTick()` based on the manager's `isTesting()` helper.
+const IDLE_INSTALL_THRESHOLD_MS         = 15 * 60 * 1000;   // 15 min — production
+const IDLE_INSTALL_THRESHOLD_MS_TESTING =      3 * 1000;    // 3 sec  — when isTesting()
+const IDLE_TICK_MS_TESTING              =          500;     // 500ms periodic tick when testing
 
 const DEFAULTS = {
   enabled:       true,
@@ -98,7 +106,7 @@ const autoUpdater = {
     autoUpdater._reconcilePendingUpdate();
 
     // 2. Wire the electron-updater instance (or dev simulator).
-    if (autoUpdater._isDevMode()) {
+    if (autoUpdater._isSimulating()) {
       logger.log(`Dev simulation mode active (EM_DEV_UPDATE=${process.env.EM_DEV_UPDATE})`);
       autoUpdater._wireDevSimulator();
     } else {
@@ -140,11 +148,16 @@ const autoUpdater = {
     //    c) Evaluate idle-install readiness (auto-install if user idle, prompt if active).
     //    Centralizing means one timer, one decision flow, no race between "post-download"
     //    triggers and watcher ticks.
-    if (autoUpdater._options.intervalMs > 0) {
-      autoUpdater._intervalId = setInterval(() => autoUpdater._periodicTick(), autoUpdater._options.intervalMs);
+    //
+    // In tests (`manager.isTesting() === true`) the cadence drops to IDLE_TICK_MS_TESTING
+    // (500ms) so a real integration test sees the tick fire within seconds of a download.
+    const isTesting = !!manager?.isTesting?.();
+    const tickInterval = isTesting ? IDLE_TICK_MS_TESTING : autoUpdater._options.intervalMs;
+    if (tickInterval > 0) {
+      autoUpdater._intervalId = setInterval(() => autoUpdater._periodicTick(), tickInterval);
     }
 
-    logger.log(`auto-updater initialized (interval=${autoUpdater._options.intervalMs}ms, maxAge=${autoUpdater._options.maxAgeMs}ms, idle-install threshold=${IDLE_INSTALL_THRESHOLD_MS / 60000}min)`);
+    logger.log(`auto-updater initialized (interval=${tickInterval}ms, maxAge=${autoUpdater._options.maxAgeMs}ms, idle-install threshold=${autoUpdater._idleThresholdMs() / 1000}s${isTesting ? ' [testing]' : ''})`);
   },
 
   // Single periodic decision point. Runs every intervalMs. All install-readiness logic
@@ -167,15 +180,20 @@ const autoUpdater = {
 
   async checkNow(opts) {
     opts = opts || {};
-    autoUpdater._userInitiated = !!opts.userInitiated;
     autoUpdater._state.lastCheckedAt = Date.now();
 
     if (!autoUpdater._readyToCheck()) {
+      // Already mid-check or sitting on a downloaded update — return without mutating
+      // _userInitiated. Otherwise a user clicking "Check for Updates" while a periodic
+      // background check is in flight would flip _userInitiated=true, which then makes
+      // _evaluateIdleInstall() skip the auto-install path (see line ~303). The flag must
+      // only flip when we actually start a new check.
       logger.log(`Skipping check — current state=${autoUpdater._state.code}`);
       return autoUpdater.getStatus();
     }
+    autoUpdater._userInitiated = !!opts.userInitiated;
 
-    if (autoUpdater._isDevMode()) {
+    if (autoUpdater._isSimulating()) {
       autoUpdater._runDevSimulation();
       return autoUpdater.getStatus();
     }
@@ -212,7 +230,7 @@ const autoUpdater = {
       logger.log(`installNow ignored — state=${autoUpdater._state.code}`);
       return false;
     }
-    if (autoUpdater._isDevMode()) {
+    if (autoUpdater._isSimulating()) {
       logger.log('Dev mode — skipping real quitAndInstall().');
       return true;
     }
@@ -254,23 +272,17 @@ const autoUpdater = {
 
   // Internals ──────────────────────────────────────────────────────────────────────
 
-  _isDevMode() {
+  // Auto-updater dev SIMULATION mode — controls whether checkForUpdates() is wired
+  // to electron-updater (real) or our synthetic event sequence (fake). Triggered by
+  // setting EM_DEV_UPDATE=available|unavailable|error. NOT the same as
+  // `manager.isDevelopment()` (which is the runtime "are we packaged" signal); a
+  // packaged production build can absolutely run with EM_DEV_UPDATE set for QA.
+  _isSimulating() {
     return !!process.env.EM_DEV_UPDATE;
   },
 
-  _getCurrentVersion() {
-    try {
-      const electron = require('electron');
-      if (electron && electron.app && typeof electron.app.getVersion === 'function') {
-        return electron.app.getVersion();
-      }
-    } catch (e) { /* not in electron */ }
-    try {
-      const path = require('path');
-      const pkg = require(path.join(process.cwd(), 'package.json'));
-      return pkg && pkg.version;
-    } catch (e) { /* ignore */ }
-    return null;
+  _idleThresholdMs() {
+    return autoUpdater._manager?.isTesting?.() ? IDLE_INSTALL_THRESHOLD_MS_TESTING : IDLE_INSTALL_THRESHOLD_MS;
   },
 
   _readyToCheck() {
@@ -295,17 +307,18 @@ const autoUpdater = {
   // skipped when the 30-day gate already forced an install).
   //   - Only runs when state.code === 'downloaded' (i.e. an update is sitting ready).
   //   - Skips if the original check was user-initiated (consumer UI handles that path).
-  //   - If user idle ≥ IDLE_INSTALL_THRESHOLD_MS → installNow().
+  //   - If user idle ≥ _idleThresholdMs() (15min in prod, 3s in tests) → installNow().
   //   - Else if we haven't prompted for this version yet → show native dialog.
   //   - Else: do nothing this tick. Try again next tick.
   _evaluateIdleInstall() {
     if (autoUpdater._state.code !== 'downloaded') return;
     if (autoUpdater._userInitiated) return;        // user-initiated path — consumer UI owns the install affordance
-    if (autoUpdater._isDevMode()) return;          // dev simulator never really installs
+    if (autoUpdater._isSimulating()) return;          // dev simulator never really installs
 
     const idleMs = Date.now() - autoUpdater._lastActivityAt;
-    if (idleMs >= IDLE_INSTALL_THRESHOLD_MS) {
-      logger.log(`User idle for ${Math.round(idleMs / 60000)}min — auto-installing update v${autoUpdater._state.version}.`);
+    const threshold = autoUpdater._idleThresholdMs();
+    if (idleMs >= threshold) {
+      logger.log(`User idle for ${Math.round(idleMs / 1000)}s (threshold=${Math.round(threshold / 1000)}s) — auto-installing update v${autoUpdater._state.version}.`);
       try { autoUpdater.installNow(); }
       catch (e) { logger.warn(`idle auto-install failed: ${e.message}`); }
       return;
@@ -324,6 +337,16 @@ const autoUpdater = {
   // the user goes idle.
   async _promptToInstall(version) {
     try {
+      // In test mode we short-circuit BEFORE invoking the real native dialog. The
+      // dialog is modal + blocking on a real desktop session and pops a window the
+      // user can't dismiss programmatically — exactly what we don't want firing
+      // during automated runs. Tests that want to assert prompt behavior should
+      // override `_promptToInstall` per-test (see auto-updater.test.js).
+      if (autoUpdater._manager?.isTesting?.()) {
+        logger.log(`[testing] _promptToInstall(${version}) — skipped native dialog.`);
+        return;
+      }
+
       const electron = require('electron');
       const { dialog, BrowserWindow } = electron;
       if (!dialog) return;
@@ -448,7 +471,7 @@ const autoUpdater = {
     const pending = m.storage.get(`${STORAGE_KEY}.pendingUpdate`);
     if (!pending || !pending.downloadedAt) return;
 
-    const currentVersion = autoUpdater._getCurrentVersion();
+    const currentVersion = autoUpdater._manager?.getVersion?.();
     if (currentVersion && pending.version === currentVersion) {
       logger.log(`Pending update v${pending.version} appears to be applied — clearing flag.`);
       m.storage.set(`${STORAGE_KEY}.pendingUpdate`, null);

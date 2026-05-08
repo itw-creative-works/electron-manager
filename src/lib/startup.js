@@ -128,15 +128,12 @@ const startup = {
     return 'none';
   },
 
-  // Dev detection: app.isPackaged is the canonical "are we running a packaged build" flag.
-  // Set EM_FORCE_LOGIN_ITEM=1 to override (e.g. for testing the login-item flow in dev intentionally).
+  // Should we suppress dev-only login-item changes? Routes through manager.isDevelopment()
+  // (the cross-context "are we running unpackaged" helper). EM_FORCE_LOGIN_ITEM=1 bypasses
+  // the dev guard so you can intentionally test the login-item flow in dev.
   _isDev() {
     if (process.env.EM_FORCE_LOGIN_ITEM === '1') return false;
-    try {
-      return startup._electron?.app?.isPackaged === false;
-    } catch (e) {
-      return false;
-    }
+    return !!startup._manager?.isDevelopment?.();
   },
 
   // Returns the resolved user-launch mode, defaulting to 'normal' for unknown values.

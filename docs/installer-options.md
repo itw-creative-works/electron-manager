@@ -87,7 +87,7 @@ Reference plists from a working MAS-published Electron app (Slapform) are archiv
 | Field | Default | What it does |
 |---|---|---|
 | `targets.linux.arch` | `['x64']` | Architectures. ia32 is essentially extinct on modern Linux. |
-| `targets.linux.snap.enabled` | `false` | Opt into Snap Store publishing. |
+| `targets.linux.snap.enabled` | `true` (in scaffold) | Snap Store publishing. EM scaffold ships this `true`; programmatic callers without the field default to OFF. Auto-skipped if `SNAPCRAFT_STORE_CREDENTIALS` env is unset. |
 | `targets.linux.snap.confinement` | `'strict'` | `strict` (sandboxed) or `classic` (unrestricted, requires Snap Store approval). |
 | `targets.linux.snap.grade` | `'stable'` | `stable` or `devel`. |
 | `targets.linux.snap.autoStart` | `true` | Register the snap to auto-start on login. |
@@ -95,18 +95,24 @@ Reference plists from a working MAS-published Electron app (Slapform) are archiv
 
 ### Snap Store publishing
 
-Disabled by default because it requires (a) a Ubuntu One account, (b) one-time interactive credential minting, and (c) a Snap Store namespace registration. To enable:
+Tri-state behavior:
 
-1. Set `targets.linux.snap.enabled: true` in `config/electron-manager.json`.
-2. Mint store credentials locally:
+- **Field missing entirely** → off. `build-config.js` checks `=== true` strictly, so older configs / programmatic callers without the field don't suddenly emit a snap target.
+- **`enabled: true` (scaffold default) + no `SNAPCRAFT_STORE_CREDENTIALS`** → off, with a build-time log line: `Snap target enabled in config but SNAPCRAFT_STORE_CREDENTIALS not set — skipping snap target.` This means a fresh `mgr setup` produces a working `.deb + .AppImage` build out of the box without failing on a missing snap publish credential.
+- **`enabled: true` + `SNAPCRAFT_STORE_CREDENTIALS` set** → snap target emits, snap publishes on release.
+- **`enabled: false`** → off, regardless of credentials. Explicit opt-out.
+
+To turn snap publishing on for a project that already has the field set to `true`:
+
+1. Mint store credentials locally:
    ```bash
    snapcraft export-login -    # writes a credentials blob to stdout
    ```
-3. Paste the entire blob (multi-line) into `.env` as `SNAPCRAFT_STORE_CREDENTIALS=...`.
-4. Run `npx mgr push-secrets` to flow the secret to GitHub Actions.
-5. Next `npm run release` will build + upload the snap automatically.
+2. Paste the entire blob (multi-line) into `.env` as `SNAPCRAFT_STORE_CREDENTIALS=...`.
+3. Run `npx mgr push-secrets` to flow the secret to GitHub Actions.
+4. Next `npm run release` builds + uploads the snap automatically. No config flip needed.
 
-Reference: the workflow's Linux step conditionally installs `snapcraft` (via `sudo snap install snapcraft --classic`) only when the consumer's config has `snap.enabled: true`. So apps that never publish to Snap don't pay the install cost.
+Reference: the workflow's Linux step conditionally installs `snapcraft` (`sudo snap install snapcraft --classic`) only when both (a) `targets.linux.snap.enabled !== false` AND (b) `SNAPCRAFT_STORE_CREDENTIALS` secret is present. Mirrors the build-config-side gate.
 
 ## File associations + custom protocols (uncommon)
 

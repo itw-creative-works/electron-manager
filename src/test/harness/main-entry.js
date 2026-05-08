@@ -183,6 +183,27 @@ async function runRendererSuites(files) {
   }
 
   const harnessDir = __dirname;
+  // Tell the renderer-preload (running in the BrowserWindow's preload) where to
+  // require() the renderer Manager from. We resolve by absolute path because the
+  // preload runs with the renderer's module resolution scope, not main's.
+  process.env.EM_TEST_RENDERER_MANAGER_PATH = path.resolve(__dirname, '..', '..', 'renderer.js');
+
+  // Register test-only IPC channels so renderer-layer tests can verify round-trip
+  // behavior end-to-end (renderer.invoke → main handler → response). Idempotent:
+  // unregister first in case a previous renderer suite registered the same channel.
+  try { ipcMain.removeHandler('em:__test:echo'); } catch (_) { /* ignore */ }
+  ipcMain.handle('em:__test:echo', (_evt, payload) => ({ echoed: payload, ts: Date.now() }));
+  // Forwarded log capture — renderer logger.log(...) sends 'em:log:forward'; we
+  // accumulate the most recent payload so the renderer test can verify it landed.
+  global.__emTestLastForwardedLog = null;
+  ipcMain.removeAllListeners('em:__test:forwarded-log-tap');
+  ipcMain.on('em:log:forward', (_evt, payload) => {
+    global.__emTestLastForwardedLog = payload;
+  });
+  // Test-only handler the renderer can call to read back the most recently
+  // forwarded log payload. Returns null if none yet.
+  try { ipcMain.removeHandler('em:__test:read-last-log'); } catch (_) { /* ignore */ }
+  ipcMain.handle('em:__test:read-last-log', () => global.__emTestLastForwardedLog);
   const win = new BrowserWindow({
     show:           false,
     width:          800,

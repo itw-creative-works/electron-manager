@@ -173,24 +173,73 @@ module.exports = {
       },
     },
     {
-      name: 'baseConfig: snap disabled by default — no snap target, no snap block',
+      name: 'baseConfig: snap missing from config — no snap target (default OFF)',
       run: (ctx) => {
+        // Behavior contract: callers who never set targets.linux.snap.enabled should
+        // never get a snap target emitted. The scaffold ships `enabled: true` so new
+        // projects opt in by virtue of the scaffold; this case is for older projects
+        // or programmatic callers that don't supply the field.
         const { baseConfig } = require(path.join(__dirname, '..', '..', '..', 'gulp', 'tasks', 'build-config.js'));
-        const out = baseConfig({});
-        ctx.expect(out.linux.target.find((t) => t.target === 'snap')).toBeUndefined();
-        ctx.expect(out.snap).toBeUndefined();
+        const saved = process.env.SNAPCRAFT_STORE_CREDENTIALS;
+        process.env.SNAPCRAFT_STORE_CREDENTIALS = 'fake-creds-blob';   // creds present, but config doesn't enable
+        try {
+          const out = baseConfig({});
+          ctx.expect(out.linux.target.find((t) => t.target === 'snap')).toBeUndefined();
+          ctx.expect(out.snap).toBeUndefined();
+        } finally {
+          if (saved === undefined) delete process.env.SNAPCRAFT_STORE_CREDENTIALS;
+          else process.env.SNAPCRAFT_STORE_CREDENTIALS = saved;
+        }
       },
     },
     {
-      name: 'baseConfig: snap enabled emits snap target + snap publish block',
+      name: 'baseConfig: snap enabled in config but no creds — auto-skipped',
       run: (ctx) => {
         const { baseConfig } = require(path.join(__dirname, '..', '..', '..', 'gulp', 'tasks', 'build-config.js'));
-        const out = baseConfig({ targets: { linux: { snap: { enabled: true } } } });
-        ctx.expect(out.linux.target.find((t) => t.target === 'snap')).toBeDefined();
-        ctx.expect(out.snap).toBeDefined();
-        ctx.expect(out.snap.confinement).toBe('strict');
-        ctx.expect(out.snap.publish.provider).toBe('snapStore');
-        ctx.expect(out.snap.publish.channels).toEqual(['stable']);
+        const saved = process.env.SNAPCRAFT_STORE_CREDENTIALS;
+        delete process.env.SNAPCRAFT_STORE_CREDENTIALS;
+        try {
+          const out = baseConfig({ targets: { linux: { snap: { enabled: true } } } });
+          ctx.expect(out.linux.target.find((t) => t.target === 'snap')).toBeUndefined();
+          ctx.expect(out.snap).toBeUndefined();
+        } finally {
+          if (saved !== undefined) process.env.SNAPCRAFT_STORE_CREDENTIALS = saved;
+        }
+      },
+    },
+    {
+      name: 'baseConfig: snap explicitly disabled — no snap target regardless of creds',
+      run: (ctx) => {
+        const { baseConfig } = require(path.join(__dirname, '..', '..', '..', 'gulp', 'tasks', 'build-config.js'));
+        const saved = process.env.SNAPCRAFT_STORE_CREDENTIALS;
+        process.env.SNAPCRAFT_STORE_CREDENTIALS = 'fake-creds-blob';
+        try {
+          const out = baseConfig({ targets: { linux: { snap: { enabled: false } } } });
+          ctx.expect(out.linux.target.find((t) => t.target === 'snap')).toBeUndefined();
+          ctx.expect(out.snap).toBeUndefined();
+        } finally {
+          if (saved === undefined) delete process.env.SNAPCRAFT_STORE_CREDENTIALS;
+          else process.env.SNAPCRAFT_STORE_CREDENTIALS = saved;
+        }
+      },
+    },
+    {
+      name: 'baseConfig: snap enabled + creds present emits snap target + snap publish block',
+      run: (ctx) => {
+        const { baseConfig } = require(path.join(__dirname, '..', '..', '..', 'gulp', 'tasks', 'build-config.js'));
+        const saved = process.env.SNAPCRAFT_STORE_CREDENTIALS;
+        process.env.SNAPCRAFT_STORE_CREDENTIALS = 'fake-creds-blob';
+        try {
+          const out = baseConfig({ targets: { linux: { snap: { enabled: true } } } });
+          ctx.expect(out.linux.target.find((t) => t.target === 'snap')).toBeDefined();
+          ctx.expect(out.snap).toBeDefined();
+          ctx.expect(out.snap.confinement).toBe('strict');
+          ctx.expect(out.snap.publish.provider).toBe('snapStore');
+          ctx.expect(out.snap.publish.channels).toEqual(['stable']);
+        } finally {
+          if (saved === undefined) delete process.env.SNAPCRAFT_STORE_CREDENTIALS;
+          else process.env.SNAPCRAFT_STORE_CREDENTIALS = saved;
+        }
       },
     },
     {

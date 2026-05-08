@@ -110,12 +110,8 @@ Manager.actLikeProduction = function () {
 };
 Manager.prototype.actLikeProduction = Manager.actLikeProduction;
 
-Manager.getEnvironment = function () {
-  return Manager.isBuildMode()
-    ? 'production'
-    : 'development';
-};
-Manager.prototype.getEnvironment = Manager.getEnvironment;
+// `getEnvironment()` lives in src/utils/url-helpers.js — same impl across all four
+// Managers. Mixed in via the attachTo() call at the bottom of this file.
 
 Manager.getMode = function () {
   return {
@@ -246,6 +242,11 @@ Manager.logMemory = function (logger, label) {
   logger.log(`[Memory ${label}] RSS: ${mem.rss}MB | Heap Used: ${mem.heapUsed}MB / ${mem.heapTotal}MB | External: ${mem.external}MB`);
 };
 Manager.prototype.logMemory = Manager.logMemory;
+
+// Mix in shared cross-context helpers — same code path used in main, renderer, preload.
+// All four contexts share the exact same implementation.
+require('./utils/mode-helpers.js').attachTo(Manager);
+require('./utils/url-helpers.js').attachTo(Manager);
 
 // Export
 module.exports = Manager;

@@ -146,7 +146,7 @@ Merge order: framework defaults < `config.windows.<name>` (if present) < call-si
 
 `manager.quit({ force })` and `manager.relaunch({ force })` are exposed on the live manager. `relaunch` calls `autoUpdater.installNow()` if an update is downloaded, otherwise `app.relaunch() + app.quit()`.
 
-**Auto-update background install (legacy parity).** When a download finishes (`code: 'downloaded'`) AND the check was NOT user-initiated (no menu/tray click — just the periodic background poll), `_setState` schedules `installNow()` after 5s. User-initiated checks skip this so the consumer's UI can prompt instead. Auto-updater menu/tray hook keeps the label in lockstep with status (Checking → Downloading 42% → Restart to Update v1.2.3 → You're up to date).
+**Auto-update idle-aware install.** When a download finishes (`code: 'downloaded'`) AND the check was NOT user-initiated, the existing periodic tick (every `intervalMs`, default 60s) makes the install decision instead of doing a flat-delay relaunch. On each tick: re-check the feed → enforce the 30-day max-age gate → evaluate idle install. Idle eval rules: if `now - _lastActivityAt >= IDLE_INSTALL_THRESHOLD_MS` (default 15min) the app installs; if active, EM shows a native "Restart Now / Later" dialog ONCE per version (`_promptedForVersion` guards against re-prompts) and the periodic tick keeps re-evaluating, so dismissal is "not now" — the install fires whenever the user eventually walks away. User-initiated checks bypass all this; the consumer's UI is expected to surface its own restart affordance (the menu/tray check-for-updates label already changes to "Restart to Update vX.Y.Z" via `_menuItemFieldsForState`). Activity signals: renderer-side (debounced 5s in preload, IPC `em:auto-updater:activity`) — `mousedown`, `keydown`, `wheel`, `touchstart`, `focus`. Main-side: `app.on('browser-window-focus')`. Consumers can force-bump via `manager.autoUpdater.markActive()` for app-specific signals (auth events, long-task completion). `checkNow()` is deduped via `_readyToCheck()`: a click on "Check for Updates" while a periodic check is mid-flight (state in `checking|available|downloading|downloaded`) early-returns without firing a second `checkForUpdates()` AND without flipping `_userInitiated` (the no-op call must not change behavior). Auto-updater menu/tray hook keeps the label in lockstep with status (Checking → Downloading 42% → Restart to Update v1.2.3 → You're up to date).
 
 **macOS dock auto-show.** `windows.create()` and `windows.show()` call `app.dock.show()` if the dock is hidden — works even when `LSUIElement: true` is baked at build (`startup.mode = 'hidden'`). The app launches completely invisible (no dock icon, no Cmd+Tab, no taskbar) and the dock icon appears the moment the consumer surfaces UI.
 
@@ -187,7 +187,7 @@ Notable defaults / behaviors:
 - **app.darkModeSupport**: `true`. macOS honors via `NSRequiresAquaSystemAppearance: false`; win/linux ignore.
 - **targets.win**: `arch: ['x64', 'ia32']` (multi-arch single NSIS installer); `oneClick: true` + `desktopShortcut/startMenuShortcut/runAfterFinish: true` + `perMachine: false` — Slack-style frictionless install. Override any of those in `targets.win.<key>`.
 - **targets.mac**: `arch: ['universal']` (Intel + Apple Silicon in one .dmg via lipo). MAS distribution config keys exist (`targets.mac.mas.*`) but are STUBBED — setting `enabled: true` triggers an audit warning. Reference plists archived at `<em>/src/defaults/_mas/`.
-- **targets.linux**: `arch: ['x64']`, `snap.enabled: false`. Snap publishing is opt-in — set `targets.linux.snap.enabled: true` and put `SNAPCRAFT_STORE_CREDENTIALS` in `.env` (run `snapcraft export-login -` to mint, then `mgr push-secrets` to flow to GH Actions).
+- **targets.linux**: `arch: ['x64']`. Snap publishing is opt-in via `targets.linux.snap.enabled: true`. The EM scaffold ships that field set to `true` by default — new consumers get snap publishing automatically once their credentials are wired up. Programmatic callers (or older configs) without the field at all default to OFF: `build-config.js` checks `=== true` strictly. Even when enabled, the snap target is **auto-skipped at build time when `SNAPCRAFT_STORE_CREDENTIALS` is unset** — so a fresh project doesn't fail CI before the user wires up snapcraft auth. Add the credential blob (`snapcraft export-login -`) to `.env`, run `mgr push-secrets`, and the next release publishes to the Snap Store with no further config changes. Set `enabled: false` to opt out completely (skips snap regardless of credentials).
 - **fileAssociations / protocols**: optional passthrough fields for OS file-type registration + extra URL schemes. EM auto-registers `<brand.id>://` always; `protocols` is for additional schemes only. Empty by default; not emitted to YAML when unset.
 - **Deep-link scheme**: always `<brand.id>://...` (no config). Built-in routes: `auth/token`, `app/show`, `app/quit`. Custom routes: `manager.deepLink.on('pattern', fn)` at runtime.
 - **Tray / menu / context-menu**: paths are conventional (`src/integrations/{name}/index.js`) — no config block. Disable: `manager.<name>.disable()`.
@@ -206,6 +206,25 @@ Notable defaults / behaviors:
 - `EM_BUILD_MODE=true` — production build (minified, no sourcemaps).
 - `EM_IS_PUBLISH=true` — publish step.
 - `EM_IS_SERVER=true` — running in CI.
+- `EM_TEST_MODE=true` — running inside EM's test framework (canonical signal — set by both runners). Powers `manager.isTesting()`.
+
+### Cross-context helpers
+
+Three Manager constructors (main / renderer / preload) plus the build-time Manager (`build.js`) all mix in shared helpers via `attachTo(Manager)`:
+
+| Helper | Source | What it returns |
+|---|---|---|
+| `isDevelopment()` | `src/utils/mode-helpers.js` | `true` when running unpackaged. Authoritative signal: `app.isPackaged === false`. Falls back to `NODE_ENV === 'development'` or `config.em.environment === 'development'` when `app` isn't available (preload, renderer, build-time scripts). |
+| `isProduction()` | `src/utils/mode-helpers.js` | Inverse of `isDevelopment()`. |
+| `isTesting()` | `src/utils/mode-helpers.js` | `process.env.EM_TEST_MODE === 'true'`. Set by EM's test runners; consumers writing their own tests should set the same env var. |
+| `getWebsiteUrl(env?)` | `src/utils/url-helpers.js` | Marketing/brand site URL. Dev → `https://localhost:4000` (matches BEM's jekyll-emulator port). Prod → `config.brand.url`. Use this for "Open Website" tray/menu items, billing-portal links, etc. |
+| `getEnvironment()` | `src/utils/url-helpers.js` | `'production' \| 'development'`. Two layers: prefer `config.em.environment` if loaded, fall back to `EM_BUILD_MODE === 'true' ? 'production' : 'development'`. |
+| `getFunctionsUrl(env?)` | `src/utils/url-helpers.js` | Firebase functions URL. Dev → `http://localhost:5001/<projectId>/us-central1`. Prod → `https://us-central1-<projectId>.cloudfunctions.net`. |
+| `getApiUrl(env?)` | `src/utils/url-helpers.js` | API URL. Dev → `http://localhost:5002`. Prod → `https://api.<authDomain>`. |
+
+Same code path everywhere. Available as both prototype methods (`manager.isTesting()`) and statics (`Manager.isTesting()`) — matches BEM's pattern. Use these whenever behavior should differ by *what kind of process* or *what backend env*; don't grep `process.env` ad-hoc throughout the codebase.
+
+Adding a new cross-context helper: write the function in a `src/utils/<topic>-helpers.js` module, expose `attachTo(Manager)`, then import + call `attachTo` at the bottom of all four Manager files (`main.js`, `renderer.js`, `preload.js`, `build.js`). Don't define helpers on individual Manager prototypes — that path leads to duplicated semantics like the old `getEnvironment` collision between main.js and build.js.
 
 ### Test framework
 

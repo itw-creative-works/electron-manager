@@ -26,6 +26,19 @@ In EM itself, `npm test` does the same.
 
 Suites that hit a live backend (Firebase Auth admin SDK, real GitHub API, etc.) are gated behind `--integration` (or `EM_TEST_INTEGRATION=1`). Default is to skip them so `npx mgr test` is fast + green offline. The CI workflow runs unit tests only by default; add a separate workflow to flip the flag for integration coverage.
 
+### `EM_TEST_MODE=true` — the canonical "we're in tests" signal
+
+Both EM test runners (`runners/electron.js`, `runners/boot.js`) set `EM_TEST_MODE=true` in the spawned child env. That powers `manager.isTesting()` (and `Manager.isTesting()` static) — the cross-context helper everything in EM checks when it needs to behave differently in tests:
+
+- `auto-updater` flips its idle threshold from 15min → 3s and its periodic tick from 60s → 500ms, AND short-circuits the native install-prompt dialog (so tests don't pop modal windows).
+- Other lib code can branch on `manager.isTesting()` to suppress dock bounce, login-item changes, etc.
+
+Consumers writing their own tests should set `EM_TEST_MODE=true` in their test runner so the same signal applies — for example, in `package.json`:
+```json
+"test": "EM_TEST_MODE=true vitest"
+```
+Then in your code, gate test-only behavior on `manager.isTesting()` instead of inventing yet another env var.
+
 ## Test discovery
 
 - **Framework defaults**: `<EM>/dist/test/suites/**/*.js`

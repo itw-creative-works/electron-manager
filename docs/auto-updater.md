@@ -53,20 +53,38 @@ This guarantees no app on EM stays > maxAgeMs days behind a downloaded update.
 
 ## Idle-aware install (15-min default)
 
-When an update finishes downloading via a background poll (NOT a user-initiated check), EM does NOT immediately quit-and-install. Instead, it kicks off an idle watcher:
+When an update finishes downloading via a background poll (NOT a user-initiated check), EM does NOT immediately quit-and-install. Instead, the install decision is folded into the existing periodic tick (`_periodicTick`, fires every `intervalMs`, default 60s) which runs three steps in order: re-check the feed → enforce the 30-day max-age gate → evaluate idle install. Single timer, single decision flow.
 
-- Any UI activity bumps `_lastActivityAt = Date.now()`. Built-in signals:
-  - **Renderer-side** — `mousedown`, `keydown`, `wheel`, `touchstart`, `focus` on `window` (capture phase, debounced to once per 5s; sent to main as IPC `em:auto-updater:activity`).
-  - **Main-side** — `app.on('browser-window-focus')` (covers tray-click-to-show, dock click, alt-tab back, etc.).
-- Every minute, the watcher polls `Date.now() - _lastActivityAt`:
-  - If `>= 15min` → `installNow()` (app quits + relaunches into the new version).
-  - Else if we haven't prompted for this version yet → show a native dialog ("Restart Now / Later"). One prompt per version, ever. Dismissal ("Later") is "not now" — the watcher keeps polling and will auto-install when the user eventually walks away.
+### Activity signals
 
-Constants are hardcoded at the top of `src/lib/auto-updater.js`:
+Any UI activity bumps `_lastActivityAt = Date.now()`. Built-in signals:
+
+- **Renderer-side** — `mousedown`, `keydown`, `wheel`, `touchstart`, `focus` on `window` (capture phase, debounced to once per 5s in preload; sent to main as IPC `em:auto-updater:activity` which routes through `_onActivityIpc → markActive`).
+- **Main-side** — `app.on('browser-window-focus')` (covers tray-click-to-show, dock click, alt-tab back, etc.) wired during `_wireActivityHooks()` (idempotent, one-shot per process).
+
+### Decision flow (`_evaluateIdleInstall`)
+
+Runs every periodic tick. Conditions, in order:
+
+- If `state.code !== 'downloaded'` → no-op (nothing to install).
+- If `_userInitiated` → no-op (consumer UI owns the install affordance).
+- If `_isDevMode()` → no-op (dev simulator's `quitAndInstall` is a no-op anyway).
+- If `Date.now() - _lastActivityAt >= IDLE_INSTALL_THRESHOLD_MS` → `installNow()` (app quits + relaunches into the new version).
+- Else if `_promptedForVersion !== state.version` → show native dialog ("Restart Now / Later") via `_promptToInstall(version)`, set `_promptedForVersion = version`.
+- Else → no-op this tick. Try again next tick.
+
+Constants hardcoded at the top of `src/lib/auto-updater.js`:
 - `IDLE_INSTALL_THRESHOLD_MS = 15 * 60 * 1000` — how long the user must be idle.
-- `IDLE_WATCHER_INTERVAL_MS = 60 * 1000` — how often the watcher re-evaluates.
 
-User-initiated checks (someone clicked "Check for Updates" in the menu/tray) bypass this entirely — the consumer's UI is responsible for surfacing the "Restart to Update" affordance (the menu/tray item already does this label-wise).
+### User-initiated checks bypass everything
+
+When someone clicks "Check for Updates" in the menu/tray, `checkNow({userInitiated: true})` fires. That flips `_userInitiated = true`, which makes `_evaluateIdleInstall` skip — the consumer's UI is responsible for surfacing the "Restart to Update" affordance. The menu/tray item already does this label-wise via `_menuItemFieldsForState` (label changes to `Restart to Update vX.Y.Z` + enabled).
+
+### `checkNow()` dedup + `_userInitiated` leak fix
+
+`_readyToCheck()` returns true only when `state.code` is `idle | not-available | error`. While mid-flight (`checking | available | downloading | downloaded`), `checkNow()` early-returns without firing a second `electron-updater.checkForUpdates()`. Combined with Electron's `ipcMain.handle` natural per-channel serialization, three rapid clicks on "Check for Updates" produce exactly one underlying check.
+
+Subtle: `_userInitiated` is only flipped AFTER the `_readyToCheck` guard. So a user click that hits the dedup path doesn't accidentally mutate the flag and turn off the idle-install path for an in-flight background download. (Pre-1.2.39 had this bug.)
 
 ### Consumer hook: `markActive()`
 
@@ -80,13 +98,23 @@ Call this from app-specific signals the framework can't see — e.g. just receiv
 
 ### Why 15 minutes?
 
-Long enough that an actively-used app won't surprise-quit mid-task. Short enough that a user who minimizes the app and walks to lunch comes back to the new version. Tune the constants in `auto-updater.js` if your app's usage pattern is different.
+Long enough that an actively-used app won't surprise-quit mid-task. Short enough that a user who minimizes the app and walks to lunch comes back to the new version. Tune `IDLE_INSTALL_THRESHOLD_MS` if your app's usage pattern is different.
 
 ### Implementation notes
 
-- `_promptedForVersion` tracks the version we've already shown the dialog for. Reset on `shutdown()`. If a *newer* update downloads later, the prompt fires again (different version).
-- `_idleWatcherId` is cleared as soon as `_state.code !== 'downloaded'` (i.e. the moment installNow() takes effect or storage clears the pending update).
-- The watcher tick runs immediately upon download, then every `IDLE_WATCHER_INTERVAL_MS`. So a user who's been idle for hours when the update lands gets the install instantly without waiting another minute.
+- `_promptedForVersion` tracks the version we've already shown the dialog for. Reset on `shutdown()`. If a *newer* update downloads later, the version flips and the prompt fires again (different version).
+- The first `_evaluateIdleInstall` after a download lands waits up to one tick (default 60s) before any prompt or install — gives an active user a small grace window to reach a natural pause before the dialog appears.
+- The 30-day gate firing short-circuits idle eval: `_periodicTick` returns after `_enforceMaxAgeGate()` returns true, since the install is already in flight.
+
+### Test mode behavior
+
+When `manager.isTesting() === true` (canonical signal: `EM_TEST_MODE=true`), the auto-updater swaps in test-friendly defaults so a real download → idle wait → install can complete in seconds instead of minutes:
+
+- **Idle threshold**: `IDLE_INSTALL_THRESHOLD_MS_TESTING = 3000ms` (3 sec) instead of 15 min.
+- **Periodic tick**: `IDLE_TICK_MS_TESTING = 500ms` instead of `intervalMs` (default 60s).
+- **`_promptToInstall` short-circuits** before invoking `dialog.showMessageBox`. The native dialog is modal + blocking + would pop a window the test process can't dismiss programmatically. In test mode the prompt logs `[testing] _promptToInstall(...) — skipped native dialog.` and returns. Tests that want to assert prompt behavior override `_promptToInstall` per-test (see `auto-updater.test.js`).
+
+This lets the framework's own integration tests drive the full sequence (`EM_DEV_UPDATE=available` → state machine → 500ms tick → 3s idle threshold elapses → stubbed `installNow` fires) in ~5s. Consumers running their own tests should set `EM_TEST_MODE=true` to inherit the same defaults.
 
 ## Menu integration
 

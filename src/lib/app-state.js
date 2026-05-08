@@ -86,8 +86,11 @@ const appState = {
     const previousQuitAt   = previous.lastQuitAt || null;
     appState._recoveredFromCrash = !isFirstLaunch && previousSentinel && !previousQuitAt;
 
-    // Version detection.
+    // Version detection. Prefer the cross-context manager.getVersion() helper —
+    // it tries `app.getVersion()` first (authoritative in main, reads asar
+    // package.json in packaged builds) and falls back to project package.json.
     const currentVersion  = manager?.config?.app?.version
+                         || manager?.getVersion?.()
                          || tryGetVersionFromPackage()
                          || null;
     const previousVersion = previous.version || null;
@@ -228,13 +231,12 @@ const appState = {
 };
 
 function tryGetVersionFromPackage() {
-  try {
-    const Manager = require('../build.js');
-    const pkg = Manager.getPackage('project') || {};
-    return pkg.version || null;
-  } catch (e) {
-    return null;
-  }
+  // Last-resort fallback used only when manager.getVersion() is unavailable.
+  // Reads via build.js's getPackage helper which already handles "no package.json
+  // at projectRoot" by returning null — no try/catch needed.
+  const Manager = require('../build.js');
+  const pkg = Manager.getPackage('project');
+  return pkg?.version || null;
 }
 
 module.exports = appState;

@@ -1,5 +1,110 @@
 # Changelog
 
+## 1.3.0 — cross-context helpers + getWebsiteUrl + full main+renderer test coverage
+
+### Cross-context helpers (BEM-pattern)
+
+New `src/utils/mode-helpers.js` and `src/utils/url-helpers.js` define a single
+canonical implementation of helpers shared across all four Manager constructors
+(main / renderer / preload / build) via `attachTo(Manager)`:
+
+- **Mode helpers** (`mode-helpers.js`):
+  - `isDevelopment()` — `!app.isPackaged` with NODE_ENV / `config.em.environment`
+    fallback. Authoritative runtime signal.
+  - `isProduction()` — inverse.
+  - `isTesting()` — `process.env.EM_TEST_MODE === 'true'`. Set by EM's test
+    runners; consumers writing their own tests should set the same env var.
+  - `getVersion()` — `app.getVersion()` first, falls back to project
+    `package.json#version`.
+
+- **URL helpers** (`url-helpers.js`):
+  - `getEnvironment()` — `'production' | 'development'`. Prefers
+    `config.em.environment`; falls back to `EM_BUILD_MODE`.
+  - `getFunctionsUrl(env?)` — Firebase functions URL.
+  - `getApiUrl(env?)` — API URL.
+  - **`getWebsiteUrl(env?)` (NEW)** — marketing/brand website URL. Dev returns
+    `https://localhost:4000` (BEM convention); prod returns
+    `config.brand.url`. Used now by tray "Visit Website" + menu
+    "{Brand} Home" so dev runs open localhost instead of punching out to live.
+
+Available as both prototype (`manager.isTesting()`) AND static
+(`Manager.isTesting()`) — matches BEM's pattern.
+
+### Removed duplicates / consolidated impl
+
+- `autoUpdater._isTesting()` — wrapped `manager.isTesting()` with a defensive
+  fallback. Removed; callers route through manager directly.
+- `autoUpdater._getCurrentVersion()` — duplicated what is now
+  `manager.getVersion()`. Removed.
+- `sentry/core.js#resolveRelease` — was inlining the same `electron.app
+  .getVersion()` + package.json fallback. Now routes through `manager.getVersion()`.
+- `app-state.js` — try/catch wrapping `require('../build.js')` (which cannot
+  fail) removed. Version detection now prefers `manager.getVersion()`.
+- `startup.js#_isDev()` — was inlining `app.isPackaged === false`. Now routes
+  through `manager.isDevelopment()`. The `EM_FORCE_LOGIN_ITEM` override stays.
+- Renamed `autoUpdater._isDevMode()` → `_isSimulating()`. The old name was
+  misleading — it has nothing to do with `manager.isDevelopment()`. It controls
+  whether checkForUpdates uses the `EM_DEV_UPDATE` event simulator vs real
+  electron-updater. Auto-updater-specific concept; stays inside the module.
+
+### Single canonical test env var
+
+Consolidated to `EM_TEST_MODE=true` (was previously a mix of `EM_TEST_MODE`,
+`EM_TEST_BOOT`, and a never-shipped `EM_TESTING`). Both EM test runners set
+this; consumers writing their own tests should set the same. `EM_TEST_BOOT=1`
+stays as a separate dispatch marker (different concept: tells main.js to load
+the boot harness instead of doing normal init).
+
+### Test coverage — main + renderer parity
+
+The renderer-process Manager's helpers are now actually exercised in renderer
+process, not just asserted to exist. ~28 new tests; 508 passing total.
+
+- **Main suite `protocol.test.js` (8 tests)** — single-instance lock state,
+  scheme registration, `isOurScheme` matching/rejection, mutation-safe
+  `getSchemes`, idempotent re-init.
+- **Main suite `url-helpers.test.js` (12 tests)** — all four URL helpers in
+  main: dev/prod resolution, missing-config error paths, env-arg override.
+- **Renderer suite `cross-context-helpers.test.js` (13 tests)** — same helpers
+  exercised inside a real BrowserWindow via a `__emTestManager` contextBridge
+  surface in the test harness preload.
+- **Renderer suite `round-trip.test.js` (7 tests)** — verifies actual behavior
+  of `window.em.ipc.invoke` (renderer → main → response), `window.em.logger`
+  forwarding via `em:log:forward`, `window.em.storage.onChange` broadcasts,
+  and `window.em.autoUpdater` subscriptions across the IPC boundary.
+- **Auto-updater real-time integration test** — drives a real download
+  through the dev simulator and asserts the install fires when the idle
+  threshold elapses (using the testing-mode 3s threshold + 500ms tick).
+
+Test harness improvements: `renderer-preload.js` now mirrors production preload
+(forwarding logger, `storage.onChange`, `autoUpdater.onStatus`). Main harness
+registers test-only `em:__test:echo` + `em:__test:read-last-log` channels for
+renderer suites to use.
+
+### Auto-updater refinements
+
+- **`_userInitiated` leak fix** — a user click on "Check for Updates" while a
+  background check is mid-flight no longer flips the flag. Was breaking
+  idle-install when the in-flight download completed.
+- **Test mode** swaps in `IDLE_INSTALL_THRESHOLD_MS_TESTING` (3s) +
+  `IDLE_TICK_MS_TESTING` (500ms) when `manager.isTesting() === true` so
+  integration tests exercise the full sequence in seconds, not 15min.
+- **`_promptToInstall` short-circuits in test mode** so tests don't pop modal
+  native dialogs.
+
+### Docs
+
+- `CLAUDE.md` — new "Cross-context helpers" section with full API table; build
+  modes table includes `EM_TEST_MODE`.
+- `docs/auto-updater.md` — replaced the stale `_idleWatcherId` model with the
+  centralized periodic-tick model; new "Test mode behavior" section.
+- `docs/test-framework.md` — new section on `EM_TEST_MODE` as the canonical
+  signal.
+- `docs/web-manager-bridge.md` — `getApiUrl()` note updated for cross-context
+  availability.
+- `README.md` — Snap publishing description updated for default-on +
+  cred-gated-skip semantics; doc-index line tweaked.
+
 ## 1.2.38 — snap default-on with cred auto-skip + auto-updater idle-install centralized into periodic tick
 
 ### Snap publishing now defaults to ON, auto-skips when no creds

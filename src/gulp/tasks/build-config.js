@@ -160,12 +160,16 @@ function baseConfig(config, extras = {}) {
   const nsisRunAfterFinish     = winTargetCfg.runAfterFinish !== false;
   const nsisPerMachine         = winTargetCfg.perMachine === true;
 
-  // Snap publishing — enabled by default; auto-skipped if SNAPCRAFT_STORE_CREDENTIALS
-  // isn't set in the environment (so a fresh project doesn't fail CI before the user
-  // wires up snapcraft auth). Set targets.linux.snap.enabled:false to skip the snap
-  // target entirely regardless of credentials.
+  // Snap publishing — opt-in via explicit `targets.linux.snap.enabled: true` in
+  // config. The framework scaffold ships with that field set to true by default
+  // (so new consumers get snap publishing out of the box once their credentials
+  // are wired up), but if the field is missing entirely we default to OFF — that
+  // way callers who never knew about snap don't suddenly start emitting a snap
+  // target. Even when enabled, the snap target is auto-skipped when
+  // SNAPCRAFT_STORE_CREDENTIALS isn't set, so a fresh project doesn't fail CI
+  // before the user wires up snapcraft auth.
   const snapCfg = linuxTargetCfg.snap || {};
-  const snapConfigEnabled = snapCfg.enabled !== false;   // default true
+  const snapConfigEnabled = snapCfg.enabled === true;
   const haveSnapCreds = !!process.env.SNAPCRAFT_STORE_CREDENTIALS;
   const snapEnabled = snapConfigEnabled && haveSnapCreds;
   if (snapConfigEnabled && !haveSnapCreds) {

@@ -284,46 +284,13 @@ function loadConfigFromFile(filepath) {
   return JSON5.parse(fs.readFileSync(filepath, 'utf8'));
 }
 
-// Environment + API URL helpers — mirror web-manager's contract so EM apps can
-// hit the same dev/prod backends as UJM and BXM consumers.
+// Cross-context helpers (isDevelopment/isProduction/isTesting + getFunctionsUrl/getApiUrl
+// + getEnvironment) live in src/utils/mode-helpers.js + src/utils/url-helpers.js +
+// src/build.js. All four Manager constructors mix them in via their respective
+// `attachTo(Manager)` calls — see the bottom of this file.
 
-Manager.prototype.isDevelopment = function () {
-  return (this.config?.em?.environment || 'production') === 'development';
-};
-
-Manager.prototype.getEnvironment = function () {
-  return this.config?.em?.environment || 'production';
-};
-
-Manager.prototype.getFunctionsUrl = function (environment) {
-  const env = environment || this.getEnvironment();
-  const projectId = this.config?.firebaseConfig?.projectId;
-
-  if (!projectId) {
-    throw new Error('firebaseConfig.projectId not set in config/electron-manager.json');
-  }
-
-  if (env === 'development') {
-    return `http://localhost:5001/${projectId}/us-central1`;
-  }
-
-  return `https://us-central1-${projectId}.cloudfunctions.net`;
-};
-
-Manager.prototype.getApiUrl = function (environment) {
-  const env = environment || this.getEnvironment();
-
-  if (env === 'development') {
-    return 'http://localhost:5002';
-  }
-
-  // Prod: api.<authDomain>. Mirrors web-manager.getApiUrl behavior.
-  const authDomain = this.config?.firebaseConfig?.authDomain;
-  if (!authDomain) {
-    throw new Error('firebaseConfig.authDomain not set in config/electron-manager.json');
-  }
-
-  return `https://api.${authDomain}`;
-};
+// Mix in shared cross-context helpers — same code path used in renderer, preload, build.
+require('./utils/mode-helpers.js').attachTo(Manager);
+require('./utils/url-helpers.js').attachTo(Manager);
 
 module.exports = Manager;

@@ -158,4 +158,8 @@ function serializeForIpc(args) {
   });
 }
 
+// Mix in shared cross-context helpers — same code path used in main, renderer, build.
+require('./utils/mode-helpers.js').attachTo(Manager);
+require('./utils/url-helpers.js').attachTo(Manager);
+
 module.exports = Manager;

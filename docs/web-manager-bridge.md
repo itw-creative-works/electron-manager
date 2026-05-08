@@ -207,5 +207,5 @@ If `EM_TEST_FIREBASE_ADMIN_KEY` (or `GOOGLE_APPLICATION_CREDENTIALS`) isn't set,
 - Firebase app name in main is `em-auth` (avoids clashes if a consumer's main code also wants its own Firebase instance).
 - The bridge does NOT persist user info to EM storage — Firebase's IndexedDB persistence handles session restoration. Matches BXM.
 - Custom tokens are NEVER stored. Renderers receive them once via broadcast, sign in, discard. Fresh tokens are minted on demand from `/backend-manager` with command `user:create-custom-token`.
-- `manager.getApiUrl()` (already on main Manager) returns the dev or prod URL, so the bridge automatically hits the right backend.
+- `manager.getApiUrl()` returns the dev or prod URL, so the bridge automatically hits the right backend. Available across all four Manager contexts (main / renderer / preload / build) via the shared `src/utils/url-helpers.js` module — same code path everywhere. See CLAUDE.md → "Cross-context helpers."
 - All sensitive Firebase user fields (`stsTokenManager`, `providerData`, etc.) are stripped before sending over IPC. Only `{uid, email, displayName, photoURL, emailVerified}` cross the bridge.

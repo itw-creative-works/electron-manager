@@ -131,13 +131,16 @@ module.exports = {
       },
     },
     {
-      name: 'downloadActionsRunner uses tar (not PowerShell Expand-Archive)',
+      name: 'downloadActionsRunner uses Expand-Archive on Windows + tar fallback elsewhere',
       run: (ctx) => {
+        // 1.2.36+ uses PowerShell Expand-Archive on Windows because Git-for-Windows'
+        // GNU tar misinterprets `C:\...` paths as `host:path`. tar still used on
+        // mac/linux for the framework-dev path.
         const fs = require('fs');
         const src = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'commands', 'runner.js'), 'utf8');
-        // Smoke check: tar invocation present, Expand-Archive removed.
-        ctx.expect(src).toContain("spawnSync('tar', ['-xf'");
-        ctx.expect(src).not.toContain('Expand-Archive');
+        ctx.expect(src).toContain('Expand-Archive');                   // Windows path present
+        ctx.expect(src).toContain("spawnSync('tar', ['-xf'");          // unix fallback present
+        ctx.expect(src).toContain("process.platform === 'win32'");     // platform fork present
       },
     },
     {

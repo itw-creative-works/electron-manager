@@ -77,7 +77,8 @@ async function runBootTests({ tests, projectRoot, emDistRoot }) {
   //   EM_TEST_BOOT_SPEC     — JSON file with the test definitions
   // Argv would be cleaner but Electron rejects unknown CLI flags.
   const childEnv = Object.assign({}, process.env, {
-    EM_TEST_BOOT:                  '1',
+    EM_TEST_MODE:                  'true',   // canonical signal — manager.isTesting() picks it up
+    EM_TEST_BOOT:                  '1',      // boot-runner-specific dispatch marker (main.js reads this to load the harness instead of doing normal init)
     EM_TEST_BOOT_HARNESS:          bootEntry,
     EM_TEST_BOOT_SPEC:             specFile,
     // Tray on macOS pops a real menubar icon; suppress to keep the test invisible.

@@ -35,9 +35,9 @@ function runElectronTests({ harnessEntry, suiteFiles, rendererSuiteFiles, filter
     // ELECTRON_RUN_AS_NODE is already stripped by bin/mgr at the CLI boundary, so the child
     // env is clean — no extra delete here.
     const childEnv = Object.assign({}, process.env, {
-      EM_TEST_MODE:    '1',
+      EM_TEST_MODE:              'true',   // canonical signal — manager.isTesting() picks it up
       ELECTRON_NO_ATTACH_CONSOLE: '1',
-      NODE_OPTIONS:    '',
+      NODE_OPTIONS:              '',
     });
 
     const child = spawn(electronBin, args, {

@@ -20,7 +20,7 @@
 - **Auto-update background install.** When a download finishes from a background poll (not user-initiated), EM auto-relaunches into the new version after 5s — apps update overnight without bothering the user. User-initiated checks skip this so your UI can prompt instead.
 - **Webpack-bundled** main / preload / renderer for source protection.
 - **Built-in test framework** — Jest-like syntax, four layers: `build` (plain Node), `main` (spawned Electron), `renderer` (hidden BrowserWindow), and `boot` (spawns the consumer's actual built `dist/main.bundle.js` for end-to-end smoke tests against the live manager — no `npm start && sleep && kill` shell hacks). Boot layer always rebuilds the bundle first so tests never see stale code.
-- **Multi-platform build/release** via GitHub Actions — macOS sign + notarize, Linux (deb + AppImage + optional Snap), Windows EV-token signing (self-hosted runner now, cloud-signing pluggable). Sensible installer defaults out of the box: NSIS one-click install on Windows (desktop + start menu shortcut, launch on finish), universal mac binary (one .dmg for Intel + Apple Silicon), `app.category` automatically mapped to per-platform values, copyright `{YEAR}` token always current. Snap Store publishing is one config flag away. See [installer-options](docs/installer-options.md).
+- **Multi-platform build/release** via GitHub Actions — macOS sign + notarize, Linux (deb + AppImage + optional Snap), Windows EV-token signing (self-hosted runner now, cloud-signing pluggable). Sensible installer defaults out of the box: NSIS one-click install on Windows (desktop + start menu shortcut, launch on finish), universal mac binary (one .dmg for Intel + Apple Silicon), `app.category` automatically mapped to per-platform values, copyright `{YEAR}` token always current. Snap Store publishing is on by default in the scaffold and auto-skipped at build time when `SNAPCRAFT_STORE_CREDENTIALS` isn't set — drop the credential blob into `.env`, run `mgr push-secrets`, and the next release ships to the Snap Store. See [installer-options](docs/installer-options.md).
 
 ## Quick start (consumer)
 
@@ -96,7 +96,7 @@ Each subsystem has its own API reference under [`docs/`](docs/):
 - [themes](docs/themes.md) — classy + bootstrap themes, `@use 'electron-manager' as * with (...)` overrides, per-page CSS bundles
 - [sentry](docs/sentry.md) — error/crash reporting, dev-mode gating, auto auth attribution, release tagging
 - [hooks](docs/hooks.md) — lifecycle hooks (build/pre, build/post, release/pre, release/post, notarize)
-- [installer-options](docs/installer-options.md) — installer/distribution config: NSIS one-click defaults, ia32 inclusion, app.category mapping, `{YEAR}` copyright token, snap publishing opt-in, MAS roadmap
+- [installer-options](docs/installer-options.md) — installer/distribution config: NSIS one-click defaults, ia32 inclusion, app.category mapping, `{YEAR}` copyright token, snap publishing (default-on with cred-gated auto-skip), MAS roadmap
 - [signing](docs/signing.md) — macOS + Windows code signing reference, cert files, env vars
 - [releasing](docs/releasing.md) — end-to-end release walkthrough (`.env` → GitHub Release)
 - [runner](docs/runner.md) — Windows EV-token signing runner — `npx mgr runner install`, auto-onboards new GH orgs, `npx mgr runner monitor` for a live signing event tail
