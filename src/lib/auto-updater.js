@@ -1,12 +1,20 @@
-// Auto-updater — wraps electron-updater with three triggers:
+// Auto-updater — wraps electron-updater with these triggers:
 //
 //   1. Startup check        — fires `startupDelayMs` after `whenReady` (default 10s, non-blocking).
-//   2. Periodic check       — `setInterval` every `intervalMs` (default 60s).
-//   3. 30-day pending gate  — once an update is downloaded, store `downloadedAt`. On every poll
-//                             tick + at app start, if (now - downloadedAt) >= maxAgeMs (default 30d),
-//                             force `quitAndInstall()`. Counter is set on the FIRST download and not
-//                             reset by subsequent downloads — first one wins. Cleared only when the app
-//                             actually launches at the pendingUpdate.version (i.e. install applied).
+//   2. Feed-check timer     — every `feedCheckIntervalMs` (default 1h). HTTP-bound — hits the
+//                             release feed. Hourly to match Discord/Slack/VS Code; running this
+//                             every minute would hammer GitHub at 60× the necessary rate.
+//   3. Idle-eval timer      — every `idleEvalIntervalMs` (default 1m). In-process arithmetic only,
+//                             no HTTP. Decides whether to install an already-downloaded update
+//                             based on user idle time. Frequent so a downloaded update installs
+//                             promptly when the user steps away (rather than waiting up to an
+//                             hour for the next feed-check).
+//   4. 30-day pending gate  — once an update is downloaded, store `downloadedAt`. On every
+//                             feed-check tick + at app start, if (now - downloadedAt) >= maxAgeMs
+//                             (default 30d), force `quitAndInstall()`. Counter is set on the FIRST
+//                             download and not reset by subsequent downloads — first one wins.
+//                             Cleared only when the app actually launches at the
+//                             pendingUpdate.version (i.e. install applied).
 //
 // State machine (broadcast to renderers as `em:auto-updater:status`):
 //   idle / checking / available / downloading / downloaded / not-available / error
@@ -28,13 +36,14 @@ const STORAGE_KEY = 'autoUpdater';
 // Idle-aware install constant — hardcoded for now (not config-shaped). Tune here.
 //
 // A downloaded update no longer auto-installs after a flat 5s delay. Instead, the
-// existing periodic tick (every `DEFAULTS.intervalMs`) makes the install decision:
+// idle-eval timer (every `DEFAULTS.idleEvalIntervalMs`, default 1m) makes the
+// install decision:
 //   1. Any UI activity (mouse / keyboard / wheel / touch / window focus) bumps
 //      `_lastActivityAt = Date.now()`.
-//   2. The periodic tick checks `state.code === 'downloaded'`:
+//   2. The idle-eval tick checks `state.code === 'downloaded'`:
 //        - If user idle ≥ IDLE_INSTALL_THRESHOLD_MS → installNow().
 //        - Else if we haven't prompted for this version yet → native dialog (once).
-//   3. Dismissal ("Later") is "not now" — the periodic tick keeps polling and the
+//   3. Dismissal ("Later") is "not now" — the idle-eval tick keeps polling and the
 //      install fires whenever the user eventually walks away. We never re-prompt
 //      for the same version (tracked via `_promptedForVersion`).
 //
@@ -45,20 +54,34 @@ const STORAGE_KEY = 'autoUpdater';
 //
 // Test mode: when `manager.isTesting()` is true, the threshold collapses to 3s so
 // integration tests can drive a real download → idle wait → install in ~5s instead
-// of 15min. The intervalMs (periodic tick cadence) likewise drops to 500ms in tests
-// so the watcher actually fires inside a test run. Both wired in `idleThresholdMs()`
-// and `_periodicTick()` based on the manager's `isTesting()` helper.
+// of 15min. Both timers (feed-check + idle-eval) likewise drop to 500ms in tests so
+// the full sequence fires inside a test run. Wired in `_idleThresholdMs()` and the
+// initialize() timer setup based on the manager's `isTesting()` helper.
 const IDLE_INSTALL_THRESHOLD_MS         = 15 * 60 * 1000;   // 15 min — production
 const IDLE_INSTALL_THRESHOLD_MS_TESTING =      3 * 1000;    // 3 sec  — when isTesting()
 const IDLE_TICK_MS_TESTING              =          500;     // 500ms periodic tick when testing
 
+// Two separate timers, two different jobs:
+//
+//   feedCheckIntervalMs   — how often to hit the update feed (HTTP request). EXPENSIVE
+//                           (network I/O against a third-party host every running app
+//                           instance). Default 1h matches Discord/Slack/VS Code.
+//   idleEvalIntervalMs    — how often to re-evaluate "is now a good time to install
+//                           the downloaded update?" CHEAP (in-process arithmetic on
+//                           _lastActivityAt + state check). Default 1min so a downloaded
+//                           update installs promptly when the user steps away.
+//
+// They were briefly merged into a single timer in 1.2.38; that was a mistake — running
+// the feed-check at idle-eval cadence (60s) was hammering GitHub at 60× the necessary
+// rate. Restored as separate timers in 1.3.1.
 const DEFAULTS = {
-  enabled:       true,
-  channel:       'latest',
-  startupDelayMs:  10 * 1000,           // 10s after whenReady
-  intervalMs:    60 * 1000,             // 60s — every minute we re-check the feed and re-evaluate the 30-day gate
-  maxAgeMs:      30 * 24 * 60 * 60 * 1000,  // 30 days
-  autoDownload:  true,
+  enabled:               true,
+  channel:               'latest',
+  startupDelayMs:           10 * 1000,           // 10s after whenReady
+  feedCheckIntervalMs:      60 * 60 * 1000,      // 1h — feed poll cadence
+  idleEvalIntervalMs:        1 * 60 * 1000,      // 1m — idle-install evaluator cadence
+  maxAgeMs:                 30 * 24 * 60 * 60 * 1000,  // 30 days
+  autoDownload:          true,
 };
 
 // Fresh state object so a single `Object.assign` never bleeds between instances or test runs.
@@ -79,7 +102,8 @@ const autoUpdater = {
   _library:     null,
   _options:     null,
   _state:       freshState(),
-  _intervalId:  null,
+  _feedCheckIntervalId: null,
+  _idleEvalIntervalId:  null,
   _pendingTimers: [],
   _userInitiated: false,
   _devSimulating: false,
@@ -142,33 +166,49 @@ const autoUpdater = {
       autoUpdater.checkNow({ userInitiated: false }).catch((e) => logger.warn(`startup check failed: ${e.message}`));
     }, startupDelay));
 
-    // 5. Schedule periodic tick — single timer that handles ALL install-decision logic:
-    //    a) Re-check the feed (so we discover new updates).
-    //    b) Enforce the 30-day pending-update gate (force install if too old).
-    //    c) Evaluate idle-install readiness (auto-install if user idle, prompt if active).
-    //    Centralizing means one timer, one decision flow, no race between "post-download"
-    //    triggers and watcher ticks.
+    // 5. Schedule TWO independent timers:
     //
-    // In tests (`manager.isTesting() === true`) the cadence drops to IDLE_TICK_MS_TESTING
-    // (500ms) so a real integration test sees the tick fire within seconds of a download.
+    //    a) Feed-check timer (EXPENSIVE — HTTP). Hits the GitHub release feed.
+    //       Default 1h cadence. Also enforces the 30-day max-age gate as a safety net
+    //       since this tick is when we'd notice a long-pending update.
+    //
+    //    b) Idle-eval timer (CHEAP — in-process). Re-evaluates whether to install
+    //       a downloaded update based on user idle time. Default 1m cadence so a
+    //       downloaded update installs promptly when the user steps away.
+    //
+    // In tests (`manager.isTesting() === true`) both cadences collapse to
+    // IDLE_TICK_MS_TESTING (500ms) so an integration test sees the full sequence
+    // fire within seconds of a download.
     const isTesting = !!manager?.isTesting?.();
-    const tickInterval = isTesting ? IDLE_TICK_MS_TESTING : autoUpdater._options.intervalMs;
-    if (tickInterval > 0) {
-      autoUpdater._intervalId = setInterval(() => autoUpdater._periodicTick(), tickInterval);
+    const feedInterval = isTesting ? IDLE_TICK_MS_TESTING : autoUpdater._options.feedCheckIntervalMs;
+    const idleInterval = isTesting ? IDLE_TICK_MS_TESTING : autoUpdater._options.idleEvalIntervalMs;
+
+    if (feedInterval > 0) {
+      autoUpdater._feedCheckIntervalId = setInterval(() => autoUpdater._feedCheckTick(), feedInterval);
+    }
+    if (idleInterval > 0) {
+      autoUpdater._idleEvalIntervalId  = setInterval(() => autoUpdater._idleEvalTick(),  idleInterval);
     }
 
-    logger.log(`auto-updater initialized (interval=${tickInterval}ms, maxAge=${autoUpdater._options.maxAgeMs}ms, idle-install threshold=${autoUpdater._idleThresholdMs() / 1000}s${isTesting ? ' [testing]' : ''})`);
+    logger.log(`auto-updater initialized (feed-check=${feedInterval}ms, idle-eval=${idleInterval}ms, maxAge=${autoUpdater._options.maxAgeMs}ms, idle-install threshold=${autoUpdater._idleThresholdMs() / 1000}s${isTesting ? ' [testing]' : ''})`);
   },
 
-  // Single periodic decision point. Runs every intervalMs. All install-readiness logic
-  // lives here so there's no second timer racing with the first.
-  async _periodicTick() {
+  // Feed-check tick — hits the GitHub release feed. Expensive (HTTP). Also enforces
+  // the 30-day max-age gate since this is the slower-cadence tick.
+  async _feedCheckTick() {
     try {
       await autoUpdater.checkNow({ userInitiated: false });
     } catch (e) {
-      logger.warn(`periodic check failed: ${e.message}`);
+      logger.warn(`feed-check failed: ${e.message}`);
     }
-    if (autoUpdater._enforceMaxAgeGate()) return;   // forced install — no further evaluation needed
+    autoUpdater._enforceMaxAgeGate();
+  },
+
+  // Idle-eval tick — cheap, no network. Just decides whether to install the
+  // already-downloaded update. Runs frequently so a downloaded update installs
+  // promptly when the user steps away (rather than waiting for the next hourly
+  // feed-check).
+  _idleEvalTick() {
     autoUpdater._evaluateIdleInstall();
   },
 
@@ -251,9 +291,11 @@ const autoUpdater = {
 
   // Lifecycle teardown — used by tests.
   shutdown() {
-    if (autoUpdater._intervalId) clearInterval(autoUpdater._intervalId);
+    if (autoUpdater._feedCheckIntervalId) clearInterval(autoUpdater._feedCheckIntervalId);
+    if (autoUpdater._idleEvalIntervalId)  clearInterval(autoUpdater._idleEvalIntervalId);
     autoUpdater._pendingTimers.forEach((t) => clearTimeout(t));
-    autoUpdater._intervalId  = null;
+    autoUpdater._feedCheckIntervalId = null;
+    autoUpdater._idleEvalIntervalId  = null;
     autoUpdater._pendingTimers = [];
     autoUpdater._initialized   = false;
     autoUpdater._library       = null;
@@ -297,14 +339,14 @@ const autoUpdater = {
     autoUpdater._broadcastStatus();
 
     // No post-download install trigger here. All install-decision logic lives in the
-    // periodic tick (`_evaluateIdleInstall`) so there's a single decision point. The
-    // tick runs every intervalMs; first evaluation happens on the next tick after
-    // download completes (gives a user who's currently active a chance to reach a
-    // natural pause before any prompt fires).
+    // idle-eval tick (`_evaluateIdleInstall`). It runs every idleEvalIntervalMs
+    // (default 1m); first evaluation happens on the next tick after download
+    // completes (gives a user who's currently active a chance to reach a natural
+    // pause before any prompt fires).
   },
 
-  // Evaluate whether to auto-install or prompt. Called from the periodic tick (and
-  // skipped when the 30-day gate already forced an install).
+  // Evaluate whether to auto-install or prompt. Called from the idle-eval tick.
+  // The 30-day gate runs on the feed-check tick separately.
   //   - Only runs when state.code === 'downloaded' (i.e. an update is sitting ready).
   //   - Skips if the original check was user-initiated (consumer UI handles that path).
   //   - If user idle ≥ _idleThresholdMs() (15min in prod, 3s in tests) → installNow().

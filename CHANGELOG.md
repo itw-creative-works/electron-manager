@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.3.1 — fix: auto-updater feed-check default cadence 60s → 1h (de-hammers GitHub)
+
+Critical fix. The 1.2.38 refactor that centralized auto-updater install logic into
+a single periodic tick also pulled the feed-check (HTTP) onto the same 60-second
+cadence as the idle-install evaluator (in-process arithmetic). Two jobs with very
+different cost profiles got conflated:
+
+- **Feed-check** = HTTP request to the GitHub release feed. Expensive. Should be
+  hourly to match Discord/Slack/VS Code conventions.
+- **Idle-eval** = in-process check (`Date.now() - _lastActivityAt`). Free. Should
+  run frequently so a downloaded update installs promptly when the user steps away.
+
+Running both at 60s meant every running EM-built app was hitting the GitHub release
+feed every minute (60× the necessary rate). 1.3.0 inherited this bug.
+
+### Restored as two separate timers
+
+```
+feedCheckIntervalMs:  60 * 60 * 1000   // 1h — HTTP feed-check
+idleEvalIntervalMs:    1 * 60 * 1000   // 1m — in-process idle eval
+```
+
+In tests both still collapse to 500ms via `manager.isTesting()` so the integration
+flow runs in seconds.
+
+The startup feed-check (10s after app boot) is unchanged, so users restarting the
+app still pick up updates immediately. The 30-day max-age gate (force-install if a
+downloaded update sits longer than 30 days) still runs on every feed-check tick as
+a safety net. Idle-install eval doesn't depend on the feed-check timer.
+
+### Test coverage
+
+Added a guard test (`feed-check default cadence is 1h (production), not 1m`) that
+asserts the production defaults so this regression can't happen silently again.
+Two new tick-separation tests verify the feed-check tick runs HTTP + 30-day gate
+WITHOUT idle eval, and the idle-eval tick runs idle eval WITHOUT HTTP or gate.
+
+509 passing, 0 failing.
+
 ## 1.3.0 — cross-context helpers + getWebsiteUrl + full main+renderer test coverage
 
 ### Cross-context helpers (BEM-pattern)

@@ -226,7 +226,8 @@ module.exports = {
         cfg.autoUpdate = { enabled: false };
         try {
           await ctx.manager.autoUpdater.initialize(ctx.manager);
-          ctx.expect(ctx.manager.autoUpdater._intervalId).toBe(null);
+          ctx.expect(ctx.manager.autoUpdater._feedCheckIntervalId).toBe(null);
+          ctx.expect(ctx.manager.autoUpdater._idleEvalIntervalId).toBe(null);
           ctx.expect(ctx.manager.autoUpdater._library).toBe(null);
         } finally {
           cfg.autoUpdate = orig;
@@ -537,10 +538,14 @@ module.exports = {
       },
     },
 
-    // ─── Periodic tick — full sequence ───────────────────────────────────────────
+    // ─── Two-timer separation ────────────────────────────────────────────────────
+    //
+    // Feed-check (HTTP, expensive, hourly) and idle-eval (in-process, cheap, every
+    // minute) MUST stay separate timers — running the feed-check at idle-eval cadence
+    // hammers the GitHub release feed at 60× the necessary rate.
 
     {
-      name: 'periodic tick runs feed-check + 30-day gate + idle eval, in order',
+      name: 'feed-check tick: hits the library + runs 30-day gate (no idle eval)',
       run: async (ctx) => {
         const u = ctx.manager.autoUpdater;
         const origLib = u._library;
@@ -557,8 +562,8 @@ module.exports = {
         u._evaluateIdleInstall  = () => { calls.push('idle'); };
         try {
           u._state = { ...u._state, code: 'idle' };
-          await u._periodicTick();
-          ctx.expect(calls).toEqual(['check', 'gate', 'idle']);
+          await u._feedCheckTick();
+          ctx.expect(calls).toEqual(['check', 'gate']);
         } finally {
           u._library = origLib;
           u._enforceMaxAgeGate = origGate;
@@ -567,7 +572,7 @@ module.exports = {
       },
     },
     {
-      name: 'periodic tick: 30-day gate firing short-circuits idle eval',
+      name: 'idle-eval tick: only runs idle eval (no HTTP, no gate)',
       run: async (ctx) => {
         const u = ctx.manager.autoUpdater;
         const origLib = u._library;
@@ -580,17 +585,26 @@ module.exports = {
           autoDownload: true,
           on: () => {},
         };
-        u._enforceMaxAgeGate    = () => { calls.push('gate'); return true; };   // gate forced an install
+        u._enforceMaxAgeGate    = () => { calls.push('gate'); return false; };
         u._evaluateIdleInstall  = () => { calls.push('idle'); };
         try {
-          u._state = { ...u._state, code: 'idle' };
-          await u._periodicTick();
-          ctx.expect(calls).toEqual(['check', 'gate']);   // idle skipped — gate already triggered
+          u._idleEvalTick();
+          ctx.expect(calls).toEqual(['idle']);
         } finally {
           u._library = origLib;
           u._enforceMaxAgeGate = origGate;
           u._evaluateIdleInstall = origIdle;
         }
+      },
+    },
+    {
+      name: 'feed-check default cadence is 1h (production), not 1m',
+      run: (ctx) => {
+        const u = ctx.manager.autoUpdater;
+        // Sanity-guard: if someone re-merges the timers or drops the cadence to
+        // 60s again, this test fails. Production builds must not hammer the feed.
+        ctx.expect(u._options.feedCheckIntervalMs).toBe(60 * 60 * 1000);
+        ctx.expect(u._options.idleEvalIntervalMs).toBe(1 * 60 * 1000);
       },
     },
     {
@@ -788,7 +802,8 @@ module.exports = {
           u._pendingTimers.push(setTimeout(() => {}, 1000000));
           u._promptedForVersion = '1.2.3';
           u.shutdown();
-          ctx.expect(u._intervalId).toBe(null);
+          ctx.expect(u._feedCheckIntervalId).toBe(null);
+          ctx.expect(u._idleEvalIntervalId).toBe(null);
           ctx.expect(u._pendingTimers).toEqual([]);
           ctx.expect(u._initialized).toBe(false);
           ctx.expect(u._library).toBe(null);
