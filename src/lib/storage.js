@@ -43,17 +43,19 @@ const storage = {
     // The /* webpackIgnore: true */ magic comment tells webpack to leave this import() alone —
     // the consumer's bundled main.js will then ask Node directly to resolve 'electron-store',
     // which finds it in EM's own node_modules at runtime.
+    // electron-store is ESM-only as of v11; dynamic import is the only way to load
+    // it from CommonJS. The dynamic import is the actual fallible op (peer dep
+    // resolution); `require('electron')` doesn't throw.
     let ElectronStore;
-    let electron;
     try {
       const mod = await import(/* webpackIgnore: true */ 'electron-store');
       ElectronStore = mod.default || mod;
-      electron = require('electron');
     } catch (e) {
-      logger.warn(`electron or electron-store not available — storage running as no-op. (${e.message})`);
+      logger.warn(`electron-store not available — storage running as no-op. (${e.message})`);
       storage._initialized = true;
       return;
     }
+    const electron = require('electron');
 
     // Build the store. Filename is `em-storage.json` (electron-store appends .json).
     // Production name is read from electron's app.name (set automatically from package.productName).

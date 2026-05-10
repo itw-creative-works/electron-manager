@@ -44,13 +44,10 @@ const startup = {
     }
 
     startup._manager = manager;
-
-    try {
-      startup._electron = require('electron');
-    } catch (e) {
-      logger.warn(`electron not available — startup running in no-op mode. (${e.message})`);
+    startup._electron = require('electron');
+    if (!startup._electron?.app) {
       startup._initialized = true;
-      return;
+      return;     // renderer/preload — no app.setLoginItemSettings to wire
     }
 
     const mode         = startup.getMode();

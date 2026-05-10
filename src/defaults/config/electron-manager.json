@@ -186,6 +186,43 @@
   // Add custom routes at runtime: manager.deepLink.on('my-route', (ctx) => {...}) in main.
 
   sentry:         { dsn: '' },
+
+  // GA4 analytics. Measurement ID lives in config (not secret); the API secret
+  // lives in `process.env.GOOGLE_ANALYTICS_SECRET` (matches BEM convention) so
+  // it's not committed. Webpack's DefinePlugin bakes the secret into packaged
+  // builds at build time so production apps don't need .env at runtime.
+  // client_id / user_id are uuidv5(deviceId/firebaseUid, projectId-namespace)
+  // so the same human gets unified events across desktop + web + backend.
+  analytics: {
+    enabled: true,                            // set false to disable analytics entirely
+    providers: {
+      google: {
+        id: '',                               // 'G-XXXXXXXXXX' Measurement ID
+      },
+    },
+  },
+
+  // "Hot config" — JSON document fetched from the brand site so app behavior
+  // can be flipped without shipping a new build (e.g. force-update gate, ads
+  // toggle, default user agent strings, etc.). Default URL is derived as
+  // `${brand.url}/data/resources/main.json` (legacy convention). Override the
+  // path with `remoteConfig.url`. Polled at the same cadence as auto-updater
+  // feed-check (default 1h). Disable via `enabled: false`.
+  remoteConfig: {
+    enabled: true,
+    // url: 'https://brand.example/data/resources/main.json',   // default uses brand.url
+  },
+
+  // Restart Manager — auxiliary helper app that handles relaunching this app on
+  // our behalf via the `restart-manager://` URL scheme. EM auto-registers a few
+  // seconds after launch, auto-unregisters on clean quit, and downloads + installs
+  // restart-manager if missing (mac: signed .zip; windows: NSIS one-click; linux:
+  // opens the .deb URL in the user's browser). Set false to disable entirely.
+  // In dev mode it's silently skipped unless EM_RESTART_MANAGER_DEV=1.
+  restartManager: {
+    enabled: true,
+  },
+
   firebaseConfig: {},
   webManager:     {},
 }

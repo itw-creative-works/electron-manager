@@ -35,12 +35,12 @@ const ipc = {
     }
 
     ipc._manager = manager;
-
-    try {
-      ipc._electron = require('electron');
-      ipc._ipcMain = ipc._electron.ipcMain;
-    } catch (e) {
-      logger.warn(`electron not available — ipc running in test/no-op mode. (${e.message})`);
+    ipc._electron = require('electron');
+    ipc._ipcMain = ipc._electron.ipcMain;
+    // No ipcMain in renderer/preload — those contexts use ipcRenderer instead.
+    // We're a main-side bus; bail in non-main contexts.
+    if (!ipc._ipcMain) {
+      logger.warn('ipc: ipcMain not available — running in test/no-op mode (renderer or non-Electron context)');
       ipc._initialized = true;
       return;
     }

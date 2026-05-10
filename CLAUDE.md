@@ -44,6 +44,8 @@ new (require('electron-manager/renderer'))().initialize();
 Boot sequence (main process — `manager.initialize()`):
 
 1. **`startup.applyEarly()`** — first thing, before `whenReady`. Calls `app.dock.hide()` for `mode: 'hidden'` (zero-bounce production via `LSUIElement` baked at build time).
+1b. **userData path append** — in dev (`!app.isPackaged`), appends ` (Development)` to `app.getPath('userData')` so dev session data, logs, and `electron-store` files don't collide with a production-installed copy of the same app on the same machine. Logged before/after. Mirrors legacy electron-manager. **Must run before `storage.initialize()`** (which constructs `electron-store` against the path).
+1c. **Global user-agent fallback** — sets `app.userAgentFallback` to a branded template via `node-powertools.template`. Default per-platform templates: `Mozilla/5.0 (... <platform-specific> ...) AppleWebKit/537.36 (KHTML, like Gecko) {brand.name}/{app.version} Chrome/{chrome} Safari/537.36`. Merge tags resolve from `{ brand: { name, id }, app: { version }, chrome, electron, node, platform, arch }`. Logged on init. Every BrowserWindow load + electron-updater fetch + node-fetch via the renderer carries the branded UA. Consumers can override post-init by re-setting `app.userAgentFallback` from their main.js.
 2. **`app.on('before-quit')`** wired — sets `manager._isQuitting = true` so any quit path (Cmd+Q, role:'quit' menu, programmatic `app.quit()`, OS shutdown) bypasses the window-manager's hide-on-close trap.
 3. **`ipc`** — typed channel bus online before any feature can register handlers.
 4. **`storage`** — async (electron-store v11 ESM via `webpackIgnore`'d dynamic import). Other libs depend on this.
@@ -78,6 +80,11 @@ Boot sequence (main process — `manager.initialize()`):
 | `auto-updater` | real | electron-updater wrapper, startup + periodic checks, 30-day pending-update gate, dev simulation via `EM_DEV_UPDATE`, renderer-broadcast status state machine, **idle-aware install** (auto-installs only after 15min of inactivity; prompts via native dialog once per version when user is active; `manager.autoUpdater.markActive()` for consumer-defined activity) |
 | `sentry` | real | per-context split (`lib/sentry/{index,core,main,renderer,preload}.js`), auto auth attribution via web-manager-bridge, dev-mode gating |
 | `templating` | real | `{{ }}` token replacement (BXM/UJM convention), `buildPageVars()` helper, used at build time by `gulp/html` |
+| `context` | real | runtime info block — `manager.context.{geolocation,client,session,app}`. `geolocation.ip` async-fetched via ipify + persisted to storage so offline boots still have last-known IP. `session.deviceId` resolved from first non-internal MAC via `os.networkInterfaces()`, falls back to `crypto.randomUUID()` persisted on first launch. Shape mirrors BEM's `assistant.request.{geolocation,client}` for cross-project consistency. |
+| `usage` | real | `opens` / `hoursTotal` / `hoursThisSession`. Tracks app launches + accumulates session length across clean exits (crashed sessions don't credit hours — `lastQuitAt` was never written). Persisted via `manager.storage`; before-quit handler records session end. |
+| `remote-config` | real | "Hot config" — fetches `${brand.url}/data/resources/main.json` (legacy convention) or override URL. Polls at the same cadence as auto-updater feed-check (default 1h). `manager.remoteConfig.get(path?)` for cache-first reads (instant, never blocks). Cached to storage so offline boots still have last-known values. `on('update', fn)` for fresh-fetch broadcasts. |
+| `analytics` | real | GA4 via Measurement Protocol. **Cross-platform identity** — `client_id = uuidv5(deviceId, projectId-namespace)` and `user_id = uuidv5(firebaseUid, projectId-namespace)`. Same projectId in BEM/UJM/web-manager/EM produces identical uuidv5 outputs → unified events for one human across all surfaces. Auto-fires `app_launch` (main), wires `login`/`logout` events to `webManager.onAuthChange`. Measurement ID in config (`analytics.providers.google.id`); secret in `process.env.GOOGLE_ANALYTICS_SECRET` (matches BEM convention) — webpack DefinePlugin bakes it into packaged bundles at build time. |
+| `restart-manager` | real | Auxiliary helper app (`restart-manager/download-server`) that handles relaunches via the `restart-manager://` URL scheme. Auto-registers ~15s after launch, auto-unregisters on clean quit. Auto-installs RM if missing — **mac**: signed/notarized `.zip` → unzip → open (no DMG mount, no prompts); **windows**: NSIS one-click installer; **linux**: opens `.deb` URL in browser (no sudo). Bails when `brand.id === 'restart-manager'` (RM doesn't manage itself), in dev (unless `EM_RESTART_MANAGER_DEV=1`), or when `restartManager.enabled === false`. Caps at 3 install attempts per process. |
 
 ### File-based feature definitions
 
@@ -297,6 +304,11 @@ API references for each subsystem live in `docs/`:
 - [docs/deep-link.md](docs/deep-link.md) — cross-platform deep links, single-instance, built-in routes
 - [docs/web-manager-bridge.md](docs/web-manager-bridge.md) — Firebase auth state sync across main + renderers
 - [docs/auto-updater.md](docs/auto-updater.md) — startup + periodic checks, 30-day pending-update gate, dev simulation
+- [docs/analytics.md](docs/analytics.md) — GA4 Measurement Protocol, cross-platform `uuidv5` identity, auth-aware user_id, queueing
+- [docs/context.md](docs/context.md) — runtime context block (geolocation, client, session, app)
+- [docs/usage.md](docs/usage.md) — opens / hoursTotal / hoursThisSession; clean-exit accumulation
+- [docs/remote-config.md](docs/remote-config.md) — "hot config" fetched from brand site; override flags without re-releasing
+- [docs/restart-manager.md](docs/restart-manager.md) — auxiliary helper app for relaunches; auto-install via signed mac.zip / NSIS exe / browser-opened .deb
 - [docs/sentry.md](docs/sentry.md) — per-context split, auto auth attribution, dev-mode gating
 - [docs/templating.md](docs/templating.md) — `{{ }}` token replacement, page vars, HTML pipeline
 - [docs/logging.md](docs/logging.md) — runtime logger (main + preload + renderer → one `runtime.log`), `mgr logs` CLI, dev vs prod paths

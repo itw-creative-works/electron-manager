@@ -4,19 +4,24 @@
 
 const LoggerLite = require('./lib/logger-lite.js');
 
-const storage     = require('./lib/storage.js');
-const sentry      = require('./lib/sentry/index.js');
-const protocol    = require('./lib/protocol.js');
-const deepLink    = require('./lib/deep-link.js');
-const appState    = require('./lib/app-state.js');
-const ipc         = require('./lib/ipc.js');
-const autoUpdater = require('./lib/auto-updater.js');
-const tray        = require('./lib/tray.js');
-const menu        = require('./lib/menu.js');
-const ctxMenu     = require('./lib/context-menu.js');
-const startup     = require('./lib/startup.js');
-const wmBridge    = require('./lib/web-manager-bridge.js');
-const windows     = require('./lib/window-manager.js');
+const storage      = require('./lib/storage.js');
+const sentry       = require('./lib/sentry/index.js');
+const protocol     = require('./lib/protocol.js');
+const deepLink     = require('./lib/deep-link.js');
+const appState     = require('./lib/app-state.js');
+const ipc          = require('./lib/ipc.js');
+const autoUpdater  = require('./lib/auto-updater.js');
+const tray         = require('./lib/tray.js');
+const menu         = require('./lib/menu.js');
+const ctxMenu      = require('./lib/context-menu.js');
+const startup      = require('./lib/startup.js');
+const wmBridge     = require('./lib/web-manager-bridge.js');
+const windows      = require('./lib/window-manager.js');
+const context      = require('./lib/context.js');
+const usage        = require('./lib/usage.js');
+const remoteConfig = require('./lib/remote-config.js');
+const analytics    = require('./lib/analytics.js');
+const restartManager = require('./lib/restart-manager.js');
 
 function Manager() {
   const self = this;
@@ -46,6 +51,11 @@ function Manager() {
   self.startup     = startup;
   self.webManager  = wmBridge;
   self.windows     = windows;
+  self.context     = context;
+  self.usage       = usage;
+  self.remoteConfig = remoteConfig;
+  self.analytics   = analytics;
+  self.restartManager = restartManager;
 
   return self;
 }
@@ -78,8 +88,7 @@ Manager.prototype.relaunch = function (options) {
     self._allowQuit = true;
   }
 
-  let electron;
-  try { electron = require('electron'); } catch (e) { return; }
+  const electron = require('electron');
 
   // If updater downloaded a fresh build, install + relaunch via electron-updater
   // (which calls `app.quit()` internally with the right post-quit script). Falls
@@ -124,13 +133,9 @@ Manager.prototype.initialize = async function (consumerConfig, options) {
 
   self.logger.log(`Initializing electron-manager (main)... pid=${process.pid} platform=${process.platform} arch=${process.arch} packaged=${!!require('electron')?.app?.isPackaged} argv=${JSON.stringify(process.argv.slice(1))}`);
 
-  // electron is a peer dep — require lazily so this file can be loaded outside Electron for tests
-  let electron;
-  try {
-    electron = require('electron');
-  } catch (e) {
-    self.logger.warn('electron not available — main Manager running in test/scaffold mode.');
-  }
+  // electron is a peer dep — always installed but the surface differs by context.
+  // In main `electron.app` is defined; in renderer/preload/plain-Node it's not.
+  const electron = require('electron');
 
   // Lifecycle event logging. These are the high-signal app-level events worth tracing
   // when something goes wrong — quit reasons, window-all-closed, will-finish-launching,
@@ -173,6 +178,51 @@ Manager.prototype.initialize = async function (consumerConfig, options) {
   self.startup._electron = electron || null;
   self.startup.applyEarly();
 
+  // 1b. Append "(Development)" to userData path in dev. MUST run before storage.initialize()
+  //     because electron-store reads `app.getPath('userData')` at construction time. Mirrors
+  //     legacy electron-manager's behavior — keeps dev session data, app state, etc. isolated
+  //     from production-installed copies of the same app on the same machine.
+  if (electron?.app && self.isDevelopment()) {
+    const before = electron.app.getPath('userData');
+    const after  = `${before} (Development)`;
+    electron.app.setPath('userData', after);
+    self.logger.log(`userData path: ${before} -> ${after} (dev mode)`);
+  } else if (electron?.app) {
+    self.logger.log(`userData path: ${electron.app.getPath('userData')} (production)`);
+  }
+
+  // 1c. Set the global user agent fallback. Default template applied to every EM app so
+  //     web requests (BrowserWindow loads, fetch, electron-updater downloads) carry a
+  //     branded UA — Mozilla parsers see a normal Chrome UA + we tag with the app's
+  //     name/version for our own server-side telemetry. Legacy electron-manager did the
+  //     same; merge tags now use node-powertools.template (single-curly syntax).
+  if (electron?.app) {
+    const { template } = require('node-powertools');
+    const ctx = {
+      brand: {
+        name: self.config?.brand?.name || self.config?.app?.productName || 'App',
+        id:   self.config?.brand?.id   || '',
+      },
+      app: {
+        version: self.getVersion?.() || '0.0.0',
+      },
+      chrome:   process.versions.chrome   || '0',
+      electron: process.versions.electron || '0',
+      node:     process.versions.node     || '0',
+      platform: process.platform,
+      arch:     process.arch,
+    };
+    const templates = {
+      darwin: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) {brand.name}/{app.version} Chrome/{chrome} Safari/537.36',
+      win32:  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) {brand.name}/{app.version} Chrome/{chrome} Safari/537.36',
+      linux:  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) {brand.name}/{app.version} Chrome/{chrome} Safari/537.36',
+    };
+    const tmpl = templates[process.platform] || templates.linux;
+    const ua = template(tmpl, ctx);
+    electron.app.userAgentFallback = ua;
+    self.logger.log(`userAgent: ${ua}`);
+  }
+
   // 2. IPC bus online first — storage and other libs register handlers on it
   self.ipc.initialize(self);
 
@@ -197,6 +247,16 @@ Manager.prototype.initialize = async function (consumerConfig, options) {
   // 7. App state (first-launch / crash / startup-context flags)
   await self.appState.initialize(self);
 
+  // 7b. Runtime context — session id, deviceId, OS info, async geolocation fetch.
+  // Must run AFTER storage (writes deviceId + cached geolocation to storage) and
+  // BEFORE analytics (which reads context.session.deviceId). Async but the geolocation
+  // fetch is fire-and-forget so this returns quickly.
+  await self.context.initialize(self);
+
+  // 7c. Usage tracking — opens / hours-total / hours-this-session. Reads/writes
+  // storage.usage and registers a before-quit handler to record session duration.
+  self.usage.initialize(self);
+
   // 8. Wait for app readiness before any UI
   if (electron?.app?.whenReady) {
     await electron.app.whenReady();
@@ -215,6 +275,21 @@ Manager.prototype.initialize = async function (consumerConfig, options) {
 
   // 12. Web-manager bridge (main-side Firebase Auth source of truth, IPC handlers for renderers)
   await self.webManager.initialize(self);
+
+  // 12b. Remote config — fetches `<brand.url>/data/resources/main.json` for hot
+  // config flips (force-update gate, default user agents, etc.). Polls hourly.
+  // Wired AFTER auto-updater so it can inherit feedCheckIntervalMs from there.
+  self.remoteConfig.initialize(self);
+
+  // 12c. Analytics — GA4 via Measurement Protocol. Wired AFTER web-manager-bridge
+  // so it can subscribe to onAuthChange and flip user_id automatically.
+  self.analytics.initialize(self);
+
+  // 12d. Restart Manager — auxiliary helper app that handles relaunches on our
+  // behalf. Self-registers via custom URL scheme; downloads + installs RM if
+  // missing. Skips itself when this app IS restart-manager, in dev (unless
+  // EM_RESTART_MANAGER_DEV=1), or when restartManager.enabled=false.
+  self.restartManager.initialize(self);
 
   // 13. Initialize the windows lib — registers app-level handlers (window-all-closed, etc.)
   //     but does NOT create any windows. Consumers are responsible for calling

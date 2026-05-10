@@ -17,18 +17,10 @@ function Manager() {
 Manager.prototype.initialize = async function () {
   const self = this;
 
-  let electron;
-  try {
-    electron = require('electron');
-  } catch (e) {
-    self.logger.warn('electron not available — preload Manager running in test mode.');
-    return self;
-  }
-
-  const { contextBridge, ipcRenderer } = electron;
+  const { contextBridge, ipcRenderer } = require('electron');
 
   if (!contextBridge || !ipcRenderer) {
-    self.logger.warn('contextBridge / ipcRenderer not available.');
+    self.logger.warn('contextBridge / ipcRenderer not available — preload running in test mode.');
     return self;
   }
 
@@ -73,6 +65,35 @@ Manager.prototype.initialize = async function () {
         const wrapped = (_, payload) => handler(payload);
         ipcRenderer.on('em:auto-updater:status', wrapped);
         return () => ipcRenderer.removeListener('em:auto-updater:status', wrapped);
+      },
+    },
+    // GA4 analytics — fire-and-forget event sender. Same shape as on main, just
+    // routes through IPC so renderer code is identical.
+    analytics: {
+      event:             (name, params)  => ipcRenderer.send('em:analytics:event', { name, params }),
+      pageview:          (path)          => ipcRenderer.send('em:analytics:event', { name: 'page_view',   params: path ? { page_path: path } : {} }),
+      screenview:        (screenName)    => ipcRenderer.send('em:analytics:event', { name: 'screen_view', params: screenName ? { screen_name: screenName } : {} }),
+      setUserProperties: (props)         => ipcRenderer.send('em:analytics:set-user-properties', props),
+      getStatus:         ()              => ipcRenderer.invoke('em:analytics:status'),
+    },
+    // Runtime context (geolocation / client / session / app). Read once at
+    // renderer init or whenever fresh values are needed.
+    context: {
+      get: () => ipcRenderer.invoke('em:context:get'),
+    },
+    // Usage stats (opens / hoursTotal / hoursThisSession).
+    usage: {
+      get: () => ipcRenderer.invoke('em:usage:get'),
+    },
+    // Hot config — same get/refreshNow surface as main, plus an onUpdate
+    // subscription that fires whenever main re-fetches successfully.
+    remoteConfig: {
+      get:        (path) => ipcRenderer.invoke('em:remote-config:get', path),
+      refreshNow: ()     => ipcRenderer.invoke('em:remote-config:refresh-now'),
+      onUpdate: (handler) => {
+        const wrapped = (_, payload) => handler(payload);
+        ipcRenderer.on('em:remote-config:update', wrapped);
+        return () => ipcRenderer.removeListener('em:remote-config:update', wrapped);
       },
     },
   });

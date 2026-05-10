@@ -15,11 +15,9 @@
 // Always prefer this over `process.cwd()` for runtime path resolution in lib/*.
 
 module.exports = function appRoot() {
-  try {
-    const electron = require('electron');
-    if (electron?.app?.getAppPath) {
-      return electron.app.getAppPath();
-    }
-  } catch (_) { /* electron not available */ }
+  // In main, `electron.app.getAppPath` is the right answer. In renderer/preload
+  // / plain Node, `app` is undefined — fall through to cwd.
+  const electron = require('electron');
+  if (electron?.app?.getAppPath) return electron.app.getAppPath();
   return process.cwd();
 };

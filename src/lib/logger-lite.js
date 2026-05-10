@@ -25,18 +25,11 @@ const fs   = require('fs');
 // preload contextBridge to attach to.
 const FORWARD_CHANNEL = 'em:log:forward';
 
-// Resolve electron module if available — guarded because logger-lite is also
-// loaded by build-time code paths that have no `electron` runtime.
-function tryRequireElectron() {
-  try {
-    return require('electron');
-  } catch (e) {
-    return null;
-  }
-}
-
-const electron = tryRequireElectron();
-const isElectron = electron !== null;
+// `electron` is a peer dep that's always installed in EM's contexts. In plain
+// Node (gulp/CLI/tests), require returns the binary-path string — destructuring
+// `app` returns undefined, which is what we use to detect "not in main".
+const electron = require('electron');
+const isElectron = !!(electron && typeof electron === 'object');
 
 // Are we running in main? In renderer/preload the `app` module is undefined.
 // Coerce to a real boolean so `_internals.isMain` exposes a boolean (not undefined).

@@ -13,7 +13,9 @@
 ## What it does
 
 - **One-line bootstrap** per Electron process: `require('electron-manager/main')`, `/preload`, `/renderer`.
-- **Modular feature library** — storage, IPC, tray, menu, context menu, window manager, startup, app-state, deep-link, auto-updater, web-manager auth, Sentry. Each feature is its own module with documented API.
+- **Modular feature library** — storage, IPC, tray, menu, context menu, window manager, startup, app-state, deep-link, auto-updater, web-manager auth, Sentry, **analytics, context, usage, remote-config, restart-manager**. Each feature is its own module with documented API.
+- **Cross-platform analytics identity.** GA4 Measurement Protocol with `client_id = uuidv5(deviceId, projectIdNamespace)` and `user_id = uuidv5(firebaseUid, projectIdNamespace)`. Same Firebase project ID in BEM/UJM/web-manager/EM produces identical `user_id` outputs everywhere → unified events for one human across desktop + web + backend, no manual stitching.
+- **"Hot config"** fetched from your brand site (`<brand.url>/data/resources/main.json`) and polled hourly — flip a force-update version, default user-agent, ad rotation, etc. without re-releasing. `manager.remoteConfig.get('versionRequired')`. Cached to storage so offline boots still have last-known values.
 - **File-based feature definitions** — trays, menus, and context-menus are JS files (full power, no DSL): `src/integrations/{tray,menu,context-menu}/index.js`. All three ship sensible **id-tagged defaults** (legacy-EM-style: about, preferences, check-for-updates, dev menu w/ inspector + log folders, etc.) and share the same **id-path mutation API**: `find`, `update`, `remove`, `enable`, `show`, `hide`, `insertBefore`, `insertAfter`, `appendTo`. Any default item is one line away from removal, customization, or repositioning.
 - **Lazy windows + Discord-style hide-on-close.** EM doesn't auto-create any windows — your `main.js` calls `windows.create('main', { show: !startup.isLaunchHidden() })`. The `main` window's X button hides instead of quitting on every platform; real quit only via Cmd+Q / menu Quit / tray Quit / auto-update install. Inset titlebar by default (mac `hiddenInset` traffic lights / win native overlay buttons / linux native frame) with a draggable topbar in the page template.
 - **Zero-bounce hidden-launch on macOS.** `startup.mode = 'hidden'` bakes `LSUIElement: true` into Info.plist at build time → app launches completely invisible (no dock icon, no Cmd+Tab, no taskbar). Tray + notifications + networking still work. When the user double-clicks the running app's icon, EM's `app.on('activate')` (macOS) / `app.on('second-instance')` (win/linux) handler surfaces the `main` window and the dock icon appears alongside it. CleanMyMac-style "tray-only at login, full window when manually opened" is the default.
@@ -92,6 +94,11 @@ Each subsystem has its own API reference under [`docs/`](docs/):
 - [deep-link](docs/deep-link.md) — cross-platform deep links, single-instance, pattern routing, built-in routes
 - [web-manager-bridge](docs/web-manager-bridge.md) — Firebase auth state synchronized across main + every renderer
 - [auto-updater](docs/auto-updater.md) — startup + periodic checks, 30-day max-age gate, dev simulation
+- [analytics](docs/analytics.md) — GA4 Measurement Protocol with cross-platform `uuidv5` identity (same human → same `user_id` across desktop/web/backend)
+- [context](docs/context.md) — runtime info block (geolocation, client, session, app) — BEM-shaped
+- [usage](docs/usage.md) — opens / hoursTotal / hoursThisSession; clean-exit accumulation
+- [remote-config](docs/remote-config.md) — "hot config" fetched from brand site for runtime flag flips without re-releases
+- [restart-manager](docs/restart-manager.md) — auxiliary helper app for relaunches; auto-installs via signed mac.zip / NSIS exe / browser-opened .deb
 - [templating](docs/templating.md) — `{{ var }}` token replacement, page template, body-only views
 - [themes](docs/themes.md) — classy + bootstrap themes, `@use 'electron-manager' as * with (...)` overrides, per-page CSS bundles
 - [sentry](docs/sentry.md) — error/crash reporting, dev-mode gating, auto auth attribution, release tagging

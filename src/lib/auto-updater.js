@@ -145,7 +145,7 @@ const autoUpdater = {
         ['em:auto-updater:install-now', async () => autoUpdater.installNow()],
       ];
       for (const [chan, fn] of channels) {
-        try { if (typeof manager.ipc.unhandle === 'function') manager.ipc.unhandle(chan); } catch (e) { /* ignore */ }
+        manager.ipc.unhandle?.(chan);
         manager.ipc.handle(chan, fn);
       }
       // Activity ping from preload (debounced renderer-side mouse/keyboard/focus).
@@ -307,7 +307,7 @@ const autoUpdater = {
     const m = autoUpdater._manager;
     if (m && m.ipc && typeof m.ipc.unhandle === 'function') {
       ['em:auto-updater:status', 'em:auto-updater:check-now', 'em:auto-updater:install-now'].forEach((c) => {
-        try { m.ipc.unhandle(c); } catch (e) { /* ignore */ }
+        m.ipc.unhandle(c);
       });
     }
   },
@@ -361,8 +361,9 @@ const autoUpdater = {
     const threshold = autoUpdater._idleThresholdMs();
     if (idleMs >= threshold) {
       logger.log(`User idle for ${Math.round(idleMs / 1000)}s (threshold=${Math.round(threshold / 1000)}s) — auto-installing update v${autoUpdater._state.version}.`);
-      try { autoUpdater.installNow(); }
-      catch (e) { logger.warn(`idle auto-install failed: ${e.message}`); }
+      // installNow is async; any internal throw becomes a rejection caught by
+      // the global unhandledRejection handler in main.js.
+      autoUpdater.installNow().catch((e) => logger.warn(`idle auto-install failed: ${e.message}`));
       return;
     }
 
@@ -378,46 +379,49 @@ const autoUpdater = {
   // Dismissal ("Later") is fine — the watcher keeps polling and will auto-install once
   // the user goes idle.
   async _promptToInstall(version) {
+    // In test mode we short-circuit BEFORE invoking the real native dialog. The
+    // dialog is modal + blocking on a real desktop session and pops a window the
+    // user can't dismiss programmatically — exactly what we don't want firing
+    // during automated runs. Tests that want to assert prompt behavior should
+    // override `_promptToInstall` per-test (see auto-updater.test.js).
+    if (autoUpdater._manager?.isTesting?.()) {
+      logger.log(`[testing] _promptToInstall(${version}) — skipped native dialog.`);
+      return;
+    }
+
+    const { dialog, BrowserWindow } = require('electron');
+    if (!dialog) return;        // renderer/preload context — no dialog API
+
+    const focusedWindow = BrowserWindow?.getFocusedWindow?.() || null;
+    const productName = autoUpdater._manager?.config?.app?.productName
+      || autoUpdater._manager?.config?.brand?.name
+      || 'this app';
+
+    // showMessageBox CAN reject (e.g. dialog destroyed, no display) — wrap just
+    // the call. Synchronous setup above doesn't need a try.
+    let result;
     try {
-      // In test mode we short-circuit BEFORE invoking the real native dialog. The
-      // dialog is modal + blocking on a real desktop session and pops a window the
-      // user can't dismiss programmatically — exactly what we don't want firing
-      // during automated runs. Tests that want to assert prompt behavior should
-      // override `_promptToInstall` per-test (see auto-updater.test.js).
-      if (autoUpdater._manager?.isTesting?.()) {
-        logger.log(`[testing] _promptToInstall(${version}) — skipped native dialog.`);
-        return;
-      }
-
-      const electron = require('electron');
-      const { dialog, BrowserWindow } = electron;
-      if (!dialog) return;
-
-      const focusedWindow = BrowserWindow?.getFocusedWindow?.() || null;
-      const productName = autoUpdater._manager?.config?.app?.productName
-        || autoUpdater._manager?.config?.brand?.name
-        || 'this app';
-
-      const result = await dialog.showMessageBox(focusedWindow, {
-        type:    'info',
-        buttons: ['Restart Now', 'Later'],
+      result = await dialog.showMessageBox(focusedWindow, {
+        type:      'info',
+        buttons:   ['Restart Now', 'Later'],
         defaultId: 0,
         cancelId:  1,
-        title:   'Update Ready',
-        message: `${productName} is ready to install version ${version}.`,
-        detail:  `Restart to apply the update now, or it will install automatically the next time you're idle.`,
+        title:     'Update Ready',
+        message:   `${productName} is ready to install version ${version}.`,
+        detail:    `Restart to apply the update now, or it will install automatically the next time you're idle.`,
       });
-
-      if (result.response === 0) {
-        logger.log(`User accepted install prompt — installing v${version}.`);
-        autoUpdater.installNow();
-      } else {
-        logger.log(`User dismissed install prompt for v${version} — watcher continues.`);
-        // Bump activity so we don't re-prompt within the same tick window.
-        autoUpdater.markActive();
-      }
     } catch (e) {
-      logger.warn(`_promptToInstall failed: ${e.message}`);
+      logger.warn(`_promptToInstall: dialog.showMessageBox failed: ${e.message}`);
+      return;
+    }
+
+    if (result.response === 0) {
+      logger.log(`User accepted install prompt — installing v${version}.`);
+      autoUpdater.installNow();
+    } else {
+      logger.log(`User dismissed install prompt for v${version} — watcher continues.`);
+      // Bump activity so we don't re-prompt within the same tick window.
+      autoUpdater.markActive();
     }
   },
 
@@ -436,10 +440,10 @@ const autoUpdater = {
     if (autoUpdater._activityHooksWired) return;
     autoUpdater._activityHooksWired = true;
 
-    try {
-      const { app } = require('electron');
-      app.on('browser-window-focus', () => autoUpdater.markActive());
-    } catch (e) { /* electron not available */ }
+    // `app` is main-only; renderer/preload contexts have no `.on('browser-window-focus')`.
+    const { app } = require('electron');
+    if (!app?.on) return;
+    app.on('browser-window-focus', () => autoUpdater.markActive());
   },
 
   _broadcastStatus() {

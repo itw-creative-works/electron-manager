@@ -63,11 +63,10 @@ const deepLink = {
     }
 
     deepLink._manager = manager;
+    deepLink._electron = require('electron');
 
-    try {
-      deepLink._electron = require('electron');
-    } catch (e) {
-      logger.warn(`electron not available — deep-link running in no-op mode. (${e.message})`);
+    // Need `app` (main-only); renderer/preload don't have it. No-op there.
+    if (!deepLink._electron?.app) {
       deepLink._initialized = true;
       return;
     }

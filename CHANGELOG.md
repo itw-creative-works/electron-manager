@@ -1,5 +1,64 @@
 # Changelog
 
+## 1.4.0 — analytics + context + usage + remote-config + restart-manager + userData/UA + try-catch audit
+
+Five new framework lib modules and tighter early-init behavior.
+
+### Added
+
+- **`analytics`** — GA4 Measurement Protocol with cross-platform `uuidv5` identity.
+  `client_id = uuidv5(deviceId, projectId-namespace)`, `user_id = uuidv5(firebaseUid, projectId-namespace)`.
+  Same Firebase projectId in BEM/UJM/web-manager/EM produces identical outputs → unified
+  events for one human across desktop + web + backend. Auto-fires `app_launch`, wires
+  `login`/`logout` to `webManager.onAuthChange`. Secret in `process.env.GOOGLE_ANALYTICS_SECRET`
+  (matches BEM); webpack DefinePlugin bakes it into packaged bundles at build time.
+- **`context`** — runtime info block at `manager.context.{geolocation, client, session, app}`.
+  Mirrors BEM's `assistant.request.{geolocation, client}` shape. Async ipify fetch for
+  `geolocation.ip` (cached so offline boots have last-known); MAC-derived `session.deviceId`
+  with `crypto.randomUUID()` fallback persisted on first launch.
+- **`usage`** — `opens` / `hoursTotal` / `hoursThisSession`. Crash-safe: hours only credit
+  on clean exits (`lastQuitAt` written via `before-quit`). Sessions that crashed don't
+  contribute.
+- **`remote-config`** — "Hot config" fetched from `<brand.url>/data/resources/main.json`
+  and polled at auto-updater's feed-check cadence (1h). Defaults seeded immediately so
+  `get()` never returns undefined; never blocks boot. Persisted to storage so offline
+  boots still have last-known values. `on('update', fn)` for re-running gates.
+- **`restart-manager`** — auxiliary helper app for relaunches via `restart-manager://`
+  URL scheme. Auto-registers ~15s after launch, auto-unregisters on clean quit.
+  Auto-installs RM if missing: **mac** uses signed/notarized `.zip` → unzip → open
+  (no DMG mount, no prompts); **windows** uses NSIS one-click installer; **linux**
+  opens the `.deb` URL in the user's browser (no sudo). Bails when
+  `brand.id === 'restart-manager'`, in dev (unless `EM_RESTART_MANAGER_DEV=1`), or
+  when `enabled: false`. URLs point at `restart-manager/download-server`.
+- **`startup.applyEarly()` step 1b** — userData path append. In dev (`!app.isPackaged`)
+  appends ` (Development)` to `app.getPath('userData')` so dev session data, logs, and
+  `electron-store` files don't collide with a production-installed copy on the same
+  machine. Logged before/after. Mirrors legacy electron-manager.
+- **`startup.applyEarly()` step 1c** — global user agent fallback. Sets
+  `app.userAgentFallback` to a branded template via `node-powertools.template`:
+  `Mozilla/5.0 (...) AppleWebKit/537.36 (KHTML, like Gecko) {brand.name}/{app.version} Chrome/{chrome} Safari/537.36`
+  with per-platform shape (Macintosh / Windows NT / X11). Every BrowserWindow load +
+  electron-updater fetch + node-fetch via the renderer now carries the branded UA.
+- **Cross-context helpers** (`utils/mode-helpers.js`, `utils/url-helpers.js`) —
+  `isDevelopment()`, `isProduction()`, `isTesting()`, `getVersion()`,
+  `getEnvironment()`, `getWebsiteUrl()`, `getFunctionsUrl()`, `getApiUrl()`.
+  `attachTo(Manager)` mixin exposes the same API across main/renderer/preload/build
+  Manager constructors.
+- **Tests** — 7 new suites (`analytics`, `analytics-bridge`, `context`, `usage`,
+  `remote-config`, `restart-manager`, `startup-paths-and-ua`). Suite total: 580 passing.
+- **Docs** — `docs/analytics.md`, `docs/context.md`, `docs/usage.md`,
+  `docs/remote-config.md`, `docs/restart-manager.md`. README.md + CLAUDE.md updated.
+
+### Changed
+
+- **`require('electron')` audit** — removed ~14 paranoid `try { … } catch { … }` wraps
+  across 12+ lib files (`protocol.js`, `logger-lite.js`, `ipc.js`, `deep-link.js`,
+  `app-state.js`, `context-menu.js`, `menu.js`, `startup.js`, `tray.js`,
+  `window-manager.js`, `app-root.js`, `main.js`, `preload.js`, `auto-updater.js`).
+  `require('electron')` doesn't throw — it returns different shapes per context
+  (main has `.app`, renderer has `.ipcRenderer`, plain Node returns the binary path
+  as a string). Correct pattern is `const { app } = require('electron'); if (app) {…}`.
+
 ## 1.3.1 — fix: auto-updater feed-check default cadence 60s → 1h (de-hammers GitHub)
 
 Critical fix. The 1.2.38 refactor that centralized auto-updater install logic into

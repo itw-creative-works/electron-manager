@@ -89,10 +89,9 @@ const menu = {
       return;
     }
 
-    try {
-      menu._electron = require('electron');
-    } catch (e) {
-      logger.warn(`electron not available — menu running in no-op mode. (${e.message})`);
+    menu._electron = require('electron');
+    if (!menu._electron?.Menu) {
+      // renderer/preload — no Menu API
       menu._initialized = true;
       return;
     }

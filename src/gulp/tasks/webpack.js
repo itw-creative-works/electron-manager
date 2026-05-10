@@ -71,12 +71,25 @@ module.exports = function webpackTask(done) {
 //    (so framework code can reference it without globals).
 // 2. BannerPlugin prepends a tiny IIFE that assigns the same value to globalThis.EM_BUILD_JSON
 //    (so it's reachable from DevTools and consumer code via window.EM_BUILD_JSON).
+//
+// Also: bake build-time secrets (GOOGLE_ANALYTICS_SECRET) into the bundle as a
+// DefinePlugin replacement of `process.env.GOOGLE_ANALYTICS_SECRET`. Packaged
+// apps don't ship .env, so without this the analytics module would have no
+// secret at runtime in production. Local dev still reads from process.env (the
+// DefinePlugin replacement only fires when the build runs with the secret set;
+// otherwise we leave the reference intact).
 function buildJsonPlugins(buildJson) {
   const literal = JSON.stringify(buildJson);
+  const definitions = {
+    EM_BUILD_JSON: literal,
+  };
+  // Bake build-time analytics secret into bundles when present in the build env.
+  // Mirror BEM's env-var name (`GOOGLE_ANALYTICS_SECRET`).
+  if (process.env.GOOGLE_ANALYTICS_SECRET) {
+    definitions['process.env.GOOGLE_ANALYTICS_SECRET'] = JSON.stringify(process.env.GOOGLE_ANALYTICS_SECRET);
+  }
   return [
-    new webpack.DefinePlugin({
-      EM_BUILD_JSON: literal,
-    }),
+    new webpack.DefinePlugin(definitions),
     new webpack.BannerPlugin({
       banner: `(function(){var __em=${literal};if(typeof globalThis!=='undefined'){globalThis.EM_BUILD_JSON=__em;}if(typeof window!=='undefined'){window.EM_BUILD_JSON=__em;}})();`,
       raw:    true,

@@ -25,15 +25,11 @@ const protocol = {
     }
 
     protocol._manager = manager;
+    protocol._electron = require('electron');
 
-    try {
-      protocol._electron = require('electron');
-    } catch (e) {
-      logger.warn(`electron not available — protocol running in no-op mode. (${e.message})`);
-      protocol._initialized = true;
-      return;
-    }
-
+    // `app` is only defined in the main process. In renderer/preload (and in
+    // plain Node where `electron` is a binary-path string), it's undefined —
+    // protocol becomes a no-op there.
     const { app } = protocol._electron;
     if (!app) {
       protocol._initialized = true;

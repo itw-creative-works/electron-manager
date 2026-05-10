@@ -134,4 +134,28 @@ contextBridge.exposeInMainWorld('em', {
       return () => ipcRenderer.removeListener('em:auto-updater:status', wrapped);
     },
   },
+  // Mirror production preload's analytics/context/usage/remoteConfig so renderer-layer
+  // tests can verify their IPC behavior end-to-end.
+  analytics: {
+    event:             (name, params) => ipcRenderer.send('em:analytics:event', { name, params }),
+    pageview:          (path)         => ipcRenderer.send('em:analytics:event', { name: 'page_view',   params: path ? { page_path: path } : {} }),
+    screenview:        (screenName)   => ipcRenderer.send('em:analytics:event', { name: 'screen_view', params: screenName ? { screen_name: screenName } : {} }),
+    setUserProperties: (props)        => ipcRenderer.send('em:analytics:set-user-properties', props),
+    getStatus:         ()             => ipcRenderer.invoke('em:analytics:status'),
+  },
+  context: {
+    get: () => ipcRenderer.invoke('em:context:get'),
+  },
+  usage: {
+    get: () => ipcRenderer.invoke('em:usage:get'),
+  },
+  remoteConfig: {
+    get:        (path) => ipcRenderer.invoke('em:remote-config:get', path),
+    refreshNow: ()     => ipcRenderer.invoke('em:remote-config:refresh-now'),
+    onUpdate: (handler) => {
+      const wrapped = (_, payload) => handler(payload);
+      ipcRenderer.on('em:remote-config:update', wrapped);
+      return () => ipcRenderer.removeListener('em:remote-config:update', wrapped);
+    },
+  },
 });

@@ -46,10 +46,9 @@ const windowManager = {
     windowManager._manager = manager;
     windowManager._initialized = true;
 
-    try {
-      windowManager._electron = require('electron');
-    } catch (e) {
-      logger.warn('electron not available — window-manager running in test mode.');
+    windowManager._electron = require('electron');
+    if (!windowManager._electron?.app) {
+      // renderer/preload — no BrowserWindow / app APIs to manage
       return;
     }
 

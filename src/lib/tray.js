@@ -76,10 +76,9 @@ const tray = {
       return;
     }
 
-    try {
-      tray._electron = require('electron');
-    } catch (e) {
-      logger.warn(`electron not available — tray running in no-op mode. (${e.message})`);
+    tray._electron = require('electron');
+    if (!tray._electron?.Tray) {
+      // renderer/preload — no Tray API
       tray._initialized = true;
       return;
     }

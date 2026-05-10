@@ -60,14 +60,7 @@ const appState = {
     }
 
     appState._manager = manager;
-
-    try {
-      appState._electron = require('electron');
-    } catch (e) {
-      logger.warn(`electron not available — app-state running in no-op mode. (${e.message})`);
-      appState._initialized = true;
-      return;
-    }
+    appState._electron = require('electron');
 
     const storage = manager?.storage;
     if (!storage?.get) {

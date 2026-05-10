@@ -78,10 +78,9 @@ const contextMenu = {
       return;
     }
 
-    try {
-      contextMenu._electron = require('electron');
-    } catch (e) {
-      logger.warn(`electron not available — context-menu running in no-op mode. (${e.message})`);
+    contextMenu._electron = require('electron');
+    if (!contextMenu._electron?.app) {
+      // renderer/preload — no Menu/BrowserWindow APIs to wire context menus on
       contextMenu._initialized = true;
       return;
     }
