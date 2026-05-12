@@ -64,6 +64,7 @@
 const path = require('path');
 const fs   = require('fs');
 const LoggerLite = require('./logger-lite.js');
+const sanitizeURL = require('../utils/sanitize-url.js');
 const { buildIdApi } = require('./_menu-mixin.js');
 
 const logger = new LoggerLite('menu');
@@ -324,7 +325,8 @@ const menu = {
           const { shell } = require('electron');
           // Route through getWebsiteUrl() so dev runs open localhost:4000 instead
           // of punching out to the live brand site.
-          shell.openExternal(m.getWebsiteUrl());
+          const safe = sanitizeURL(m.getWebsiteUrl());
+          if (safe) shell.openExternal(safe);
         },
       });
     }

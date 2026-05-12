@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.4.2 — zero-trust URL sanitization + CLAUDE.md slimmed under 250 lines
+
+### Added
+
+- **`src/utils/sanitize-url.js`** — zero-trust URL gate for `shell.openExternal`, `BrowserWindow.loadURL`, `window.location.href =`, etc. Returns the URL unchanged when protocol is `http:`/`https:`, `''` for anything else (`javascript:`, `data:`, `file:`, `vbscript:`, `chrome:`, custom schemes). Canonical pattern: `const safe = sanitizeURL(url); if (safe) shell.openExternal(safe);`. 9 unit tests in `src/test/suites/build/sanitize-url.test.js`.
+- **`docs/boot-sequence.md`** — full ordered list of `manager.initialize()` steps + rationale. Migrated out of CLAUDE.md.
+- **`docs/cross-context-helpers.md`** — helper table (`isDevelopment`, `isTesting`, `getApiUrl`, etc.), adding new helpers, `EM_*` build-mode env vars. Migrated out of CLAUDE.md.
+
+### Changed
+
+- **Zero-trust URL sanitization at 5 call sites** that previously passed potentially attacker-controllable URLs to `shell.openExternal`:
+  - `src/lib/context-menu.js` — `params.linkURL` (right-click target URL from page content)
+  - `src/lib/tray.js` — `m.getWebsiteUrl()` (config-derived)
+  - `src/lib/menu.js` — same as tray
+  - `src/lib/restart-manager.js` — Linux `.deb` installer URL (config-derived); warns + bails on non-http(s)
+  - `src/assets/themes/classy/js/hero-demo-form.js` — `$form.dataset.redirect` (DOM-controllable); falls back to `/dashboard` on bad input
+- **`CLAUDE.md` restructured: 347 → 181 lines.** The file had grown into a manual rather than an overview. Deep references moved into `docs/<topic>.md` files. Top-of-file note added: meat goes into `docs/*.md`, not CLAUDE.md.
+- `~/.claude/CLAUDE.md` (global) strengthened with the <250-line rule for per-repo CLAUDE.md files + a default-to-`docs/` directive so future sessions write deep references in `docs/` instead of growing CLAUDE.md.
+
 ## 1.4.1 — schema validator + config/ rename + presence-driven sentry/analytics + defensive-code sweep
 
 Harmonization pass: stricter config validation, BEM-style presence-driven flags, and a defensive-coding cleanup.

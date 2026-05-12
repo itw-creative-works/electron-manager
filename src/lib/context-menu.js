@@ -54,6 +54,7 @@
 const path = require('path');
 const fs   = require('fs');
 const LoggerLite = require('./logger-lite.js');
+const sanitizeURL = require('../utils/sanitize-url.js');
 const { buildIdApi } = require('./_menu-mixin.js');
 
 const logger = new LoggerLite('context-menu');
@@ -200,7 +201,8 @@ const contextMenu = {
         label: 'Open Link in Browser',
         click: () => {
           const { shell } = require('electron');
-          shell.openExternal(params.linkURL);
+          const safe = sanitizeURL(params.linkURL);
+          if (safe) shell.openExternal(safe);
         },
       });
       items.push({

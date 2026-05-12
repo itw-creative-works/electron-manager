@@ -1,5 +1,7 @@
 # Electron Manager (EM)
 
+> **Note for contributors and Claude:** This file is the architectural overview — identity, top-level conventions, and a map to the deep references. The **meat** (per-subsystem APIs, edge cases, behavior tables, defaults lists) lives in `docs/<topic>.md`. When extending or adding content, write it in the matching `docs/*.md` file and cross-link from here — do NOT inline it. If a topic doesn't have a doc yet, create one. Goal: keep this file under 250 lines.
+
 ## Identity
 
 Electron Manager (EM) is a comprehensive framework for building modern Electron desktop apps. Sister project to Browser Extension Manager (BXM) and Ultimate Jekyll Manager (UJM). Provides one-line-import bootstrap per Electron process, modular feature library with file-based extensibility, a multi-platform build/release pipeline, and a built-in test framework.
@@ -9,11 +11,11 @@ Electron Manager (EM) is a comprehensive framework for building modern Electron 
 ### For Consuming Projects
 
 1. `npm install electron-manager --save-dev`
-2. `npx mgr setup` — scaffolds the project (writes `config/electron-manager.json`, `src/main.js`, `src/preload.js`, per-window renderer entries, and integrations skeletons in `src/integrations/{tray,menu,context-menu}/index.js`). `electron-builder.yml` and `entitlements.mac.plist` are NOT scaffolded — they're generated into `dist/config/` at build time.
+2. `npx mgr setup` — scaffolds the project (writes `config/electron-manager.json`, `src/main.js`, `src/preload.js`, per-window renderer entries, and integrations skeletons in `src/integrations/{tray,menu,context-menu}/index.js`).
 3. `npm start` — dev (gulp → webpack → electron .)
 4. `npm run build` — local production build (compiles bundles only, no installer)
-5. `npm run package:quick` — fast packaged build for the host platform/arch only — produces a launchable `release/<platform>-<arch>/<ProductName>.app` (or `.exe`-folder/linux-unpacked) in ~20-30s. Skips DMG/zip/universal/notarize. Use this to smoke-test packaged-mode behavior locally without waiting for the full pipeline.
-6. `npm run package` — full local production package (DMG/zip/universal-mac, NSIS-win, deb+AppImage-linux). Slow (~3min on mac for universal).
+5. `npm run package:quick` — fast packaged build for the host platform/arch only (~20-30s, skips DMG/zip/universal/notarize). Smoke-test packaged-mode behavior locally.
+6. `npm run package` — full local production package (DMG/zip/universal-mac, NSIS-win, deb+AppImage-linux). ~3min on mac.
 7. `npm run release` — signed + published release (requires certs)
 8. `npx mgr test` — runs framework + project test suites
 
@@ -41,281 +43,113 @@ new (require('electron-manager/preload'))().initialize();   // exposes window.em
 new (require('electron-manager/renderer'))().initialize();
 ```
 
-Boot sequence (main process — `manager.initialize()`):
-
-1. **`startup.applyEarly()`** — first thing, before `whenReady`. Calls `app.dock.hide()` for `mode: 'hidden'` (zero-bounce production via `LSUIElement` baked at build time).
-1b. **userData path append** — in dev (`!app.isPackaged`), appends ` (Development)` to `app.getPath('userData')` so dev session data, logs, and `electron-store` files don't collide with a production-installed copy of the same app on the same machine. Logged before/after. Mirrors legacy electron-manager. **Must run before `storage.initialize()`** (which constructs `electron-store` against the path).
-1c. **Global user-agent fallback** — sets `app.userAgentFallback` to a branded template via `node-powertools.template`. Default per-platform templates: `Mozilla/5.0 (... <platform-specific> ...) AppleWebKit/537.36 (KHTML, like Gecko) {brand.name}/{app.version} Chrome/{chrome} Safari/537.36`. Merge tags resolve from `{ brand: { name, id }, app: { version }, chrome, electron, node, platform, arch }`. Logged on init. Every BrowserWindow load + electron-updater fetch + node-fetch via the renderer carries the branded UA. Consumers can override post-init by re-setting `app.userAgentFallback` from their main.js.
-2. **`app.on('before-quit')`** wired — sets `manager._isQuitting = true` so any quit path (Cmd+Q, role:'quit' menu, programmatic `app.quit()`, OS shutdown) bypasses the window-manager's hide-on-close trap.
-3. **`ipc`** — typed channel bus online before any feature can register handlers.
-4. **`storage`** — async (electron-store v11 ESM via `webpackIgnore`'d dynamic import). Other libs depend on this.
-5. **`sentry`** — earliest catchable global handler.
-6. **`protocol`** — single-instance lock + custom scheme register.
-7. **`deepLink`** — argv parse for cold-start, second-instance handler.
-8. **`appState`** — first-launch / launch-count / crash-sentinel / version-change.
-9. `await app.whenReady()`.
-10. **`autoUpdater`** — electron-updater, never blocks.
-11. **`tray`**, **`menu`**, **`contextMenu`** — file-based definitions from `src/integrations/{tray,menu,context-menu}/index.js`. Disable any of them at runtime via `manager.<name>.disable()` (no config flag).
-12. **`startup.initialize`** — applies `setLoginItemSettings`.
-13. **`webManager`** — relay renderer auth state.
-14. **`windows.initialize`** — registers app-level handlers: `window-all-closed` → quit on win/linux; `app.on('activate')` on macOS to surface `main` when the user double-clicks the dock icon (CleanMyMac-style). **Does NOT auto-create any window.** The consumer's main.js calls `manager.windows.create('main', { show: !startup.isLaunchHidden() })` from inside `manager.initialize().then(() => { ... })`. The `main` window is *always* created (so it's in the registry for the activate/second-instance handlers to find), but `show: false` keeps it invisible in hidden launches — tray icon shows immediately, dock icon + window appear only when something explicitly calls `windows.show('main')` (or the user double-clicks the running app).
+`manager.initialize()` runs a fixed boot order (startup → ipc → storage → sentry → protocol → deepLink → appState → whenReady → autoUpdater → tray/menu/contextMenu → startup → webManager → windows). See [docs/boot-sequence.md](docs/boot-sequence.md) for the full ordered list + rationale.
 
 ### Lib modules
 
-`src/lib/*.js` — every Electron concern its own module. Each exports a singleton with `initialize(manager)`.
+`src/lib/*.js` — every Electron concern its own module. Each exports a singleton with `initialize(manager)`. Deep dive per module: see `docs/<lib-name>.md`.
 
-| Module | Status | Description |
-|---|---|---|
-| `ipc` | real | typed channel bus, single registration point |
-| `storage` | real | electron-store wrapper, sync main / async renderer via IPC |
-| `window-manager` | real | lazy-creation registry (no auto-windows; consumer calls `manager.windows.create('main')`). Bounds persistence + auto context-menu attach + inset titlebar (mac `hiddenInset` / win `titleBarOverlay` / linux native) + Discord-style hide-on-close on `main`. Auto `app.dock.show()` on macOS when first window appears (LSUIElement parity). Re-surface handlers: `app.on('activate')` on macOS + `app.on('second-instance')` on win/linux call `main.show()` when the user double-clicks the running app — so hidden-mode apps come back to life on a second click without consumer wiring. |
-| `tray` | real | file-based, dynamic items, runtime mutators |
-| `menu` | real | file-based, platform-aware default template |
-| `context-menu` | real | file-based, called per right-click with `params` |
-| `startup` | real | `mode: 'normal' | 'hidden'` (was `tray-only`, now folded into `hidden` since they were the same LSUIElement flag). `hidden` mode bakes `LSUIElement: true` into Info.plist on macOS at build time → zero dock bounce, no dock icon, not in Cmd+Tab. Tray + notifications + networking still work. Consumer surfaces UI later via `manager.windows.create('main')` which triggers `app.dock.show()` automatically. |
-| `app-state` | real | storage-backed launch flags + crash sentinel |
-| `protocol` | real | single-instance lock + scheme registration |
-| `deep-link` | real | unified deep-link dispatch (cold + warm start, mac + win + linux), built-in routes, pattern matching |
-| `web-manager-bridge` | real | main = source-of-truth Firebase Auth, renderers reflect via IPC. BXM-pattern sync. Lazy firebase load. |
-| `auto-updater` | real | electron-updater wrapper, startup + periodic checks, 30-day pending-update gate, dev simulation via `EM_DEV_UPDATE`, renderer-broadcast status state machine, **idle-aware install** (auto-installs only after 15min of inactivity; prompts via native dialog once per version when user is active; `manager.autoUpdater.markActive()` for consumer-defined activity) |
-| `sentry` | real | per-context split (`lib/sentry/{index,core,main,renderer,preload}.js`), auto auth attribution via web-manager-bridge, dev-mode gating |
-| `templating` | real | `{{ }}` token replacement (BXM/UJM convention), `buildPageVars()` helper, used at build time by `gulp/html` |
-| `context` | real | runtime info block — `manager.context.{geolocation,client,session,app}`. `geolocation.ip` async-fetched via ipify + persisted to storage so offline boots still have last-known IP. `session.deviceId` resolved from first non-internal MAC via `os.networkInterfaces()`, falls back to `crypto.randomUUID()` persisted on first launch. Shape mirrors BEM's `assistant.request.{geolocation,client}` for cross-project consistency. |
-| `usage` | real | `opens` / `hoursTotal` / `hoursThisSession`. Tracks app launches + accumulates session length across clean exits (crashed sessions don't credit hours — `lastQuitAt` was never written). Persisted via `manager.storage`; before-quit handler records session end. |
-| `remote-config` | real | "Hot config" — fetches `${brand.url}/data/resources/main.json` (legacy convention) or override URL. Polls at the same cadence as auto-updater feed-check (default 1h). `manager.remoteConfig.get(path?)` for cache-first reads (instant, never blocks). Cached to storage so offline boots still have last-known values. `on('update', fn)` for fresh-fetch broadcasts. |
-| `analytics` | real | GA4 via Measurement Protocol. **Cross-platform identity** — `client_id = uuidv5(deviceId, projectId-namespace)` and `user_id = uuidv5(firebaseUid, projectId-namespace)`. Same projectId in BEM/UJM/web-manager/EM produces identical uuidv5 outputs → unified events for one human across all surfaces. Auto-fires `app_launch` (main), wires `login`/`logout` events to `webManager.onAuthChange`. Measurement ID in config (`analytics.providers.google.id`); secret in `process.env.GOOGLE_ANALYTICS_SECRET` (matches BEM convention) — webpack DefinePlugin bakes it into packaged bundles at build time. |
-| `restart-manager` | real | Auxiliary helper app (`restart-manager/download-server`) that handles relaunches via the `restart-manager://` URL scheme. Auto-registers ~15s after launch, auto-unregisters on clean quit. Auto-installs RM if missing — **mac**: signed/notarized `.zip` → unzip → open (no DMG mount, no prompts); **windows**: NSIS one-click installer; **linux**: opens `.deb` URL in browser (no sudo). Bails when `manager.isTesting()` is true (no register, no probe, no download, no shell.openExternal — defense in depth at `initialize()`, `_send()`, `ensureInstalled()`, `_installRM()`), when `brand.id === 'restart-manager'` (RM doesn't manage itself), in dev (unless `EM_RESTART_MANAGER_DEV=1`), or when `restartManager.enabled === false`. Caps at 3 install attempts per process. |
+| Module | Description |
+|---|---|
+| `ipc` | typed channel bus, single registration point |
+| `storage` | electron-store wrapper, sync main / async renderer via IPC |
+| `window-manager` | lazy-creation registry, bounds persistence, Discord-style hide-on-close, inset titlebar, dock-show on first window, re-surface on user re-launch |
+| `tray` / `menu` / `context-menu` | file-based definitions; unified id-path API; default templates with id-tagged items |
+| `startup` | `mode: 'normal' \| 'hidden'`; `'hidden'` bakes `LSUIElement: true` for zero dock bounce |
+| `app-state` | storage-backed launch flags + crash sentinel |
+| `protocol` | single-instance lock + scheme registration |
+| `deep-link` | unified deep-link dispatch (cold + warm start, mac + win + linux), built-in routes, pattern matching |
+| `web-manager-bridge` | main = source-of-truth Firebase Auth, renderers reflect via IPC |
+| `auto-updater` | electron-updater wrapper, idle-aware install, 30-day pending gate, dev simulation |
+| `sentry` | per-context split, auto auth attribution, dev-mode gating |
+| `templating` | `{{ }}` token replacement (BXM/UJM convention), used at build time by `gulp/html` |
+| `context` | runtime info — `manager.context.{geolocation,client,session,app}` |
+| `usage` | `opens` / `hoursTotal` / `hoursThisSession`; crash-safe |
+| `remote-config` | "Hot config" fetched from `${brand.url}/data/resources/main.json`, polled hourly |
+| `analytics` | GA4 Measurement Protocol; cross-platform `uuidv5` identity |
+| `restart-manager` | auxiliary helper app for relaunches; auto-install via signed mac.zip / NSIS / browser .deb |
 
 ### File-based feature definitions
 
-Trays, menus, and context-menus are NOT defined in config — they're defined in JS files the consumer authors at fixed conventional paths (`src/integrations/{tray,menu,context-menu}/index.js`). To opt out, call `manager.{tray,menu,contextMenu}.disable()` at runtime. There's no config flag because config-only would force a DSL for conditional items, dynamic labels, and click handlers — and a runtime API is more flexible anyway.
+Trays, menus, and context-menus are NOT defined in config — they're defined in JS files the consumer authors at fixed conventional paths (`src/integrations/{tray,menu,context-menu}/index.js`). To opt out, call `manager.{tray,menu,contextMenu}.disable()` at runtime.
 
-All three ship sensible **default templates** with id-tagged items so consumers can target them. The default scaffold for each lib calls `useDefaults()` and includes commented-out examples covering the full id-path API:
+All three ship sensible default templates and share a unified id-path API (`.find/.has/.update/.remove/.enable/.show/.hide/.insertBefore/.insertAfter/.appendTo`), implemented once in `src/lib/_menu-mixin.js`. See [docs/tray.md](docs/tray.md), [docs/menu.md](docs/menu.md), [docs/context-menu.md](docs/context-menu.md).
 
-```js
-// src/integrations/tray/index.js
-module.exports = ({ manager, tray }) => {
-  tray.icon('src/assets/icons/tray-Template.png');
-  tray.tooltip(manager.config?.app?.productName);
-  tray.useDefaults();                                    // ship EM's default items
-  tray.insertAfter('open', { id: 'dashboard', label: 'Dashboard', click: ... });
-};
-```
+### Windows
 
-**Unified id-path API across all three libs** (`manager.{tray,menu,contextMenu}.*` and the per-event/per-definition `menu` builder arg):
-
-```
-.find(id) / .has(id)
-.update(id, patch)              — Object.assign + re-render
-.remove(id)                     — splice + re-render
-.enable(id, bool=true)          — sugar over update({enabled})
-.show(id, bool=true) / .hide(id) — sugar over update({visible})
-.insertBefore(id, item) / .insertAfter(id, item)
-.appendTo(id, item)             — push into a submenu (creates submenu if absent)
-```
-
-Implemented once in `src/lib/_menu-mixin.js` and mixed into all three. The resolver matches by full id field first, then walks slash-separated path segments.
-
-**Naming convention for default items:**
-- **Tray** ids are flat: `title`, `open`, `check-for-updates`, `website`, `quit` (no `tray/` prefix — the namespace is implicit).
-- **Context-menu** ids are flat: `cut`, `copy`, `paste`, `select-all`, `undo`, `redo`, `paste-and-match-style`, `open-link`, `copy-link`, `reload`, `inspect`, `toggle-devtools`.
-- **Menu** ids are paths because menus actually nest: `main/check-for-updates`, `view/developer/toggle-devtools`, `help/website`, `development/open-logs`. The path roots (`main`, `file`, `edit`, `view`, `window`, `help`, `development`) are the literal menu labels — not arbitrary prefixes.
-
-**Default item sets are informed by legacy electron-manager**:
-- Menu: about, check-for-updates, preferences (hidden), services, hide/hide-others/show-all, relaunch, quit (App menu); preferences/relaunch/quit (File on win/linux); standard edit/view/window submenus; **`view/developer/*` submenu in dev mode** (toggle-devtools, inspect-elements, force-reload); **`development/*` top-level menu in dev mode** (open exe folder, user data, logs, app config, throw test error); help with check-for-updates (win/linux) + website link (when `brand.url`).
-- Tray: title (disabled label), open, check-for-updates, website (when configured), quit.
-- Context-menu: undo/redo (gated on canUndo/canRedo), cut/copy/paste/paste-and-match-style/select-all (when editable), copy (when text selected), open-link/copy-link (when on link), reload (always), inspect/toggle-devtools (dev only).
-
-Items support function `label`/`enabled`/`visible`/`checked` evaluated on `refresh()`. Click handlers wrapped to swallow errors. Auto-updater hook patches both `main/check-for-updates`/`help/check-for-updates` (menu) AND `check-for-updates` (tray) in lockstep.
-
-### Windows (lazy creation, inset titlebar, Discord-style hide-on-close)
-
-EM does NOT auto-create any windows. Consumers call `manager.windows.create(name, opts?)` from inside `manager.initialize().then(() => { ... })`. The canonical pattern for the `main` window:
-
-```js
-windows.create('main', { show: !startup.isLaunchHidden() });
-```
-
-Always create `main` — its presence in the registry is what lets EM's `app.on('activate')` (macOS dock click) and `app.on('second-instance')` (win/linux re-launch) handlers surface UI when the user double-clicks the running app. In hidden launches, pass `show: false` to keep the window invisible until something explicitly calls `windows.show('main')` (or the user double-clicks). Tray icon shows immediately, dock icon + window appear together when surfaced.
-
-Defaults baked in (no JSON `windows:` block needed):
-
-- `main` → `{ width: 1024, height: 720, hideOnClose: true,  view: 'main' }`
-- any other → `{ width: 800,  height: 600, hideOnClose: false, view: name   }`
-
-Merge order: framework defaults < `config.windows.<name>` (if present) < call-site `overrides`. So `manager.windows.create('main', { width: 1280 })` produces `{ width: 1280, height: 720, hideOnClose: true, view: 'main' }`.
-
-**Inset titlebar by default.** macOS gets `titleBarStyle: 'hiddenInset'` (OS-drawn traffic lights inset into the chrome region). Windows gets `titleBarStyle: 'hidden'` + `titleBarOverlay: { color, symbolColor, height: 36 }` (OS-drawn min/max/close buttons in the corner). Linux gets a native frame. Override per-window via `config.windows.<name>.titleBar = 'inset' | 'native'` or `titleBarOverlay = { ... }`.
-
-**Page template is EM-internal** (`<em>/src/config/page-template.html`, copied to `<em>/dist/config/page-template.html` by prepare-package). Consumer's old `<consumer>/config/page-template.html` is no longer read. Template ships a draggable topbar (`.em-titlebar` + `.em-titlebar__drag` div with `-webkit-app-region: drag`) sized via `themes/classy/css/components/_titlebar.scss`, which keys off `html[data-platform]` (set by web-manager during init) — mac → pad-left 70px (clear traffic lights), windows → pad-right 140px (clear native overlay), linux → display:none (native frame draws title bar).
-
-**Quit-vs-hide gating (Discord-style).** `main` window's X click hides instead of quitting. Real quit only via Cmd+Q / role:'quit' menu / tray Quit / auto-updater install — those flip `manager._isQuitting` (via `app.on('before-quit')`) or `manager._allowQuit` (via `manager.quit({ force: true })` or `autoUpdater.installNow()`), which the close handler checks before deciding to swallow vs let through. Three escape hatches: `manager._allowQuit` (programmatic force), `manager._isQuitting` (any path Electron knows about), `win._emForceClose` (per-window override).
-
-`manager.quit({ force })` and `manager.relaunch({ force })` are exposed on the live manager. `relaunch` calls `autoUpdater.installNow()` if an update is downloaded, otherwise `app.relaunch() + app.quit()`.
-
-**Auto-update idle-aware install.** When a download finishes (`code: 'downloaded'`) AND the check was NOT user-initiated, the existing periodic tick (every `intervalMs`, default 60s) makes the install decision instead of doing a flat-delay relaunch. On each tick: re-check the feed → enforce the 30-day max-age gate → evaluate idle install. Idle eval rules: if `now - _lastActivityAt >= IDLE_INSTALL_THRESHOLD_MS` (default 15min) the app installs; if active, EM shows a native "Restart Now / Later" dialog ONCE per version (`_promptedForVersion` guards against re-prompts) and the periodic tick keeps re-evaluating, so dismissal is "not now" — the install fires whenever the user eventually walks away. User-initiated checks bypass all this; the consumer's UI is expected to surface its own restart affordance (the menu/tray check-for-updates label already changes to "Restart to Update vX.Y.Z" via `_menuItemFieldsForState`). Activity signals: renderer-side (debounced 5s in preload, IPC `em:auto-updater:activity`) — `mousedown`, `keydown`, `wheel`, `touchstart`, `focus`. Main-side: `app.on('browser-window-focus')`. Consumers can force-bump via `manager.autoUpdater.markActive()` for app-specific signals (auth events, long-task completion). `checkNow()` is deduped via `_readyToCheck()`: a click on "Check for Updates" while a periodic check is mid-flight (state in `checking|available|downloading|downloaded`) early-returns without firing a second `checkForUpdates()` AND without flipping `_userInitiated` (the no-op call must not change behavior). Auto-updater menu/tray hook keeps the label in lockstep with status (Checking → Downloading 42% → Restart to Update v1.2.3 → You're up to date).
-
-**macOS dock auto-show.** `windows.create()` and `windows.show()` call `app.dock.show()` if the dock is hidden — works even when `LSUIElement: true` is baked at build (`startup.mode = 'hidden'`). The app launches completely invisible (no dock icon, no Cmd+Tab, no taskbar) and the dock icon appears the moment the consumer surfaces UI.
-
-**Re-surface on user re-launch.** When the user double-clicks a running app (or clicks its dock icon on macOS), EM transparently shows the main window — no consumer wiring needed. Mechanisms:
-- **macOS** → `window-manager.initialize()` registers `app.on('activate')` which calls `windows.show('main')` if `main` is in the registry.
-- **Windows / Linux** → `deep-link.initialize()` registers `app.on('second-instance')` which does the same. (The OS spawns a duplicate process, our single-instance lock kills it, and forwards its argv here.)
-
-Both handlers are no-ops if `main` isn't in the registry, so consumers who genuinely never want a window can omit `windows.create('main', ...)` entirely. Otherwise, with `windows.create('main', { show: !isLaunchHidden() })` at boot, hidden-mode apps come back to life on a second click.
-
-**Testing the login-launch path locally.** Pass `--em-launched-at-login` as a command-line arg when launching the .app; EM treats it identically to a real OS-driven login launch (`startup.wasLaunchedAtLogin()` returns `true`, `via:argv-flag`). Useful for testing hidden-mode behavior without actually configuring login items.
-
-```bash
-open -n /path/to/MyApp.app --args --em-launched-at-login
-```
-
-**`startup.mode` simplified.** Was `'normal' | 'hidden' | 'tray-only'` — `tray-only` was always the same idea (LSUIElement) so it's now folded into `'hidden'`. Old `tray-only` configs fall back to `'normal'` per `getMode()` validation.
+EM does NOT auto-create any windows. Consumers call `manager.windows.create('main', { show: !startup.isLaunchHidden() })` from inside `manager.initialize().then(...)`. Inset titlebar by default; Discord-style hide-on-close on `main`; auto re-surface on user re-launch. See [docs/windows.md](docs/windows.md).
 
 ### Build system
 
-- **prepare-package** copies framework `src/` → `dist/` (BXM-style).
-- **Gulp** auto-loads tasks from `src/gulp/tasks/`.
-- **Webpack** — three targets (electron-main / electron-preload / electron-renderer), all bundled in production for source protection. DefinePlugin + BannerPlugin inject `EM_BUILD_JSON` into bundles.
-- **electron-builder** packages + publishes. `gulp/build-config` GENERATES `dist/electron-builder.yml` from EM defaults + `config/electron-manager.json` (no consumer-shipped `electron-builder.yml`). It also writes `dist/config/entitlements.mac.plist` (defaults + consumer overrides via `targets.mac.entitlements` config) and resolves icons via a 3-tier waterfall (config → `<consumer>/config/icons/<platform>/<slot>.png` → EM bundled defaults) into `dist/config/icons/`.
-- **Strategy-pluggable Windows signing** — `targets.win.signing.strategy` config key (no env var) selects `self-hosted` (EV USB token) | `cloud` | `local`. The GH Actions workflow has a `windows-strategy` job that reads the JSON5 config to drive runner selection + job gating.
+prepare-package copies `src/` → `dist/`; gulp orchestrates webpack (3 targets, all bundled) + electron-builder. `gulp/build-config` generates `dist/electron-builder.yml` + `dist/config/entitlements.mac.plist` from EM defaults + consumer config. Strategy-pluggable Windows signing (`targets.win.signing.strategy`: `self-hosted` | `cloud` | `local`). See [docs/build-system.md](docs/build-system.md), [docs/installer-options.md](docs/installer-options.md), [docs/signing.md](docs/signing.md).
 
 ### Config flow
 
-`config/electron-manager.json` (JSON5, in consumer) → `Manager.getConfig()` (applies derived defaults: `app.appId` ← `com.itwcreativeworks.<brand.id>`, `app.productName` ← `brand.name`) → injected into ALL THREE bundles (main / renderer / preload) at build time via webpack DefinePlugin as `EM_BUILD_JSON`. At runtime, `manager.initialize()` reads `EM_BUILD_JSON.config` first (this is authoritative in packaged apps because `process.cwd()` is `/`, so reading config from disk doesn't work). Dev mode falls back to disk read from `<appRoot>/config/electron-manager.json` for live-reload during development.
+`config/electron-manager.json` (JSON5, in consumer) → `Manager.getConfig()` (applies derived defaults: `app.appId` ← `com.itwcreativeworks.<brand.id>`, `app.productName` ← `brand.name`) → injected into ALL THREE bundles at build time via webpack DefinePlugin as `EM_BUILD_JSON`. Runtime reads `EM_BUILD_JSON.config` first (authoritative in packaged apps); dev falls back to disk read.
 
-Required fields: `brand.id` + `brand.name`. Everything else has defaults. Audit (`gulp/audit`) validates `brand.id` matches URL-scheme grammar (since it's also the deep-link scheme).
-
-Notable defaults / behaviors:
-- **appId**: `com.itwcreativeworks.<brand.id>` (set explicitly only if you must)
-- **productName**: same as `brand.name`
-- **copyright**: defaults to `© {YEAR}, ITW Creative Works`. The `{YEAR}` token is expanded to the current year at YAML generation time, so the string never goes stale across releases. Consumers can override with their own string (still gets `{YEAR}` substitution if used).
-- **app.category**: generic high-level category — defaults `'productivity'`, allowed `'productivity' | 'developer-tools' | 'utilities' | 'media' | 'social' | 'network'`. EM owns the per-platform mapping (Apple UTI → mac.category, freedesktop → linux.category). See `docs/installer-options.md` for the full table. Override per-platform via `electronBuilder.mac.category` if you need something not in the table.
-- **app.languages**: `['en']`. Applied as `mac.electronLanguages` (strips other `.lproj` dirs from the .app bundle, ~10MB savings).
-- **app.darkModeSupport**: `true`. macOS honors via `NSRequiresAquaSystemAppearance: false`; win/linux ignore.
-- **targets.win**: `arch: ['x64', 'ia32']` (multi-arch single NSIS installer); `oneClick: true` + `desktopShortcut/startMenuShortcut/runAfterFinish: true` + `perMachine: false` — Slack-style frictionless install. Override any of those in `targets.win.<key>`.
-- **targets.mac**: `arch: ['universal']` (Intel + Apple Silicon in one .dmg via lipo). MAS distribution config keys exist (`targets.mac.mas.*`) but are STUBBED — setting `enabled: true` triggers an audit warning. Reference plists archived at `<em>/src/defaults/_mas/`.
-- **targets.linux**: `arch: ['x64']`. Snap publishing is opt-in via `targets.linux.snap.enabled: true`. The EM scaffold ships that field set to `true` by default — new consumers get snap publishing automatically once their credentials are wired up. Programmatic callers (or older configs) without the field at all default to OFF: `build-config.js` checks `=== true` strictly. Even when enabled, the snap target is **auto-skipped at build time when `SNAPCRAFT_STORE_CREDENTIALS` is unset** — so a fresh project doesn't fail CI before the user wires up snapcraft auth. Add the credential blob (`snapcraft export-login -`) to `.env`, run `mgr push-secrets`, and the next release publishes to the Snap Store with no further config changes. Set `enabled: false` to opt out completely (skips snap regardless of credentials).
-- **fileAssociations / protocols**: optional passthrough fields for OS file-type registration + extra URL schemes. EM auto-registers `<brand.id>://` always; `protocols` is for additional schemes only. Empty by default; not emitted to YAML when unset.
-- **Deep-link scheme**: always `<brand.id>://...` (no config). Built-in routes: `auth/token`, `app/show`, `app/quit`. Custom routes: `manager.deepLink.on('pattern', fn)` at runtime.
-- **Tray / menu / context-menu**: paths are conventional (`src/integrations/{name}/index.js`) — no config block. Disable: `manager.<name>.disable()`.
-- **`startup.mode`**: `'normal'` | `'hidden'`. `'hidden'` bakes `LSUIElement: true` into Info.plist on macOS at build time → completely invisible launch (no dock, no Cmd+Tab); tray + notifications still work. The deprecated `'tray-only'` mode is no longer valid — its behavior was always identical to `'hidden'` so it's been folded in.
-- **`startup.openAtLogin`**: object form `{ enabled: true, mode: 'hidden' }`. The mode applies ONLY when the OS auto-launches at login; user-direct launches always use `startup.mode`. Force-OFF in dev (uses `app.isPackaged`) to prevent dev runs from polluting login items — set `EM_FORCE_LOGIN_ITEM=1` to override.
-- **Windows**: no JSON config required. Consumer calls `manager.windows.create('main', opts?)` from inside `initialize().then(...)`. Framework defaults bake in `main` → `{ width: 1024, height: 720, hideOnClose: true, view: 'main' }` (Discord-style X=hide), other named windows → `{ width: 800, height: 600, hideOnClose: false }`. Override by passing opts to `create()` or by adding a `windows: { <name>: { ... } }` block in config (merge order: defaults < json < overrides).
-- **Titlebar**: inset by default (`titleBarStyle: 'hiddenInset'` on mac; `titleBarOverlay` on windows; native on linux). Page template ships a `.em-titlebar` draggable strip sized per-platform via `html[data-platform]` (set by web-manager).
-- **Page template**: EM-internal, no longer copied to `<consumer>/config/page-template.html`. Lives at `<em>/src/config/page-template.html`.
-- **`manager.quit({ force })`** / **`manager.relaunch({ force })`**: programmatic quit/relaunch entry points that flip `_allowQuit` so window-manager's hide-on-close trap doesn't swallow the close events. Auto-updater's `installNow()` flips `_allowQuit` automatically before calling `quitAndInstall()`.
-- **Icons**: 3-tier waterfall per slot/platform (config → `config/icons/<platform>/<slot>.png` → EM bundled). `@2x` retina auto-paired from `@1x`. Linux follows Windows resolution; Windows tray falls back to Windows app icon.
-- **Entitlements**: `targets.mac.entitlements` is an object map (key→bool/string/array). Consumer overrides EM's defaults; `null` removes a default. Plist generated to `dist/config/entitlements.mac.plist`.
-- **Stable download names** (`gulp/mirror-downloads`): `Somiibo.dmg`, `Somiibo-Setup.exe`, `somiibo_amd64.deb`, `Somiibo.AppImage` — preserves legacy URLs. Apple Silicon gets `-arm64` suffix.
+Required fields: `brand.id` + `brand.name`. Everything else has defaults. See [docs/installer-options.md](docs/installer-options.md) for the full defaults table.
 
 ### Schema validation
 
-Every field in `config/electron-manager.json` is declared in **`src/config/schema.js`** — the single source of truth for which fields exist, which are required, and what shape their values take. The validator engine in **`src/utils/validate-config.js`** is pure (no deps) and ~100 lines.
-
-**Validation runs in two places, same rules**:
-
-1. **`Manager.initialize()`** — hard-fails the app at boot if any required field is missing or any present field is invalid. So a misconfigured app never reaches the "white window of confusion" — it tells you exactly which field is broken with a numbered error list.
-2. **`gulp/tasks/audit.js`** — same schema, plus build-pipeline-specific extras (`brand.images.icon` file-existence in build/publish mode, `releases.repo` in publish mode, `src/main.js`/`src/preload.js` existence). These extras live in audit.js — not the schema — because they depend on build pipeline state rather than config shape.
-
-**Schema entry shape**:
-```js
-{ path: 'brand.id', type: 'string', required: true, match: /^[a-z][a-z0-9+\-.]*$/, description: '...' }
-```
-
-`required: true | false | (config) => bool`. The function form is for "this field is mandatory ONLY when another part of config is set" — e.g. `analytics.providers.google.id` only requires when `analytics.enabled === true`. No `'publish-only'` tier — build-only checks belong in `audit.js`.
-
-`match` / `enum` / `type` checks only run on PRESENCE. Missing field with `required:false` is silent. Missing field with `required:true` fires the "missing" error once; secondary rules don't pile on top.
-
-**Adding a new field**: add one entry to `src/config/schema.js`, optionally a default in `src/defaults/config/electron-manager.json`. That's it. See [docs/config-schema.md](docs/config-schema.md).
-
-### Build modes
-
-- `EM_BUILD_MODE=true` — production build (minified, no sourcemaps).
-- `EM_IS_PUBLISH=true` — publish step.
-- `EM_IS_SERVER=true` — running in CI.
-- `EM_TEST_MODE=true` — running inside EM's test framework (canonical signal — set by both runners). Powers `manager.isTesting()`.
+Every field in `config/electron-manager.json` is declared in `src/config/schema.js` — single source of truth. Validator engine is `src/utils/validate-config.js` (pure, ~100 lines). Runs at boot (hard-fails `manager.initialize()` if invalid) AND in `gulp/audit` (plus build-pipeline extras). See [docs/config-schema.md](docs/config-schema.md).
 
 ### Cross-context helpers
 
-Three Manager constructors (main / renderer / preload) plus the build-time Manager (`build.js`) all mix in shared helpers via `attachTo(Manager)`:
-
-| Helper | Source | What it returns |
-|---|---|---|
-| `isDevelopment()` | `src/utils/mode-helpers.js` | `true` when running unpackaged. Authoritative signal: `app.isPackaged === false`. Falls back to `NODE_ENV === 'development'` or `config.em.environment === 'development'` when `app` isn't available (preload, renderer, build-time scripts). |
-| `isProduction()` | `src/utils/mode-helpers.js` | Inverse of `isDevelopment()`. |
-| `isTesting()` | `src/utils/mode-helpers.js` | `process.env.EM_TEST_MODE === 'true'`. Set by EM's test runners; consumers writing their own tests should set the same env var. |
-| `getWebsiteUrl(env?)` | `src/utils/url-helpers.js` | Marketing/brand site URL. Dev → `https://localhost:4000` (matches BEM's jekyll-emulator port). Prod → `config.brand.url`. Use this for "Open Website" tray/menu items, billing-portal links, etc. |
-| `getEnvironment()` | `src/utils/url-helpers.js` | `'production' \| 'development'`. Two layers: prefer `config.em.environment` if loaded, fall back to `EM_BUILD_MODE === 'true' ? 'production' : 'development'`. |
-| `getFunctionsUrl(env?)` | `src/utils/url-helpers.js` | Firebase functions URL. Dev → `http://localhost:5001/<projectId>/us-central1`. Prod → `https://us-central1-<projectId>.cloudfunctions.net`. |
-| `getApiUrl(env?)` | `src/utils/url-helpers.js` | API URL. Dev → `http://localhost:5002`. Prod → `https://api.<authDomain>`. |
-
-Same code path everywhere. Available as both prototype methods (`manager.isTesting()`) and statics (`Manager.isTesting()`) — matches BEM's pattern. Use these whenever behavior should differ by *what kind of process* or *what backend env*; don't grep `process.env` ad-hoc throughout the codebase.
-
-Adding a new cross-context helper: write the function in a `src/utils/<topic>-helpers.js` module, expose `attachTo(Manager)`, then import + call `attachTo` at the bottom of all four Manager files (`main.js`, `renderer.js`, `preload.js`, `build.js`). Don't define helpers on individual Manager prototypes — that path leads to duplicated semantics like the old `getEnvironment` collision between main.js and build.js.
+Four Managers (main / renderer / preload / build-time) all mix in shared helpers via `attachTo(Manager)`: `isDevelopment()`, `isProduction()`, `isTesting()`, `getWebsiteUrl()`, `getEnvironment()`, `getFunctionsUrl()`, `getApiUrl()`. Use these instead of grepping `process.env` ad-hoc. See [docs/cross-context-helpers.md](docs/cross-context-helpers.md).
 
 ### Test framework
 
-`npx mgr test` (or `npm test` in EM itself) discovers + runs:
-- `<EM>/dist/test/suites/**/*.js` — framework defaults
-- `<cwd>/test/**/*.js` — consumer suites
-
-Four layers:
-- **build** — plain Node, fast.
-- **main** — spawns Electron via `runners/electron.js`, JSON-line stdout protocol. Tests EM lib code in isolation.
-- **renderer** — hidden BrowserWindow.
-- **boot** — spawns Electron with the consumer's actual built `dist/main.bundle.js` (the production main entry). Waits for `manager.initialize()` to resolve, then runs each test's `inspect(manager)` callback against the live runtime. Replaces shell-level `npm start && sleep && kill` smoke tests with deterministic, signal-driven pass/fail. Uses a single Electron process for all boot tests (~1s after build). **Always rebuilds the bundle** before running so tests never see stale code (~10s build cost; opt out with `EM_TEST_SKIP_BUILD=1` for CI where build ran in a separate step). Plumbing: `EM_TEST_BOOT`/`EM_TEST_BOOT_HARNESS`/`EM_TEST_BOOT_SPEC` env vars, harness in `src/test/harness/boot-entry.js`, runner in `src/test/runners/boot.js`. See `docs/test-boot-layer.md`.
-
-Test files export `{ type, layer, description, tests, cleanup }`. Boot tests use `inspect: async ({ manager, expect, projectRoot }) => { ... }` instead of `run`. See `docs/test-framework.md` and `docs/test-boot-layer.md`.
+`npx mgr test` discovers + runs framework suites (`<EM>/dist/test/suites/**`) plus consumer suites (`<cwd>/test/**`). Four layers: **build** (plain Node), **main** (spawned Electron), **renderer** (hidden BrowserWindow), **boot** (consumer's actual built bundle for end-to-end smoke tests). See [docs/test-framework.md](docs/test-framework.md), [docs/test-boot-layer.md](docs/test-boot-layer.md).
 
 ### Dev logs
 
-Every gulp invocation tees its complete stdout + stderr to `<projectRoot>/logs/dev.log` (path controllable via `EM_LOG_FILE`; disable with `EM_LOG_FILE=false`). ANSI codes stripped from the file; terminal output unchanged. Truncated fresh on each run. `logs/` is gitignored by default.
-
-When debugging via Claude or anywhere else, prefer `cat logs/dev.log` / `grep ... logs/dev.log` over copy-pasting terminal scrollback. The file captures everything: gulp tasks, electron main process, electron child stdout, deprecation warnings, errors.
-
-Implementation: `src/utils/attach-log-file.js` wraps `process.stdout.write` and `process.stderr.write`. Invoked at the top of `src/gulp/main.js`. `src/gulp/tasks/serve.js` uses `stdio: ['inherit', 'pipe', 'pipe']` so the electron child's output flows through the same tee.
+Every gulp invocation tees stdout+stderr to `<projectRoot>/logs/dev.log` (path via `EM_LOG_FILE`; disable with `EM_LOG_FILE=false`). When debugging via Claude, prefer `cat logs/dev.log` over copy-pasting terminal scrollback. See [docs/logging.md](docs/logging.md).
 
 ## CLI
 
 `npx mgr <command>` (aliases `em`, `electron-manager`):
 
-| Command | Status | Description |
-|---|---|---|
-| `setup` | real | scaffold consumer, ensure peer deps, write projectScripts |
-| `clean` | real | remove `dist/`, `release/`, `.cache/` |
-| `install` | real | install peer deps |
-| `version` | real | print versions |
-| `test` | real | run framework + project test suites |
-| `build` | real | shells `gulp build` with `EM_BUILD_MODE=true` |
-| `publish` | real | shells `gulp publish` with `EM_BUILD_MODE=true EM_IS_PUBLISH=true`; full sign + notarize + GH release upload |
-| `validate-certs` | real | check cert files, env vars, profile expiration + appId match, Keychain identity. Auto-runs at end of `setup` (non-fatal). |
-| `push-secrets` | real | read `.env` Default section, encrypt via libsodium, push to GH Actions secrets. Auto-base64s file paths. **Auto-runs at end of `setup`** when `GH_TOKEN` is set. |
-| `sign-windows` | real | strategy-aware EV/cloud/local signer. Self-hosted runs `signtool` against EV token; cloud dispatches to provider CLI; local is a no-op with a clear message. Emits structured JSONL events to `<runner-workspace>/em-signing.log` (job-start, sign-start, sign-done, sign-fail, job-end) so `mgr runner monitor` can pretty-print them in real time. |
-| `runner monitor` | real | tails the `em-signing.log` JSONL feed and pretty-prints events (color-coded JOB START/END, file/duration/byte info per signtool call, error spew on sign-fail). Run on the Windows signing box in a separate terminal during a release. Flags: `--follow-only` (skip replay), `--file <path>` (override log path). |
-| `launch` | real | Launch a packaged app with a clean env (strips `ELECTRON_RUN_AS_NODE` so the host process's leaked var doesn't make the .app silently exit). Auto-discovers `release/<platform>-<arch>/<App>.app` (or `.exe`-folder/linux-unpacked) when no path given. Forward args to the app via `--args="..."`. Aliases: `mgr open`. Use this for manual smoke-testing instead of raw `open -n .../MyApp.app`. |
-| `finalize-release` | real | `--signed-dir <path>` uploads signed Windows installers to the update-server release (created by mac/linux's electron-builder publish) AND mirrors them to download-server's installer tag with stable filenames. `--publish` flips the update-server release Draft→Published so electron-updater feeds work. CI workflow runs both modes (windows-sign job calls `--signed-dir`, finalize job calls `--publish`). |
-| `release` | real | Trigger the consumer's GH Actions Build & Release workflow via `workflow_dispatch`, then poll-stream every job's logs to the local terminal AND tee them to `logs/build.log`. Exits 0 on workflow success, 1 on failure. This is the canonical "ship a release" UX — `npm run release` in any consumer maps to this. The legacy "sign + publish from my own laptop" flow is preserved as `npm run release:local`. |
+| Command | Description |
+|---|---|
+| `setup` | scaffold consumer, ensure peer deps, write projectScripts |
+| `clean` | remove `dist/`, `release/`, `.cache/` |
+| `install` | install peer deps |
+| `version` | print versions |
+| `test` | run framework + project test suites |
+| `build` | shells `gulp build` with `EM_BUILD_MODE=true` |
+| `publish` | full sign + notarize + GH release upload (`EM_IS_PUBLISH=true`) |
+| `validate-certs` | check cert files, env vars, profile expiration, Keychain identity. Auto-runs at end of `setup` |
+| `push-secrets` | encrypt `.env` Default section via libsodium → GH Actions secrets. Auto-runs at end of `setup` when `GH_TOKEN` is set |
+| `sign-windows` | strategy-aware EV/cloud/local signer; emits JSONL events for `runner monitor` |
+| `runner monitor` | tails `em-signing.log` and pretty-prints signing events |
+| `launch` | launch a packaged app with clean env (strips `ELECTRON_RUN_AS_NODE`); auto-discovers `release/<platform>-<arch>/<App>.app`. Aliases: `mgr open` |
+| `finalize-release` | `--signed-dir` uploads signed installers; `--publish` flips release Draft→Published |
+| `release` | trigger consumer's GH Actions Build & Release workflow, poll-stream logs |
+
+See [docs/releasing.md](docs/releasing.md) for the end-to-end flow.
 
 ## File Conventions
 
-- **CommonJS** (`require()`) throughout. Node 24 (the version Electron 41 ships) runs ESM deps natively via `require()` — no need for dynamic `import()` unless a package is genuinely ESM-only (e.g. `electron-store@11` — handled via `webpackIgnore`'d dynamic import in `lib/storage.js`).
-- **Node version auto-synced from Electron.** `npx mgr setup` queries `https://releases.electronjs.org/releases.json` using the consumer's installed `electron` version, finds the bundled Node version, and writes the consumer's `.nvmrc` to match. So whatever Electron ships, the consumer's Node always matches. EM's own `package.json#engines.node` is a fallback for when the network lookup fails. Implementation: `src/utils/electron-node-version.js`.
+- **CommonJS** (`require()`) throughout. Node 24 runs ESM deps natively via `require()` — no need for dynamic `import()` unless a package is genuinely ESM-only (e.g. `electron-store@11` — handled via `webpackIgnore`'d dynamic import in `lib/storage.js`).
+- **Node version auto-synced from Electron.** `npx mgr setup` queries `releases.electronjs.org` and writes the consumer's `.nvmrc` to match.
 - One `module.exports = ...` per file.
 - Logical operators at the **start** of continuation lines.
 - Short-circuit early returns rather than nested ifs.
 - Prefer **`fs-jetpack`** over `fs-extra`.
 - **No backwards compatibility** unless explicitly requested — this is unreleased v1.
-- **Lib structure — flat file vs directory split.** Default to a flat `src/lib/<name>.js`. Split into a directory (`src/lib/<name>/{index,core,main,renderer,preload}.js`) ONLY when each Electron context (main / renderer / preload) has materially different logic that would force runtime branching inside one file. `index.js` is then a thin context detector that delegates. Currently only `lib/sentry/` is split (the SDK has separate main/renderer/preload entry points). Don't split prophylactically — convert when the branching gets ugly.
-- **Use `app.getAppPath()`, not `process.cwd()`, for runtime path resolution.** In a packaged app, `process.cwd()` is `/` (or wherever Finder/launchd happened to chdir from), so `path.join(process.cwd(), 'dist', 'views', ...)` resolves to absolute garbage. Use `require('./utils/app-root.js')()` — it tries `app.getAppPath()` first (returns the asar mount or project dir) and falls back to `process.cwd()` for tests/non-Electron contexts. The build-time tools (`gulp/`, `commands/`) are exempt — they always run with cwd set correctly.
-- **`ELECTRON_RUN_AS_NODE` is stripped at the CLI boundary.** When set, Electron silently runs as plain Node — `app` is undefined, no BrowserWindow, no window. The variable leaks into shells from common parent processes (notably VS Code's Claude Code extension, which runs as a `node.mojom.NodeService` utility process with the var set). `bin/electron-manager` and `src/gulp/main.js` both call `delete process.env.ELECTRON_RUN_AS_NODE` at the top so any child process they spawn (electron-builder rebuild, mgr serve, mgr test) gets a clean slate.
+- **Lib structure — flat file vs directory split.** Default to flat `src/lib/<name>.js`. Split into a directory (`src/lib/<name>/{index,core,main,renderer,preload}.js`) ONLY when each Electron context has materially different logic. Currently only `lib/sentry/` is split. Don't split prophylactically.
+- **Use `app.getAppPath()`, not `process.cwd()`, for runtime path resolution.** In a packaged app, `process.cwd()` is `/`. Use `require('./utils/app-root.js')()` — tries `app.getAppPath()` first, falls back to `process.cwd()` for tests/non-Electron contexts.
+- **Zero-trust URL handling — `sanitizeURL` for `shell.openExternal` and friends.** Any dynamic URL passed to `shell.openExternal`, `BrowserWindow.loadURL`, `window.location.href =`, etc. MUST be gated through `require('./utils/sanitize-url.js')` first. Returns the URL unchanged when its protocol is `http:`/`https:`, and `''` for anything else (`javascript:`, `data:`, `file:`, `vbscript:`, `chrome:`, custom schemes). Canonical pattern: `const safe = sanitizeURL(url); if (safe) shell.openExternal(safe);`. Hardcoded protocol URLs constructed internally (e.g. `restart-manager://` built by `_buildUrl`) bypass — not attacker-controllable. See `src/utils/sanitize-url.js` and the `js:patterns/xss-escaping` skill.
+- **`ELECTRON_RUN_AS_NODE` is stripped at the CLI boundary.** When set, Electron silently runs as plain Node — `app` is undefined, no BrowserWindow. The variable leaks from common parent processes (VS Code's Claude Code extension runs as a `node.mojom.NodeService` utility process with the var set). `bin/electron-manager` and `src/gulp/main.js` both `delete process.env.ELECTRON_RUN_AS_NODE` at the top.
 
 ## Documentation
 
-API references for each subsystem live in `docs/`:
+API references for each subsystem live in `docs/`. **Whenever you make a behavioral change, update both this overview AND the relevant `docs/*.md` deep reference.** Treat docs as a first-class deliverable, not an afterthought.
 
+- [docs/boot-sequence.md](docs/boot-sequence.md) — full `manager.initialize()` ordered list + rationale
 - [docs/storage.md](docs/storage.md) — main + renderer storage, dot-notation, change broadcasts
 - [docs/ipc.md](docs/ipc.md) — typed channel bus
-- [docs/windows.md](docs/windows.md) — named windows, bounds persistence
+- [docs/windows.md](docs/windows.md) — named windows, bounds persistence, hide-on-close, inset titlebar
 - [docs/tray.md](docs/tray.md) — file-based tray
 - [docs/menu.md](docs/menu.md) — file-based application menu
 - [docs/context-menu.md](docs/context-menu.md) — file-based right-click menus
@@ -323,24 +157,25 @@ API references for each subsystem live in `docs/`:
 - [docs/app-state.md](docs/app-state.md) — launch flags, crash sentinel
 - [docs/deep-link.md](docs/deep-link.md) — cross-platform deep links, single-instance, built-in routes
 - [docs/web-manager-bridge.md](docs/web-manager-bridge.md) — Firebase auth state sync across main + renderers
-- [docs/auto-updater.md](docs/auto-updater.md) — startup + periodic checks, 30-day pending-update gate, dev simulation
-- [docs/analytics.md](docs/analytics.md) — GA4 Measurement Protocol, cross-platform `uuidv5` identity, auth-aware user_id, queueing
+- [docs/auto-updater.md](docs/auto-updater.md) — startup + periodic checks, 30-day pending-update gate, idle-aware install
+- [docs/analytics.md](docs/analytics.md) — GA4 Measurement Protocol, cross-platform `uuidv5` identity
 - [docs/context.md](docs/context.md) — runtime context block (geolocation, client, session, app)
 - [docs/usage.md](docs/usage.md) — opens / hoursTotal / hoursThisSession; clean-exit accumulation
-- [docs/remote-config.md](docs/remote-config.md) — "hot config" fetched from brand site; override flags without re-releasing
-- [docs/restart-manager.md](docs/restart-manager.md) — auxiliary helper app for relaunches; auto-install via signed mac.zip / NSIS exe / browser-opened .deb
-- [docs/config-schema.md](docs/config-schema.md) — canonical schema + validator: required/match/enum/type with simple `required: true|false|fn`. Runs at boot AND in `gulp audit`
-- [docs/sentry.md](docs/sentry.md) — per-context split, auto auth attribution, dev-mode gating
+- [docs/remote-config.md](docs/remote-config.md) — "hot config" fetched from brand site
+- [docs/restart-manager.md](docs/restart-manager.md) — auxiliary helper app for relaunches
+- [docs/config-schema.md](docs/config-schema.md) — canonical schema + validator
+- [docs/sentry.md](docs/sentry.md) — per-context split, auto auth attribution
 - [docs/templating.md](docs/templating.md) — `{{ }}` token replacement, page vars, HTML pipeline
-- [docs/logging.md](docs/logging.md) — runtime logger (main + preload + renderer → one `runtime.log`), `mgr logs` CLI, dev vs prod paths
-- [docs/themes.md](docs/themes.md) — vendored classy + bootstrap themes, `@use 'electron-manager'` overrides, per-page CSS bundles
+- [docs/logging.md](docs/logging.md) — runtime logger (main + preload + renderer → one `runtime.log`)
+- [docs/themes.md](docs/themes.md) — vendored classy + bootstrap themes, per-page CSS bundles
 - [docs/hooks.md](docs/hooks.md) — lifecycle hooks (build/pre, build/post, release/pre, release/post, notarize/post)
-- [docs/installer-options.md](docs/installer-options.md) — per-target installer config (NSIS one-click, snap publishing, ia32 inclusion, app.category mapping, `{YEAR}` token, MAS roadmap)
-- [docs/signing.md](docs/signing.md) — code signing for macOS + Windows, cert file inventory, env vars
-- [docs/releasing.md](docs/releasing.md) — end-to-end release walkthrough (`.env` → GitHub Release)
-- [docs/runner.md](docs/runner.md) — Windows EV-token signing runner, `npx mgr runner install`, `npx mgr runner monitor` (live signing event tail)
+- [docs/installer-options.md](docs/installer-options.md) — per-target installer config, defaults table
+- [docs/signing.md](docs/signing.md) — code signing for macOS + Windows
+- [docs/releasing.md](docs/releasing.md) — end-to-end release walkthrough
+- [docs/runner.md](docs/runner.md) — Windows EV-token signing runner
 - [docs/test-framework.md](docs/test-framework.md) — writing tests, running them, layers
-- [docs/test-boot-layer.md](docs/test-boot-layer.md) — boot test layer (spawns the consumer's actual built bundle for end-to-end smoke tests)
+- [docs/test-boot-layer.md](docs/test-boot-layer.md) — boot test layer
 - [docs/build-system.md](docs/build-system.md) — gulp, webpack, electron-builder pipeline
+- [docs/cross-context-helpers.md](docs/cross-context-helpers.md) — `isDevelopment`/`isTesting`/`getApiUrl` etc., adding new helpers
 
 `PROGRESS.md` tracks pass-by-pass progress and decisions.

@@ -41,6 +41,7 @@ const https      = require('https');
 const { spawn }  = require('child_process');
 const jetpack    = require('fs-jetpack');
 const LoggerLite = require('./logger-lite.js');
+const sanitizeURL = require('../utils/sanitize-url.js');
 
 const logger = new LoggerLite('restart-manager');
 
@@ -236,8 +237,13 @@ const restartManager = {
       // No silent install on linux — just open the .deb in the browser. The user
       // double-clicks, their package manager (Software Center, gdebi, etc.) takes
       // it from there. No sudo prompt from us.
-      logger.log(`opening linux installer URL in browser: ${url}`);
-      await shell.openExternal(url);
+      const safe = sanitizeURL(url);
+      if (!safe) {
+        logger.warn(`refused to openExternal non-http(s) URL: ${url}`);
+        return;
+      }
+      logger.log(`opening linux installer URL in browser: ${safe}`);
+      await shell.openExternal(safe);
       return;
     }
 
