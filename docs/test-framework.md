@@ -46,6 +46,8 @@ Then in your code, gate test-only behavior on `manager.isTesting()` instead of i
 
 Files in directories starting with `_` are ignored. Files load alphabetically (sorted globally per source).
 
+**Framework boot suites are scoped to EM self-test runs only.** When a consumer runs `npx mgr test`, the framework's `dist/test/suites/boot/**` is excluded from discovery — those tests are meant to assert on EM's own internal fixtures and would fail noisily against a real consumer app. Detection: the runner checks `cwd`'s `package.json#name === 'electron-manager'`. Consumers write their own boot tests under `<cwd>/test/boot/`. Matches the same exclusion pattern in BXM and UJM. See [test-boot-layer.md](test-boot-layer.md).
+
 ## Test file shapes
 
 Three forms — pick whichever fits.

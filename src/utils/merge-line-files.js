@@ -104,7 +104,12 @@ function mergeLineBasedFiles(existingContent, newContent, fileName) {
   const result = [];
   result.push(DEFAULT_MARKER);
   result.push(...mergedDefault);
-  result.push('');
+  // Insert a single blank line before CUSTOM_MARKER, but only if the merged default
+  // doesn't already end with one (otherwise we'd accumulate an extra blank line on
+  // every merge — breaking idempotency on the first re-run after a fresh `jetpack.copy`).
+  if (mergedDefault.length === 0 || mergedDefault[mergedDefault.length - 1].trim() !== '') {
+    result.push('');
+  }
   result.push(CUSTOM_MARKER);
   if (migratedToCustom.length > 0) {
     result.push(...migratedToCustom);

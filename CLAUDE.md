@@ -79,6 +79,10 @@ All three ship sensible default templates and share a unified id-path API (`.fin
 
 EM does NOT auto-create any windows. Consumers call `manager.windows.create('main', { show: !startup.isLaunchHidden() })` from inside `manager.initialize().then(...)`. Inset titlebar by default; Discord-style hide-on-close on `main`; auto re-surface on user re-launch. See [docs/windows.md](docs/windows.md).
 
+### Icons
+
+Convention-only. Drop PNGs at `config/icons/<platform>/<slot>.png` (platform-specific) or `config/icons/global/<slot>.png` (universal fallback). Resolution per slot: platform → global → (Linux only) windows → bundled default. Ship @2x native size only — EM downscales the @1x sibling via sharp. macOS tray input is `tray.png` (consumer-friendly); EM renames the dist output to `trayTemplate.png` for OS dark-mode auto-inversion. No `app.icons` config block. See [docs/icons.md](docs/icons.md).
+
 ### Build system
 
 prepare-package copies `src/` → `dist/`; gulp orchestrates webpack (3 targets, all bundled) + electron-builder. `gulp/build-config` generates `dist/electron-builder.yml` + `dist/config/entitlements.mac.plist` from EM defaults + consumer config. Strategy-pluggable Windows signing (`targets.win.signing.strategy`: `self-hosted` | `cloud` | `local`). See [docs/build-system.md](docs/build-system.md), [docs/installer-options.md](docs/installer-options.md), [docs/signing.md](docs/signing.md).
@@ -169,6 +173,7 @@ API references for each subsystem live in `docs/`. **Whenever you make a behavio
 - [docs/logging.md](docs/logging.md) — runtime logger (main + preload + renderer → one `runtime.log`)
 - [docs/themes.md](docs/themes.md) — vendored classy + bootstrap themes, per-page CSS bundles
 - [docs/hooks.md](docs/hooks.md) — lifecycle hooks (build/pre, build/post, release/pre, release/post, notarize/post)
+- [docs/icons.md](docs/icons.md) — convention-only icon resolution (`global/` + per-platform), retina derivation, macOS Template magic
 - [docs/installer-options.md](docs/installer-options.md) — per-target installer config, defaults table
 - [docs/signing.md](docs/signing.md) — code signing for macOS + Windows
 - [docs/releasing.md](docs/releasing.md) — end-to-end release walkthrough

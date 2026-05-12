@@ -41,6 +41,31 @@ npm run release          # signed + published release via GitHub Actions
 npx mgr test             # run framework + project test suites
 ```
 
+## Icons
+
+Convention-only. Drop PNGs at:
+
+```
+config/icons/
+  global/             ← used by any platform with no platform-specific override
+    icon.png
+    tray.png
+  macos/              ← macOS overrides (beats global)
+    icon.png
+    tray.png          ← 32×32 — EM renames to trayTemplate.png in dist for OS dark-mode magic
+    dmg.png           ← 1080×760 DMG background
+  windows/            ← Windows overrides
+    icon.png
+    tray.png
+  linux/              ← Linux overrides (otherwise falls back to global → windows)
+    icon.png
+    tray.png
+```
+
+Resolution per slot/platform (most specific wins): `<platform>/<slot>` → `global/<slot>` → (Linux only) `windows/<slot>` → EM bundled default. Tray missing falls back to app icon.
+
+**Ship native (@2x) size only — EM downscales the @1x sibling automatically.** macOS tray must be 32×32; macOS DMG must be 1080×760. EM emits both `<slot>.png` and `<slot>@2x.png` into `dist/config/icons/<platform>/`. No `app.icons` config block — files are the source of truth.
+
 ## Logs
 
 Three logs in `<projectRoot>/logs/`, each with its own purpose:

@@ -362,10 +362,26 @@ function discoverTestFiles() {
   const framework = [];
   const project = [];
 
+  // Detect whether we're running EM's own framework self-tests, vs a consumer
+  // who installed EM and is running their own tests. Used below to filter the
+  // boot/ layer of framework suites — those target EM's internal fixture, so
+  // they only make sense when EM tests itself. Matches BXM/UJM pattern.
+  const isFrameworkSelfTest = (() => {
+    try {
+      const cwdPkg = require(path.join(process.cwd(), 'package.json'));
+      return cwdPkg.name === 'electron-manager';
+    } catch (_) { return false; }
+  })();
+
   // Framework default suites (relative to this file: dist/test/runner.js).
+  // For consumers, we exclude boot/ — framework boot suites assert on EM's own
+  // fixture app surface and would fail noisily when run against a real consumer's
+  // built app. Consumers write their own boot tests under <cwd>/test/boot/.
   const frameworkSuitesDir = path.join(__dirname, 'suites');
   if (jetpack.exists(frameworkSuitesDir)) {
-    glob('**/*.js', { cwd: frameworkSuitesDir, ignore: ['_**'] }).sort().forEach((rel) => {
+    const ignore = ['_**'];
+    if (!isFrameworkSelfTest) ignore.push('boot/**');
+    glob('**/*.js', { cwd: frameworkSuitesDir, ignore }).sort().forEach((rel) => {
       framework.push(path.join(frameworkSuitesDir, rel));
     });
   }

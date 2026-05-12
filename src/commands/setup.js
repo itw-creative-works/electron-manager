@@ -267,7 +267,11 @@ async function copyDefaults() {
   }
 
   const { mergeLineBasedFiles } = require('../utils/merge-line-files.js');
-  const MERGEABLE_BASENAMES = new Set(['.env', '.gitignore']);
+  // CLAUDE.md is merged via the same marker-based protocol as .env/.gitignore.
+  // Framework owns everything between `# ========== Default Values ==========` and
+  // `# ========== Custom Values ==========`; consumer owns everything below the Custom marker.
+  // Re-running `npx mgr setup` keeps the framework section live-synced without clobbering the consumer's notes.
+  const MERGEABLE_BASENAMES = new Set(['.env', '.gitignore', 'CLAUDE.md']);
 
   // Template substitution context — `{{ versions.node }}` etc. resolved at scaffold time.
   // Source of truth is EM's own package.json `engines` block. EM auto-syncs `engines.node`

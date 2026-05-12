@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.4.3 — consumer CLAUDE.md auto-sync + isFrameworkSelfTest + merge idempotency fix
+
+### Added
+
+- **`'CLAUDE.md'` joins `'.env'`/`'.gitignore'`** in `MERGEABLE_BASENAMES` ([src/commands/setup.js](src/commands/setup.js)). Consumer `CLAUDE.md` now routes through the same marker-based merge as `.env`/`.gitignore` on every `npx mgr setup` — the framework's `# ========== Default Values ==========` section stays live-synced while everything below `# ========== Custom Values ==========` is preserved verbatim.
+- **`isFrameworkSelfTest` detection in `src/test/runner.js`.** The runner now checks `cwd`'s `package.json#name === 'electron-manager'` and excludes framework `boot/` suites from consumer runs (matches BXM/UJM pattern). Defensive — no behavioral change today since EM has no framework boot suites yet, but locks in the pattern.
+- One paragraph to [docs/test-framework.md](docs/test-framework.md) explaining the framework-boot-suite exclusion.
+
+### Changed
+
+- **`src/defaults/CLAUDE.md` rewritten with merge markers.** Same 50-ish lines of meat (quick start, where-things-live, per-process imports, available APIs) but wrapped between `# ========== Default Values ==========` and `# ========== Custom Values ==========` markers, dropping the "MyApp" placeholder H1, and pointing to the framework's top-level CLAUDE.md + docs/ via absolute path. Matches BXM/UJM/BEM shape.
+
+### Fixed
+
+- **`mergeLineBasedFiles` idempotency bug** ([src/utils/merge-line-files.js](src/utils/merge-line-files.js)): the function unconditionally inserted a blank line before `CUSTOM_MARKER`, causing first-merge after a fresh `jetpack.copy` to grow the file by one newline. Now skips the insert if `mergedDefault` already ends blank. Affects `.env`/`.gitignore`/`CLAUDE.md` equally — first-merge is now a true no-op.
+
 ## 1.4.2 — zero-trust URL sanitization + CLAUDE.md slimmed under 250 lines
 
 ### Added
