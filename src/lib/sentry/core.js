@@ -5,7 +5,6 @@ const LoggerLite = require('../logger-lite.js');
 const logger = new LoggerLite('sentry');
 
 const DEFAULTS = {
-  enabled:        true,
   dsn:            '',
   environment:    null,                  // null = auto-detect from EM_BUILD_MODE
   tracesSampleRate: 0.1,
@@ -13,6 +12,8 @@ const DEFAULTS = {
 };
 
 // Resolve runtime config + decide whether sentry should boot.
+// Presence-driven: a non-empty `dsn` enables sentry. No separate `enabled` flag —
+// matches BEM convention (a config block's credentials are its enable signal).
 // Returns { shouldEnable, options, reason } where options is the resolved sentry-init opts.
 function resolveConfig(manager) {
   const cfg = (manager && manager.config && manager.config.sentry) || {};
@@ -20,9 +21,6 @@ function resolveConfig(manager) {
 
   if (process.env.EM_SENTRY_ENABLED === 'false') {
     return { shouldEnable: false, options: opts, reason: 'EM_SENTRY_ENABLED=false' };
-  }
-  if (opts.enabled === false) {
-    return { shouldEnable: false, options: opts, reason: 'config.sentry.enabled=false' };
   }
   if (!opts.dsn) {
     return { shouldEnable: false, options: opts, reason: 'no dsn set' };
@@ -54,11 +52,9 @@ function normalizeUser(user, opts = {}) {
 
 // Resolve the app version. Routes through the cross-context `manager.getVersion()`
 // helper (src/utils/mode-helpers.js — `app.getVersion()` first, then package.json
-// fallback). Manager arg may be undefined in odd init paths; in that case fall back
-// to the same helper as a static via the build-time Manager.
+// fallback).
 function resolveRelease(manager) {
-  if (typeof manager?.getVersion === 'function') return manager.getVersion();
-  return require('../../build.js').getVersion();
+  return manager.getVersion();
 }
 
 module.exports = {

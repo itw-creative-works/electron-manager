@@ -2,7 +2,7 @@
 //
 // Reads .env at the repo root, encrypts each value with the repo's libsodium public key,
 // pushes via Octokit. For env vars whose value is a path to an existing file (e.g.
-// CSC_LINK=build/certs/dev-id.p12), the secret value is the base64-encoded file contents
+// CSC_LINK=config/certs/dev-id.p12), the secret value is the base64-encoded file contents
 // — the workflow then decodes back to a temp file at job start.
 //
 // Usage:

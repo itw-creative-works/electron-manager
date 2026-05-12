@@ -27,17 +27,17 @@ module.exports = function buildConfig(done) {
     const distRoot    = path.join(projectRoot, 'dist');
     const distPath    = path.join(distRoot, 'electron-builder.yml');
 
-    const config      = Manager.getConfig() || {};
-    const startupMode = config?.startup?.mode || 'normal';
+    const config      = Manager.getConfig();
+    const startupMode = config.startup?.mode || 'normal';
 
-    // 1. Generate entitlements.mac.plist into dist/build/. Consumer overrides live at
+    // 1. Generate entitlements.mac.plist into dist/config/. Consumer overrides live at
     // `targets.mac.entitlements` (an object map of plist key → value, with `null` to
     // remove an EM default). Top-level `entitlements.mac` is no longer read.
-    const entitlementsPath = writeMacEntitlements(distRoot, config?.targets?.mac?.entitlements);
+    const entitlementsPath = writeMacEntitlements(distRoot, config.targets?.mac?.entitlements);
     logger.log(`wrote ${entitlementsPath}`);
 
-    // 2. Resolve + copy icons (3-tier waterfall) into dist/build/icons/.
-    const emDefaultsRoot = path.join(__dirname, '..', '..', 'defaults', 'build');
+    // 2. Resolve + copy icons (3-tier waterfall) into dist/config/icons/.
+    const emDefaultsRoot = path.join(__dirname, '..', '..', 'defaults', 'config');
     const icons = resolveAndCopy({ config, projectRoot, distRoot, emDefaultsRoot });
     logger.log(`resolved icons: mac=${Object.keys(icons.macos).length}, win=${Object.keys(icons.windows).length}, linux=${Object.keys(icons.linux).length}`);
 
@@ -56,8 +56,8 @@ module.exports = function buildConfig(done) {
     }
 
     // Inject `publish` from `releases` config.
-    if (config?.releases?.enabled !== false) {
-      const releases = config?.releases || {};
+    if (config.releases?.enabled !== false) {
+      const releases = config.releases || {};
       let releaseOwner = releases.owner;
       if (!releaseOwner) {
         try {
@@ -85,7 +85,7 @@ module.exports = function buildConfig(done) {
     logger.log(`afterSign → ${builderConfig.afterSign}`);
 
     // Apply consumer overrides last so they win.
-    if (config?.electronBuilder && typeof config.electronBuilder === 'object') {
+    if (config.electronBuilder && typeof config.electronBuilder === 'object') {
       builderConfig = deepMerge(builderConfig, config.electronBuilder);
       logger.log('Applied electronBuilder overrides from electron-manager.json');
     }
@@ -133,20 +133,25 @@ function expandYear(str) {
 // (paths are left as project-relative defaults that may not exist on disk — fine for
 // test assertions).
 function baseConfig(config, extras = {}) {
-  const appId       = config?.app?.appId       || 'com.itwcreativeworks.app';
-  const productName = config?.app?.productName || 'App';
-  const copyright   = expandYear(config?.app?.copyright || '© {YEAR}, ITW Creative Works');
+  // Seed `app` + `brand` so callers (including tests passing bare {}) can deref without
+  // optional-chaining at every site. Matches Manager.getConfig()'s own seeding.
+  config.app   = config.app   || {};
+  config.brand = config.brand || {};
+
+  const appId       = config.app.appId       || 'com.itwcreativeworks.app';
+  const productName = config.app.productName || 'App';
+  const copyright   = expandYear(config.app.copyright || '© {YEAR}, ITW Creative Works');
 
   // Generic category → per-platform values via lookup table. Default 'productivity' is
   // a safe baseline that fits ~80% of business + utility apps.
-  const category   = resolveCategory(config?.app?.category || 'productivity');
-  const languages  = Array.isArray(config?.app?.languages) ? config.app.languages : ['en'];
-  const darkModeSupport = config?.app?.darkModeSupport !== false;  // default true
+  const category   = resolveCategory(config.app.category || 'productivity');
+  const languages  = Array.isArray(config.app.languages) ? config.app.languages : ['en'];
+  const darkModeSupport = config.app.darkModeSupport !== false;  // default true
 
   // Per-target config blocks. Each is fully optional — every key has a default.
-  const macTargetCfg   = config?.targets?.mac   || {};
-  const winTargetCfg   = config?.targets?.win   || {};
-  const linuxTargetCfg = config?.targets?.linux || {};
+  const macTargetCfg   = config.targets?.mac   || {};
+  const winTargetCfg   = config.targets?.win   || {};
+  const linuxTargetCfg = config.targets?.linux || {};
 
   const macArch   = Array.isArray(macTargetCfg.arch)   && macTargetCfg.arch.length   ? macTargetCfg.arch   : ['universal'];
   const winArch   = Array.isArray(winTargetCfg.arch)   && winTargetCfg.arch.length   ? winTargetCfg.arch   : ['x64', 'ia32'];
@@ -210,7 +215,7 @@ function baseConfig(config, extras = {}) {
 
     directories: {
       output:         'release',
-      buildResources: 'build',         // dist/build/ (relative to dist/electron-builder.yml)
+      buildResources: 'config',        // dist/config/ (relative to dist/electron-builder.yml)
     },
 
     files: [
@@ -308,10 +313,10 @@ function baseConfig(config, extras = {}) {
   // fileAssociations + protocols passthrough. EM-side `protocols` is ADDITIVE — the
   // brand.id:// scheme is registered automatically (handled by lib/protocol.js at runtime
   // and by Info.plist generation at build time elsewhere); this is for additional schemes.
-  if (Array.isArray(config?.fileAssociations) && config.fileAssociations.length > 0) {
+  if (Array.isArray(config.fileAssociations) && config.fileAssociations.length > 0) {
     out.fileAssociations = config.fileAssociations;
   }
-  if (Array.isArray(config?.protocols) && config.protocols.length > 0) {
+  if (Array.isArray(config.protocols) && config.protocols.length > 0) {
     out.protocols = config.protocols;
   }
 

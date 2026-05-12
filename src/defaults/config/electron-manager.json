@@ -63,7 +63,7 @@
       // files.user-selected.read-write, allow-dyld-environment-variables). To override:
       //   - Set a key to a value to add/replace it (boolean, string, or array per Apple's plist spec)
       //   - Set a key to `null` to remove it from EM's defaults
-      // Output: dist/build/entitlements.mac.plist (auto-wired into electron-builder.yml).
+      // Output: dist/config/entitlements.mac.plist (auto-wired into electron-builder.yml).
       // Example: { 'com.apple.security.network.server': false, 'com.apple.security.device.audio-input': true }
       entitlements: {},
       // MAS (Mac App Store) — STUBBED. Config is parsed but not yet implemented;
@@ -185,7 +185,9 @@
   //   app/quit    → app.quit()
   // Add custom routes at runtime: manager.deepLink.on('my-route', (ctx) => {...}) in main.
 
-  sentry:         { dsn: '' },
+  sentry: {
+    dsn: '',
+  },
 
   // GA4 analytics. Measurement ID lives in config (not secret); the API secret
   // lives in `process.env.GOOGLE_ANALYTICS_SECRET` (matches BEM convention) so
@@ -194,7 +196,8 @@
   // client_id / user_id are uuidv5(deviceId/firebaseUid, projectId-namespace)
   // so the same human gets unified events across desktop + web + backend.
   analytics: {
-    enabled: true,                            // set false to disable analytics entirely
+    // Presence-driven: set `providers.google.id` to `G-XXXXXXXXXX` to enable analytics.
+    // Empty string = analytics disabled (matches BEM convention — no redundant enabled flag).
     providers: {
       google: {
         id: '',                               // 'G-XXXXXXXXXX' Measurement ID
@@ -213,6 +216,18 @@
     // url: 'https://brand.example/data/resources/main.json',   // default uses brand.url
   },
 
+  // Payment — BEM-shaped so the same product catalog can be referenced from backend
+  // + desktop. The schema enforces publishableKey shape when set; everything else is
+  // freeform so apps can extend per their needs without EM caring. Leave empty until
+  // you're ready to wire payments.
+  payment: {
+    processors: {
+      stripe: { publishableKey: '' },
+      paypal: { clientId:       '' },
+    },
+    products: [],
+  },
+
   // Restart Manager — auxiliary helper app that handles relaunching this app on
   // our behalf via the `restart-manager://` URL scheme. EM auto-registers a few
   // seconds after launch, auto-unregisters on clean quit, and downloads + installs
@@ -223,6 +238,17 @@
     enabled: true,
   },
 
-  firebaseConfig: {},
-  webManager:     {},
+  // Firebase web SDK config. Flat shape — same key names BEM/BXM/web-manager all use.
+  // Copy directly from Firebase Console → Project Settings → SDK setup (Config option).
+  // Empty {} disables Firebase Auth in the renderer (web-manager-bridge logs a warn).
+  firebaseConfig: {
+    apiKey:            '',
+    authDomain:        '',
+    databaseURL:       '',
+    projectId:         '',
+    storageBucket:     '',
+    messagingSenderId: '',
+    appId:             '',
+    measurementId:     '',
+  },
 }

@@ -65,12 +65,6 @@ const deepLink = {
     deepLink._manager = manager;
     deepLink._electron = require('electron');
 
-    // Need `app` (main-only); renderer/preload don't have it. No-op there.
-    if (!deepLink._electron?.app) {
-      deepLink._initialized = true;
-      return;
-    }
-
     deepLink._wireElectronEvents();
     deepLink._registerBuiltins();
 
@@ -79,7 +73,7 @@ const deepLink = {
     const coldUrl = deepLink._extractUrlFromArgv(process.argv);
     if (coldUrl) {
       deepLink._coldStartUrl = coldUrl;
-      manager.appState?.setLaunchedFromDeepLink?.(true);
+      manager.appState.setLaunchedFromDeepLink(true);
       // Defer dispatch so the rest of init can finish.
       setImmediate(() => deepLink._handle(coldUrl, 'cold-start', { argv: process.argv, cwd: process.cwd() }));
     }
@@ -90,7 +84,7 @@ const deepLink = {
       deepLink._pendingUrls = [];
       if (!deepLink._coldStartUrl) {
         deepLink._coldStartUrl = urls[0];
-        manager.appState?.setLaunchedFromDeepLink?.(true);
+        manager.appState.setLaunchedFromDeepLink(true);
       }
       urls.forEach((u) => setImmediate(() => deepLink._handle(u, 'cold-start', { argv: process.argv, cwd: process.cwd() })));
     }
@@ -103,8 +97,7 @@ const deepLink = {
     if (deepLink._wired) return;
     deepLink._wired = true;
 
-    const { app } = deepLink._electron || {};
-    if (!app) return;
+    const { app } = deepLink._electron;
 
     // macOS: open-url. Fires for both cold-start and warm-start opens.
     app.on('open-url', (event, url) => {
@@ -127,11 +120,11 @@ const deepLink = {
       // Surface the main window. With hidden-mode apps, the consumer typically created
       // `main` with `show: false` at boot, so it's in the registry but invisible — we
       // just need to show it now that the user explicitly asked.
-      const main = deepLink._manager?.windows?.get?.('main');
+      const main = deepLink._manager.windows.get('main');
       if (main) {
         logger.log(`second-instance — surfacing main (visible=${main.isVisible()}, minimized=${main.isMinimized()})`);
         if (main.isMinimized()) main.restore();
-        deepLink._manager?.windows?._ensureDockVisible?.();
+        deepLink._manager.windows._ensureDockVisible();
         main.show();
         main.focus();
       } else {
@@ -156,12 +149,7 @@ const deepLink = {
           logger.warn('auth/token: no token in query string.');
           return;
         }
-        const bridge = deepLink._manager?.webManager;
-        if (bridge?.handleAuthToken) {
-          bridge.handleAuthToken(token);
-        } else {
-          logger.warn('auth/token received but web-manager-bridge.handleAuthToken not available yet (Pass 2.12 wires this).');
-        }
+        deepLink._manager.webManager.handleAuthToken(token);
       },
     });
 
@@ -171,7 +159,7 @@ const deepLink = {
       builtin: true,
       fn: (ctx) => {
         const name = ctx.query?.window || 'main';
-        deepLink._manager?.windows?.show?.(name);
+        deepLink._manager.windows.show(name);
       },
     });
 
@@ -180,7 +168,7 @@ const deepLink = {
       pattern: 'app/quit',
       builtin: true,
       fn: () => {
-        deepLink._electron?.app?.quit?.();
+        deepLink._electron.app.quit();
       },
     });
   },
@@ -188,7 +176,7 @@ const deepLink = {
   // Pull a `<scheme>://...` URL out of an argv array. Returns null if none of our schemes match.
   _extractUrlFromArgv(argv) {
     if (!Array.isArray(argv)) return null;
-    const schemes = deepLink._manager?.protocol?.getSchemes?.() || [];
+    const schemes = deepLink._manager.protocol.getSchemes();
     if (schemes.length === 0) return null;
 
     // Walk argv backward — the URL is typically the last meaningful arg.

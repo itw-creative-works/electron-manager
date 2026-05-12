@@ -4,7 +4,7 @@ Cross-platform code signing reference. Covers macOS (sign + notarize), Windows (
 
 ## tl;dr
 
-- **macOS production**: Developer ID Application cert + notarization API key. Files in `build/certs/`. Env vars point at them.
+- **macOS production**: Developer ID Application cert + notarization API key. Files in `config/certs/`. Env vars point at them.
 - **Windows production**: EV USB token (self-hosted runner now) or cloud signing (future, pluggable via `targets.win.signing.strategy`).
 - **Linux**: No signing for AppImage/deb. Snap/Flatpak have their own pipelines.
 
@@ -20,7 +20,7 @@ Cross-platform code signing reference. Covers macOS (sign + notarize), Windows (
       developer-id-installer.p12       # only for .pkg builds (rare)
       AuthKey_XXXXXXXXXX.p8            # universal across team
       <app-name>.provisionprofile      # per-app (only if entitlements require)
-  .env                                 # gitignored — env vars referencing build/certs/*
+  .env                                 # gitignored — env vars referencing config/certs/*
 ```
 
 ## What's universal vs per-brand
@@ -36,7 +36,7 @@ Cross-platform code signing reference. Covers macOS (sign + notarize), Windows (
 - Provisioning profile (`.provisionprofile`) — only required if your app uses entitlements that Apple gates (push notifications, in-app purchase, network extensions, app groups, etc.)
 - Icons (`icon.icns`, `icon.ico`, `icon.png`)
 
-So for ITW Creative Works' multiple Electron apps signed by the same team, you generally drop the **same** `developer-id-application.p12` and `AuthKey_*.p8` into each app's `build/certs/`. The `.env` paths are identical across apps. Provisioning profiles, if needed, are unique per app.
+So for ITW Creative Works' multiple Electron apps signed by the same team, you generally drop the **same** `developer-id-application.p12` and `AuthKey_*.p8` into each app's `config/certs/`. The `.env` paths are identical across apps. Provisioning profiles, if needed, are unique per app.
 
 ## macOS setup
 
@@ -51,17 +51,17 @@ You need an Apple Developer Program membership ($99/year). Inside it:
 ### 2. Drop files into your project
 
 ```bash
-cp ~/Downloads/developer-id-application.p12 build/certs/
-cp ~/Downloads/AuthKey_XXXXXXXXXX.p8        build/certs/
+cp ~/Downloads/developer-id-application.p12 config/certs/
+cp ~/Downloads/AuthKey_XXXXXXXXXX.p8        config/certs/
 ```
 
 ### 3. Wire `.env`
 
 ```bash
-CSC_LINK=build/certs/developer-id-application.p12
+CSC_LINK=config/certs/developer-id-application.p12
 CSC_KEY_PASSWORD=<password you set on export>
 
-APPLE_API_KEY=build/certs/AuthKey_XXXXXXXXXX.p8
+APPLE_API_KEY=config/certs/AuthKey_XXXXXXXXXX.p8
 APPLE_API_KEY_ID=XXXXXXXXXX             # 10 chars from key filename
 APPLE_API_ISSUER=00000000-0000-...      # UUID from App Store Connect
 
@@ -150,9 +150,9 @@ The corresponding decode step in CI looks like:
 ```yaml
 - name: Decode signing assets
   run: |
-    mkdir -p build/certs
-    echo "${{ secrets.CSC_LINK }}" | base64 --decode > build/certs/dev-id.p12
-    echo "${{ secrets.APPLE_API_KEY }}" | base64 --decode > build/certs/AuthKey.p8
+    mkdir -p config/certs
+    echo "${{ secrets.CSC_LINK }}" | base64 --decode > config/certs/dev-id.p12
+    echo "${{ secrets.APPLE_API_KEY }}" | base64 --decode > config/certs/AuthKey.p8
   env:
     CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
     APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
@@ -161,8 +161,8 @@ The corresponding decode step in CI looks like:
 - name: Build and release
   run: npm run release
   env:
-    CSC_LINK:         build/certs/dev-id.p12
-    APPLE_API_KEY:    build/certs/AuthKey.p8
+    CSC_LINK:         config/certs/dev-id.p12
+    APPLE_API_KEY:    config/certs/AuthKey.p8
     GH_TOKEN:         ${{ secrets.GH_TOKEN }}
 ```
 
@@ -184,7 +184,7 @@ GitHub Actions secrets you'll need (per repo):
 | `APPLE_TEAM_ID` | 10-char team ID |
 | `WIN_CSC_LINK` (cloud) | Cloud signing creds (provider-specific) |
 
-The workflow base64-decodes secrets into temp files inside `build/certs/` at job start, runs the build, and the runner's ephemeral filesystem cleans up afterward. Local `.env` files are never committed and never shipped.
+The workflow base64-decodes secrets into temp files inside `config/certs/` at job start, runs the build, and the runner's ephemeral filesystem cleans up afterward. Local `.env` files are never committed and never shipped.
 
 ## Troubleshooting
 
@@ -198,7 +198,7 @@ The workflow base64-decodes secrets into temp files inside `build/certs/` at job
 - Confirm `APPLE_API_ISSUER` is the issuer UUID from App Store Connect → Users and Access → Keys.
 
 ### "Hardened runtime requires entitlements"
-- EM generates `dist/build/entitlements.mac.plist` from defaults + your overrides at build time.
+- EM generates `dist/config/entitlements.mac.plist` from defaults + your overrides at build time.
 - Defaults cover Electron's needs (allow-jit, network client/server, library validation off, etc.).
 - To override or add: set the `entitlements.mac` block in `config/electron-manager.json`. Setting a key to `null` removes a default.
   ```json5
@@ -217,13 +217,13 @@ The workflow base64-decodes secrets into temp files inside `build/certs/` at job
 
 ## What lives in `build/`
 
-`build/` in a consumer project holds **only** code-signing certificate files. Everything else (entitlements, icons, electron-builder config) is generated by EM into `dist/build/` at build time.
+`build/` in a consumer project holds **only** code-signing certificate files. Everything else (entitlements, icons, electron-builder config) is generated by EM into `dist/config/` at build time.
 
-- **`build/certs/`** — `.p12`, `.p8`, `.cer`, `.mobileprovision` files. Per-developer / per-CI-runner. **Never commit** — `.gitignore` blocks them.
+- **`config/certs/`** — `.p12`, `.p8`, `.cer`, `.mobileprovision` files. Per-developer / per-CI-runner. **Never commit** — `.gitignore` blocks them.
 - **Nothing else.** `entitlements.mac.plist` is generated. App icons + DMG background + tray icons resolve from `config/icons/` (consumer override) → EM's bundled defaults. `electron-builder.yml` is generated.
 
-The only file you usually create yourself in `build/` is the cert files in `build/certs/`. See [`build/certs/README.md`](../src/defaults/build/certs/README.md) for the full inventory.
+The only file you usually create yourself in `build/` is the cert files in `config/certs/`. See [`config/certs/README.md`](../src/defaults/config/certs/README.md) for the full inventory.
 
 ## Related docs
 
-- [`build/certs/README.md`](../src/defaults/build/certs/README.md) — cert file inventory
+- [`config/certs/README.md`](../src/defaults/config/certs/README.md) — cert file inventory

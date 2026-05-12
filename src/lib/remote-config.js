@@ -68,7 +68,7 @@ const remoteConfig = {
     // 'online', versionRequired: '0.0.0', etc.) instead of undefined.
     remoteConfig._data = { ...DEFAULTS };
 
-    const cfg = manager?.config?.remoteConfig || {};
+    const cfg = manager.config.remoteConfig || {};
     remoteConfig._enabled = cfg.enabled !== false;       // default on
 
     if (!remoteConfig._enabled) {
@@ -80,7 +80,7 @@ const remoteConfig = {
     // brand.url + the legacy convention path.
     if (cfg.url) {
       remoteConfig._url = cfg.url;
-    } else if (manager?.config?.brand?.url) {
+    } else if (manager.config.brand.url) {
       const base = String(manager.config.brand.url).replace(/\/$/, '');
       remoteConfig._url = `${base}/data/resources/main.json`;
     }
@@ -92,7 +92,7 @@ const remoteConfig = {
 
     // Restore cached data on top of defaults (last-known-good wins over defaults
     // until the next successful fetch lands).
-    const cached = manager?.storage?.get?.(STORAGE_KEY);
+    const cached = manager.storage.get(STORAGE_KEY);
     if (cached && typeof cached === 'object') {
       remoteConfig._data = { ...DEFAULTS, ...cached };
     }
@@ -102,25 +102,25 @@ const remoteConfig = {
     remoteConfig.refreshNow().catch((e) => logger.warn(`initial fetch failed (using defaults/cache): ${e.message}`));
 
     // Cadence: match auto-updater's feed-check (same "occasionally network-hits-the-internet"
-    // job category). Falls back to a sensible default if auto-updater isn't initialized yet.
-    const interval = manager?.autoUpdater?._options?.feedCheckIntervalMs
-      || (manager?.isTesting?.() ? 500 : 60 * 60 * 1000);
+    // job category). Auto-updater is wired BEFORE remote-config in boot sequence
+    // so `_options` is always populated; testing collapses to 500ms via isTesting().
+    const interval = manager.isTesting()
+      ? 500
+      : manager.autoUpdater._options.feedCheckIntervalMs;
     remoteConfig._intervalId = setInterval(() => {
       remoteConfig.refreshNow().catch((e) => logger.warn(`periodic fetch failed: ${e.message}`));
     }, interval);
 
     // IPC: renderer reads via invoke. Subscribe-to-update is an IPC broadcast,
     // wired into the in-process listener below.
-    if (manager?.ipc) {
-      manager.ipc.unhandle?.('em:remote-config:get');
-      manager.ipc.handle('em:remote-config:get',         (path) => remoteConfig.get(path));
-      manager.ipc.unhandle?.('em:remote-config:refresh-now');
-      manager.ipc.handle('em:remote-config:refresh-now', () => remoteConfig.refreshNow());
-      // Broadcast updates to renderers.
-      remoteConfig.on('update', (data) => {
-        try { manager.ipc.broadcast?.('em:remote-config:update', data); } catch (_) { /* ignore */ }
-      });
-    }
+    manager.ipc.unhandle('em:remote-config:get');
+    manager.ipc.handle('em:remote-config:get',         (path) => remoteConfig.get(path));
+    manager.ipc.unhandle('em:remote-config:refresh-now');
+    manager.ipc.handle('em:remote-config:refresh-now', () => remoteConfig.refreshNow());
+    // Broadcast updates to renderers.
+    remoteConfig.on('update', (data) => {
+      manager.ipc.broadcast('em:remote-config:update', data);
+    });
 
     logger.log(`remote-config initialized — url=${remoteConfig._url} interval=${interval}ms (using defaults until first fetch)`);
   },
@@ -178,9 +178,7 @@ const remoteConfig = {
     // Layer fresh fetch on top of defaults so consumers can omit fields from
     // their hosted JSON and EM still has sensible values.
     remoteConfig._data = { ...DEFAULTS, ...data };
-    if (remoteConfig._manager?.storage?.set) {
-      remoteConfig._manager.storage.set(STORAGE_KEY, data);
-    }
+    remoteConfig._manager.storage.set(STORAGE_KEY, data);
     remoteConfig._emit('update', remoteConfig._data);
     logger.log(`remote-config refreshed (${remoteConfig._url})`);
     return remoteConfig._data;

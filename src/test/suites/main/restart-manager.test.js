@@ -104,19 +104,27 @@ module.exports = {
       },
     },
     {
-      name: 'install attempt counter increments + caps at 3',
+      name: 'test mode: _send is a no-op even when _enabled=true (test guard wins)',
       run: async (ctx) => {
+        // The whole point of the test-mode bail: even if someone monkey-patches
+        // _enabled, _send still refuses to do anything. No protocol probe, no
+        // shell.openExternal, no install, no counter bump. Tests must never
+        // touch real OS state.
         ctx.manager.restartManager.shutdown();
         ctx.manager.restartManager.initialize(ctx.manager);
-        // Manually bump to MAX, then trigger a send. Since enabled is false in the
-        // initialize() path above (dev mode bail), _send returns early. So we
-        // override _enabled for this test.
         ctx.manager.restartManager._enabled = true;
-        ctx.manager.restartManager._installAttempts = 3;
-        // _send should short-circuit on the attempt cap (handler is empty in test
-        // harness because there's no installed RM). No throw, no install.
+        ctx.manager.restartManager._installAttempts = 0;
         await ctx.manager.restartManager._send('register');
-        ctx.expect(ctx.manager.restartManager._installAttempts).toBe(3);
+        ctx.expect(ctx.manager.restartManager._installAttempts).toBe(0);   // never bumped
+      },
+    },
+    {
+      name: 'test mode: ensureInstalled is a no-op',
+      run: async (ctx) => {
+        // ensureInstalled() is the public force-install hook. In test mode it
+        // must short-circuit before touching the network or filesystem.
+        const result = await ctx.manager.restartManager.ensureInstalled();
+        ctx.expect(result).toBe(undefined);
       },
     },
   ],

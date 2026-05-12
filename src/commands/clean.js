@@ -7,7 +7,7 @@ const jetpack = require('fs-jetpack');
 // Dirs to clean
 const dirs = [
   '.temp',
-  '.em-cache',
+  '.cache',
   'dist',
   'release',
 ];
@@ -23,7 +23,7 @@ module.exports = async function (options) {
     logger.log('Quick mode: No existing build, running full clean');
   }
 
-  logger.log('Cleaning .temp, .em-cache, dist, release...');
+  logger.log('Cleaning .temp, .cache, dist, release...');
 
   try {
     dirs.forEach((dir) => {

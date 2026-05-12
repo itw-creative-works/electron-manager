@@ -1,6 +1,6 @@
-# `build/certs/` — Code-signing certificates and provisioning profiles
+# `config/certs/` — Code-signing certificates and provisioning profiles
 
-**Never commit anything in this directory.** The parent `.gitignore` excludes `*.p12`, `*.cer`, `*.mobileprovision`, `*.p8`, `*.pem` — and the entire `build/certs/` subdirectory is also ignored as a defense-in-depth measure.
+**Never commit anything in this directory.** The parent `.gitignore` excludes `*.p12`, `*.cer`, `*.mobileprovision`, `*.p8`, `*.pem` — and the entire `config/certs/` subdirectory is also ignored as a defense-in-depth measure.
 
 ## File inventory
 
@@ -31,7 +31,7 @@ For cloud signing (future):
 - SSL.com eSigner — username + password + credential ID in `.env`
 - DigiCert KeyLocker — API token + endpoint in `.env`
 
-No file lives in `build/certs/` for Windows — credentials are env-vars-only.
+No file lives in `config/certs/` for Windows — credentials are env-vars-only.
 
 ## Are these per-brand or universal?
 
@@ -44,12 +44,12 @@ No file lives in `build/certs/` for Windows — credentials are env-vars-only.
 
 **Per-brand / per-app:**
 - Provisioning profile (`*.provisionprofile`) — only required if entitlements demand it; tied to a specific bundle ID (`com.itwcw.<app>`)
-- Icons (separate concern, live in `build/`, not `build/certs/`)
+- Icons (separate concern, live in `build/`, not `config/certs/`)
 
 ## Setup walkthrough
 
 1. Drop the relevant cert files into this directory.
-2. Edit `.env` at the repo root and point env vars at them (typically just `CSC_LINK=build/certs/developer-id-application.p12`).
+2. Edit `.env` at the repo root and point env vars at them (typically just `CSC_LINK=config/certs/developer-id-application.p12`).
 3. Run `npx mgr validate-certs` to check the OS sees them and notarization creds are wired.
 4. `npm run release` to do a signed + notarized build.
 

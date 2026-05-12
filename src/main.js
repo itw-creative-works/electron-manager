@@ -93,12 +93,10 @@ Manager.prototype.relaunch = function (options) {
   // If updater downloaded a fresh build, install + relaunch via electron-updater
   // (which calls `app.quit()` internally with the right post-quit script). Falls
   // back to plain relaunch if updater hasn't downloaded anything.
-  try {
-    const updaterStatus = self.autoUpdater?.getStatus?.();
-    if (updaterStatus?.code === 'downloaded' && self.autoUpdater?.installNow) {
-      return self.autoUpdater.installNow();
-    }
-  } catch (_) { /* fall through */ }
+  const updaterStatus = self.autoUpdater.getStatus();
+  if (updaterStatus.code === 'downloaded') {
+    return self.autoUpdater.installNow();
+  }
 
   electron.app.relaunch();
   electron.app.quit();
@@ -131,30 +129,40 @@ Manager.prototype.initialize = async function (consumerConfig, options) {
   self.config = consumerConfig || {};
   self._options = options || {};
 
-  self.logger.log(`Initializing electron-manager (main)... pid=${process.pid} platform=${process.platform} arch=${process.arch} packaged=${!!require('electron')?.app?.isPackaged} argv=${JSON.stringify(process.argv.slice(1))}`);
+  self.logger.log(`Initializing electron-manager (main)... pid=${process.pid} platform=${process.platform} arch=${process.arch} packaged=${require('electron').app.isPackaged} argv=${JSON.stringify(process.argv.slice(1))}`);
 
-  // electron is a peer dep — always installed but the surface differs by context.
-  // In main `electron.app` is defined; in renderer/preload/plain-Node it's not.
+  // Schema validation. Hard-fail boot if required fields are missing — same rules as
+  // gulp/audit (single source of truth in src/config/schema.js). We do this before any
+  // lib initializes so a misconfigured app fails loud + early instead of partway through
+  // boot with a confusing stack trace.
+  {
+    const { validateConfig, formatErrors } = require('./utils/validate-config.js');
+    const schema = require('./config/schema.js');
+    const { errors } = validateConfig(self.config, schema);
+    if (errors.length > 0) {
+      throw new Error(`electron-manager: config validation failed — fix the following in config/electron-manager.json:\n${formatErrors(errors)}`);
+    }
+  }
+
+  // electron is a peer dep — main process only (we're in main.js, always defined).
   const electron = require('electron');
+  const app = electron.app;
 
   // Lifecycle event logging. These are the high-signal app-level events worth tracing
   // when something goes wrong — quit reasons, window-all-closed, will-finish-launching,
   // ready, render-process-gone, child-process-gone. All cheap to log; one line each.
-  if (electron?.app?.on) {
-    const app = electron.app;
-    app.on('before-quit', () => {
-      self._isQuitting = true;
-      self.logger.log('app event: before-quit (entering quit sequence — close events bypass hide-on-close)');
-    });
-    app.on('will-quit', () => self.logger.log('app event: will-quit'));
-    app.on('quit', (_e, exitCode) => self.logger.log(`app event: quit code=${exitCode}`));
-    app.on('window-all-closed', () => self.logger.log('app event: window-all-closed'));
-    app.on('render-process-gone', (_e, webContents, details) => self.logger.warn(`app event: render-process-gone reason=${details?.reason} exitCode=${details?.exitCode}`));
-    app.on('child-process-gone', (_e, details) => self.logger.warn(`app event: child-process-gone type=${details?.type} reason=${details?.reason} exitCode=${details?.exitCode}`));
-    app.on('activate', () => self.logger.log('app event: activate (macOS — dock click or app re-launch)'));
-    app.on('open-url', (_e, url) => self.logger.log(`app event: open-url url=${url}`));
-    app.on('open-file', (_e, p) => self.logger.log(`app event: open-file path=${p}`));
-  }
+  app.on('before-quit', () => {
+    self._isQuitting = true;
+    self.logger.log('app event: before-quit (entering quit sequence — close events bypass hide-on-close)');
+  });
+  app.on('will-quit', () => self.logger.log('app event: will-quit'));
+  app.on('quit', (_e, exitCode) => self.logger.log(`app event: quit code=${exitCode}`));
+  app.on('window-all-closed', () => self.logger.log('app event: window-all-closed'));
+  app.on('render-process-gone', (_e, webContents, details) => self.logger.warn(`app event: render-process-gone reason=${details.reason} exitCode=${details.exitCode}`));
+  app.on('child-process-gone', (_e, details) => self.logger.warn(`app event: child-process-gone type=${details.type} reason=${details.reason} exitCode=${details.exitCode}`));
+  app.on('activate', () => self.logger.log('app event: activate (macOS — dock click or app re-launch)'));
+  app.on('open-url', (_e, url) => self.logger.log(`app event: open-url url=${url}`));
+  app.on('open-file', (_e, p) => self.logger.log(`app event: open-file path=${p}`));
 
   // Process-level signals that bypass Electron's app events. Catches uncaught exceptions
   // so we never crash silently — combined with electron-log file transport, this means
@@ -182,13 +190,13 @@ Manager.prototype.initialize = async function (consumerConfig, options) {
   //     because electron-store reads `app.getPath('userData')` at construction time. Mirrors
   //     legacy electron-manager's behavior — keeps dev session data, app state, etc. isolated
   //     from production-installed copies of the same app on the same machine.
-  if (electron?.app && self.isDevelopment()) {
-    const before = electron.app.getPath('userData');
+  if (self.isDevelopment()) {
+    const before = app.getPath('userData');
     const after  = `${before} (Development)`;
-    electron.app.setPath('userData', after);
+    app.setPath('userData', after);
     self.logger.log(`userData path: ${before} -> ${after} (dev mode)`);
-  } else if (electron?.app) {
-    self.logger.log(`userData path: ${electron.app.getPath('userData')} (production)`);
+  } else {
+    self.logger.log(`userData path: ${app.getPath('userData')} (production)`);
   }
 
   // 1c. Set the global user agent fallback. Default template applied to every EM app so
@@ -196,19 +204,19 @@ Manager.prototype.initialize = async function (consumerConfig, options) {
   //     branded UA — Mozilla parsers see a normal Chrome UA + we tag with the app's
   //     name/version for our own server-side telemetry. Legacy electron-manager did the
   //     same; merge tags now use node-powertools.template (single-curly syntax).
-  if (electron?.app) {
+  {
     const { template } = require('node-powertools');
     const ctx = {
       brand: {
-        name: self.config?.brand?.name || self.config?.app?.productName || 'App',
-        id:   self.config?.brand?.id   || '',
+        name: self.config.brand.name,
+        id:   self.config.brand.id,
       },
       app: {
-        version: self.getVersion?.() || '0.0.0',
+        version: self.getVersion(),
       },
-      chrome:   process.versions.chrome   || '0',
-      electron: process.versions.electron || '0',
-      node:     process.versions.node     || '0',
+      chrome:   process.versions.chrome,
+      electron: process.versions.electron,
+      node:     process.versions.node,
       platform: process.platform,
       arch:     process.arch,
     };
@@ -219,7 +227,7 @@ Manager.prototype.initialize = async function (consumerConfig, options) {
     };
     const tmpl = templates[process.platform] || templates.linux;
     const ua = template(tmpl, ctx);
-    electron.app.userAgentFallback = ua;
+    app.userAgentFallback = ua;
     self.logger.log(`userAgent: ${ua}`);
   }
 
@@ -237,7 +245,7 @@ Manager.prototype.initialize = async function (consumerConfig, options) {
 
   if (!self.protocol.hasSingleInstanceLock()) {
     self.logger.warn('Single-instance lock lost. Quitting.');
-    electron?.app?.quit?.();
+    app.quit();
     return self;
   }
 
@@ -258,9 +266,7 @@ Manager.prototype.initialize = async function (consumerConfig, options) {
   self.usage.initialize(self);
 
   // 8. Wait for app readiness before any UI
-  if (electron?.app?.whenReady) {
-    await electron.app.whenReady();
-  }
+  await app.whenReady();
 
   // 9. Auto-updater (queues check, never blocks UI)
   self.autoUpdater.initialize(self);

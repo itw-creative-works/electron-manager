@@ -1,10 +1,10 @@
-// Resolve icon paths from a 3-tier waterfall, copy resolved files into dist/build/icons/,
+// Resolve icon paths from a 3-tier waterfall, copy resolved files into dist/config/icons/,
 // and return the paths electron-builder.yml needs.
 //
 // Resolution order per slot, per platform:
 //   1. Consumer config (e.g. config.app.icons.appMac is an absolute or project-relative path)
 //   2. Consumer file convention (e.g. <projectRoot>/config/icons/macos/icon.png)
-//   3. EM bundled default (<EM>/dist/build/icons/macos/icon.png)
+//   3. EM bundled default (<EM>/dist/config/icons/macos/icon.png)
 //
 // @2x retina variants are derived automatically — for any slot whose `retina` flag is true,
 // after resolving the @1x source we look for `<basename>@2x.png` in the same directory.
@@ -58,7 +58,7 @@ function findSource({ slot, file }, platform, opts) {
   const { config, projectRoot, emDefaultsRoot } = opts;
 
   // 1. Explicit config path.
-  const cfgVal = config?.app?.icons?.[configKey(slot, platform)];
+  const cfgVal = config.app?.icons?.[configKey(slot, platform)];
   if (cfgVal && typeof cfgVal === 'string') {
     const abs = path.isAbsolute(cfgVal) ? cfgVal : path.join(projectRoot, cfgVal);
     if (jetpack.exists(abs)) return abs;
@@ -75,10 +75,10 @@ function findSource({ slot, file }, platform, opts) {
   return null;
 }
 
-// Resolve all icons, copy into dist/build/icons/, return the wiring object that
+// Resolve all icons, copy into dist/config/icons/, return the wiring object that
 // build-config consumes.
 function resolveAndCopy({ config, projectRoot, distRoot, emDefaultsRoot }) {
-  const distIconsRoot = path.join(distRoot, 'build', 'icons');
+  const distIconsRoot = path.join(distRoot, 'config', 'icons');
   jetpack.dir(distIconsRoot);
 
   const resolved = { macos: {}, windows: {}, linux: {} };

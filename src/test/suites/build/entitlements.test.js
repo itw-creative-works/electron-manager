@@ -87,13 +87,13 @@ module.exports = {
       },
     },
     {
-      name: 'writeMacEntitlements: writes to dist/build/entitlements.mac.plist',
+      name: 'writeMacEntitlements: writes to dist/config/entitlements.mac.plist',
       run: (ctx) => {
         const { writeMacEntitlements } = require(path.join(__dirname, '..', '..', '..', 'lib', 'sign-helpers', 'entitlements.js'));
         const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'em-entitlements-'));
         try {
           const written = writeMacEntitlements(tmp, { 'com.apple.security.cs.allow-jit': false });
-          ctx.expect(written).toBe(path.join(tmp, 'build', 'entitlements.mac.plist'));
+          ctx.expect(written).toBe(path.join(tmp, 'config', 'entitlements.mac.plist'));
           const xml = fs.readFileSync(written, 'utf8');
           ctx.expect(xml).toContain('<key>com.apple.security.cs.allow-jit</key>');
           ctx.expect(xml).toContain('<false/>');

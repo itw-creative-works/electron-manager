@@ -17,7 +17,7 @@ const logger = Manager.logger('validate-certs');
 
 module.exports = async function (options) {
   options = options || {};
-  const strict = options.strict === true || options._?.includes?.('--strict');
+  const strict = options.strict === true || (options._ && options._.includes('--strict'));
 
   logger.log('Validating signing prerequisites...');
 
@@ -27,7 +27,7 @@ module.exports = async function (options) {
 
   const issues = [];
 
-  // macOS checks (run on any platform if cert files are present in build/certs/, since
+  // macOS checks (run on any platform if cert files are present in config/certs/, since
   // CI builds happen cross-platform — useful to flag bad files even when running on win/linux).
   await checkMac(issues, config);
 
@@ -58,10 +58,9 @@ module.exports = async function (options) {
 
 async function checkMac(issues, config) {
   const projectRoot = process.cwd();
-  const certsDir = path.join(projectRoot, 'build', 'certs');
-  const buildDir = path.join(projectRoot, 'build');
-  const expectedAppId = config?.app?.appId
-                     || `com.itwcw.${config?.brand?.id || 'app'}`;
+  const certsDir = path.join(projectRoot, 'config', 'certs');
+  const expectedAppId = config.app?.appId
+                     || `com.itwcw.${config.brand?.id || 'app'}`;
 
   // 1. Developer ID Application .p12
   const cscLink = process.env.CSC_LINK;
@@ -78,17 +77,17 @@ async function checkMac(issues, config) {
     // Look for the file even if env not pointed
     const p12Files = jetpack.find(certsDir, { matching: '*.p12', recursive: false }) || [];
     if (p12Files.length === 0) {
-      issues.push({ severity: 'warn', message: `No .p12 found in build/certs/ and CSC_LINK not set. (Required for macOS signing.)` });
+      issues.push({ severity: 'warn', message: `No .p12 found in config/certs/ and CSC_LINK not set. (Required for macOS signing.)` });
     } else {
-      issues.push({ severity: 'warn', message: `Found .p12 in build/certs/ but CSC_LINK env var is not set. Set CSC_LINK=${path.relative(projectRoot, p12Files[0])}` });
+      issues.push({ severity: 'warn', message: `Found .p12 in config/certs/ but CSC_LINK env var is not set. Set CSC_LINK=${path.relative(projectRoot, p12Files[0])}` });
     }
   } else {
-    issues.push({ severity: 'warn', message: 'No build/certs/ directory and no CSC_LINK env var. Skipping mac cert check.' });
+    issues.push({ severity: 'warn', message: 'No config/certs/ directory and no CSC_LINK env var. Skipping mac cert check.' });
   }
 
   // 2. Provisioning profile (optional — only some apps need one)
-  const provisionFiles = jetpack.exists(buildDir)
-    ? (jetpack.find(buildDir, { matching: '*.provisionprofile', recursive: false }) || [])
+  const provisionFiles = jetpack.exists(certsDir)
+    ? (jetpack.find(certsDir, { matching: '*.provisionprofile', recursive: false }) || [])
     : [];
   for (const profPath of provisionFiles) {
     try {
@@ -194,7 +193,7 @@ function checkWindows(issues, strategy, config) {
   }
 
   if (strategy === 'cloud') {
-    const provider = config?.targets?.win?.signing?.cloud?.provider;
+    const provider = config.targets?.win?.signing?.cloud?.provider;
     if (!provider) {
       issues.push({ severity: 'error', message: 'Cloud signing strategy selected but no provider set (config.targets.win.signing.cloud.provider).' });
       return;

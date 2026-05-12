@@ -45,10 +45,6 @@ const startup = {
 
     startup._manager = manager;
     startup._electron = require('electron');
-    if (!startup._electron?.app) {
-      startup._initialized = true;
-      return;     // renderer/preload — no app.setLoginItemSettings to wire
-    }
 
     const mode         = startup.getMode();
     const loginEnabled = startup._loginEnabled();
@@ -61,33 +57,25 @@ const startup = {
     // Otherwise: sync the OS open-at-login flag with config. Pass --em-launched-at-login
     // in args so we can detect login launches reliably on Windows/Linux (macOS exposes
     // wasOpenedAtLogin natively).
-    if (startup._electron.app?.setLoginItemSettings) {
-      try {
-        if (isDev) {
-          startup._electron.app.setLoginItemSettings({
-            openAtLogin:  false,
-            openAsHidden: false,
-            args:         [],
-          });
-        } else {
-          startup._electron.app.setLoginItemSettings({
-            openAtLogin:  loginEnabled,
-            openAsHidden: loginMode === 'hidden',
-            args:         loginEnabled ? [LOGIN_ARG] : [],
-          });
-        }
-      } catch (e) {
-        logger.error('setLoginItemSettings threw:', e);
-      }
+    if (isDev) {
+      startup._electron.app.setLoginItemSettings({
+        openAtLogin:  false,
+        openAsHidden: false,
+        args:         [],
+      });
+    } else {
+      startup._electron.app.setLoginItemSettings({
+        openAtLogin:  loginEnabled,
+        openAsHidden: loginMode === 'hidden',
+        args:         loginEnabled ? [LOGIN_ARG] : [],
+      });
     }
 
     // Boot summary — RAW inputs (what the OS/shell gave us) + RESOLVED values (what EM
     // decided to act on). Two parallel blocks so you can debug in either direction:
     //   "Why is EM behaving like X?" → check resolved values
     //   "Why did EM decide X?" → check raw inputs
-    const macLogin = (process.platform === 'darwin' && startup._electron?.app?.getLoginItemSettings)
-      ? (() => { try { return startup._electron.app.getLoginItemSettings(); } catch (_) { return null; } })()
-      : null;
+    const macLogin = process.platform === 'darwin' ? startup._electron.app.getLoginItemSettings() : null;
     const emEnv = Object.fromEntries(
       Object.entries(process.env).filter(([k]) => k.startsWith('EM_') || k === 'ELECTRON_RUN_AS_NODE' || k === 'NODE_ENV')
     );
@@ -99,8 +87,8 @@ const startup = {
     logger.log(`  process.argv:            ${JSON.stringify(process.argv.slice(1))}`);
     logger.log(`  process.platform:        ${process.platform}`);
     logger.log(`  process.arch:            ${process.arch}`);
-    logger.log(`  app.isPackaged:          ${!!startup._electron?.app?.isPackaged}`);
-    logger.log(`  app.getLoginItemSettings(): ${macLogin ? JSON.stringify(macLogin) : '(not macOS or unavailable)'}`);
+    logger.log(`  app.isPackaged:          ${startup._electron.app.isPackaged}`);
+    logger.log(`  app.getLoginItemSettings(): ${macLogin ? JSON.stringify(macLogin) : '(not macOS)'}`);
     logger.log(`  EM_/electron/node env:   ${JSON.stringify(emEnv)}`);
 
     logger.log('startup boot summary — RESOLVED values:');
@@ -117,10 +105,8 @@ const startup = {
   // to distinguish "fake login via --em-launched-at-login flag" from "real macOS at-login".
   _launchedAtLoginVia() {
     if (process.argv.includes(LOGIN_ARG)) return 'argv-flag';
-    if (process.platform === 'darwin' && startup._electron?.app?.getLoginItemSettings) {
-      try {
-        if (startup._electron.app.getLoginItemSettings().wasOpenedAtLogin) return 'macos-wasOpenedAtLogin';
-      } catch (_) { /* ignore */ }
+    if (process.platform === 'darwin' && startup._electron.app.getLoginItemSettings().wasOpenedAtLogin) {
+      return 'macos-wasOpenedAtLogin';
     }
     return 'none';
   },
@@ -130,25 +116,25 @@ const startup = {
   // the dev guard so you can intentionally test the login-item flow in dev.
   _isDev() {
     if (process.env.EM_FORCE_LOGIN_ITEM === '1') return false;
-    return !!startup._manager?.isDevelopment?.();
+    return startup._manager.isDevelopment();
   },
 
   // Returns the resolved user-launch mode, defaulting to 'normal' for unknown values.
   getMode() {
-    const raw = startup._manager?.config?.startup?.mode || 'normal';
+    const raw = startup._manager.config.startup?.mode || 'normal';
     return VALID_MODES.includes(raw) ? raw : 'normal';
   },
 
   // openAtLogin block reads. `_loginEnabled` defaults to true; `_loginMode` defaults to 'hidden'.
   _loginEnabled() {
-    const v = startup._manager?.config?.startup?.openAtLogin;
+    const v = startup._manager.config.startup?.openAtLogin;
     if (typeof v === 'boolean') return v;                          // back-compat for boolean form
     if (v && typeof v === 'object') return v.enabled !== false;    // object form: default true
     return true;                                                   // unset → true (apps open at login by default)
   },
 
   _loginMode() {
-    const v = startup._manager?.config?.startup?.openAtLogin;
+    const v = startup._manager.config.startup?.openAtLogin;
     if (v && typeof v === 'object' && VALID_MODES.includes(v.mode)) return v.mode;
     return 'hidden';                                               // default: launch hidden at login
   },
@@ -167,10 +153,8 @@ const startup = {
   // Windows/Linux: we registered with LOGIN_ARG, look for it in argv.
   wasLaunchedAtLogin() {
     if (process.argv.includes(LOGIN_ARG)) return true;
-    if (process.platform === 'darwin' && startup._electron?.app?.getLoginItemSettings) {
-      try {
-        return Boolean(startup._electron.app.getLoginItemSettings().wasOpenedAtLogin);
-      } catch (e) { /* ignore */ }
+    if (process.platform === 'darwin') {
+      return Boolean(startup._electron.app.getLoginItemSettings().wasOpenedAtLogin);
     }
     return false;
   },
@@ -184,8 +168,7 @@ const startup = {
     if (process.platform !== 'darwin') return;
     if (!startup.isLaunchHidden()) return;
 
-    try { startup._electron.app?.dock?.hide?.(); }
-    catch (e) { /* ignore */ }
+    startup._electron.app.dock.hide();
   },
 
   // Public mutators
@@ -194,7 +177,6 @@ const startup = {
   // { enabled, mode } to control both. Persists via setLoginItemSettings; does not mutate config.
   // No-op in dev (no packaged build = no point registering electron.app for login-launch).
   setOpenAtLogin(input) {
-    if (!startup._electron?.app?.setLoginItemSettings) return;
     if (startup._isDev()) {
       logger.log('setOpenAtLogin ignored — running in dev mode (set EM_FORCE_LOGIN_ITEM=1 to override)');
       return;
@@ -214,27 +196,18 @@ const startup = {
       openAsHidden = startup._loginMode() !== 'normal';
     }
 
-    try {
-      startup._electron.app.setLoginItemSettings({
-        openAtLogin:  enabled,
-        openAsHidden,
-        args:         enabled ? [LOGIN_ARG] : [],
-      });
-      logger.log(`setOpenAtLogin → enabled=${enabled} openAsHidden=${openAsHidden}`);
-    } catch (e) {
-      logger.error('setOpenAtLogin threw:', e);
-    }
+    startup._electron.app.setLoginItemSettings({
+      openAtLogin:  enabled,
+      openAsHidden,
+      args:         enabled ? [LOGIN_ARG] : [],
+    });
+    logger.log(`setOpenAtLogin → enabled=${enabled} openAsHidden=${openAsHidden}`);
   },
 
   // Read the current OS open-at-login state (may differ from config if user changed it
   // via System Settings; useful for keeping a settings UI in sync).
   isOpenAtLogin() {
-    if (!startup._electron?.app?.getLoginItemSettings) return null;
-    try {
-      return Boolean(startup._electron.app.getLoginItemSettings().openAtLogin);
-    } catch (e) {
-      return null;
-    }
+    return Boolean(startup._electron.app.getLoginItemSettings().openAtLogin);
   },
 };
 

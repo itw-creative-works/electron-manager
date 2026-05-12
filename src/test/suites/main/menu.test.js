@@ -44,10 +44,8 @@ module.exports = {
         if (process.platform !== 'darwin') {
           ctx.skip('macOS-only behavior');
         }
-        // Menu falls back to 'App' when no productName is configured (lib/menu.js).
-        // Match that fallback here so the test works regardless of which fixture
-        // config the test harness ends up loading.
-        const productName = ctx.manager.config?.app?.productName || 'App';
+        // Menu falls back to brand.name when no productName is configured (lib/menu.js).
+        const productName = ctx.manager.config.app?.productName || ctx.manager.config.brand.name;
         const items = ctx.manager.menu.getItems();
         ctx.expect(items[0].label).toBe(productName);
       },

@@ -47,10 +47,6 @@ const windowManager = {
     windowManager._initialized = true;
 
     windowManager._electron = require('electron');
-    if (!windowManager._electron?.app) {
-      // renderer/preload — no BrowserWindow / app APIs to manage
-      return;
-    }
 
     // Quit when all windows close on win/linux. macOS is sticky (apps stay running).
     if (process.platform !== 'darwin') {
@@ -121,7 +117,7 @@ const windowManager = {
     const defaults = isMain
       ? { width: 1024, height: 720, view: 'main', hideOnClose: true }
       : { width: 800,  height: 600, view: name,   hideOnClose: false };
-    const jsonConfig = manager?.config?.windows?.[name] || {};
+    const jsonConfig = manager.config.windows?.[name] || {};
     const config = { ...defaults, ...jsonConfig, ...overrides };
 
     logger.log(`createNamed: building "${name}" (show=${config.show !== false}, hideOnClose=${config.hideOnClose})`);
@@ -187,7 +183,7 @@ const windowManager = {
       show: false, // flicker prevention — show on ready-to-show
       // Tray-only apps suppress all taskbar/dock representation for their windows.
       skipTaskbar,
-      title: config.title || manager?.config?.app?.productName || name,
+      title: config.title || manager.config.app?.productName || name,
       backgroundColor: config.backgroundColor || '#ffffff',
       ...titleBarOpts,
       webPreferences: {
@@ -215,9 +211,7 @@ const windowManager = {
     }
 
     // Attach the context-menu listener so right-click works in this window.
-    if (manager?.contextMenu?.attach) {
-      manager.contextMenu.attach(win.webContents);
-    }
+    manager.contextMenu.attach(win.webContents);
 
     // ALL event listeners must attach BEFORE `await loadFile()` below — otherwise the
     // window can be in the registry but missing close/resize/etc. listeners during the
@@ -275,8 +269,8 @@ const windowManager = {
     const hideOnClose = config.hideOnClose === true;
 
     win.on('close', (event) => {
-      const allowQuit  = manager?._allowQuit  === true;
-      const isQuitting = manager?._isQuitting === true;
+      const allowQuit  = manager._allowQuit  === true;
+      const isQuitting = manager._isQuitting === true;
       const force      = win._emForceClose === true;
 
       if (hideOnClose && !allowQuit && !isQuitting && !force) {
@@ -326,13 +320,12 @@ const windowManager = {
     const win = windowManager._windows[name];
     if (!win || win.isDestroyed()) return;
 
-    const storage = windowManager._manager?.storage;
-    if (!storage?.set) return;
+    const storage = windowManager._manager.storage;
 
     // Use getNormalBounds when maximized/fullscreen so we restore to the underlying size on next launch.
-    const isMaximized  = win.isMaximized?.()  || false;
-    const isFullScreen = win.isFullScreen?.() || false;
-    const rawBounds = (isMaximized || isFullScreen) && win.getNormalBounds
+    const isMaximized  = win.isMaximized();
+    const isFullScreen = win.isFullScreen();
+    const rawBounds = (isMaximized || isFullScreen)
       ? win.getNormalBounds()
       : win.getBounds();
 
@@ -349,8 +342,7 @@ const windowManager = {
   },
 
   _loadBounds(name, manager) {
-    const storage = manager?.storage || windowManager._manager?.storage;
-    if (!storage?.get) return null;
+    const storage = (manager || windowManager._manager).storage;
 
     const saved = storage.get(`windows.${name}.bounds`);
     if (!saved || typeof saved !== 'object') return null;
@@ -363,10 +355,6 @@ const windowManager = {
   // Keep the window on a real display. If saved bounds put the top-left off-screen
   // (monitor unplugged, resolution changed), discard the position and just keep the size.
   _clampToDisplays(bounds) {
-    if (!windowManager._electron?.screen) {
-      return bounds;
-    }
-
     const out = { ...bounds };
 
     if (typeof out.x !== 'number' || typeof out.y !== 'number') {
@@ -418,19 +406,13 @@ const windowManager = {
   // are completely invisible until UI is requested, then dock + window appear together.
   _ensureDockVisible() {
     if (process.platform !== 'darwin') return;
-    const dock = windowManager._electron?.app?.dock;
-    if (!dock || typeof dock.show !== 'function') return;
-    try {
-      // dock.isVisible() exists from Electron 13+; fall back to always-call for older.
-      if (typeof dock.isVisible === 'function' && dock.isVisible()) {
-        logger.log('_ensureDockVisible — dock already visible');
-        return;
-      }
-      logger.log('_ensureDockVisible — calling dock.show()');
-      dock.show();
-    } catch (e) {
-      logger.warn(`_ensureDockVisible — failed: ${e.message}`);
+    const { dock } = windowManager._electron.app;
+    if (dock.isVisible()) {
+      logger.log('_ensureDockVisible — dock already visible');
+      return;
     }
+    logger.log('_ensureDockVisible — calling dock.show()');
+    dock.show();
   },
 
   hide(name) {

@@ -82,7 +82,7 @@ const bridge = {
   _getFirebaseAuth() {
     if (bridge._firebaseAuth) return bridge._firebaseAuth;
 
-    const firebaseConfig = bridge._manager?.config?.firebaseConfig;
+    const firebaseConfig = bridge._manager.config.firebaseConfig;
     if (!firebaseConfig || !Object.keys(firebaseConfig).length) {
       throw new Error('firebaseConfig is empty — cannot initialize auth.');
     }
@@ -100,8 +100,7 @@ const bridge = {
 
   _registerIpc() {
     if (bridge._ipcRegistered) return;
-    const ipc = bridge._manager?.ipc;
-    if (!ipc?.handle) return;
+    const ipc = bridge._manager.ipc;
 
     // Renderer asks main: "I'm at UID X (or null). Are we in sync?"
     ipc.handle('em:auth:sync-request', async ({ contextUid }) => {
@@ -132,10 +131,11 @@ const bridge = {
     });
 
     // Tell renderers about the change so they can update UI / refresh menu items.
-    bridge._manager?.ipc?.broadcast?.('em:auth:state-changed', snap);
+    bridge._manager.ipc.broadcast('em:auth:state-changed', snap);
 
-    // Attribute Sentry events to the signed-in user (or clear on sign-out).
-    try { bridge._manager?.sentry?.setUser?.(snap); } catch (e) { /* sentry off */ }
+    // Attribute Sentry events to the signed-in user (or clear on sign-out). When
+    // sentry is disabled (no DSN, dev mode, etc.) setUser is a documented no-op.
+    bridge._manager.sentry.setUser(snap);
   },
 
   // BXM's syncAuth pattern, ported to Electron.
@@ -176,7 +176,7 @@ const bridge = {
       if (bridge._firebaseAuth?.currentUser) {
         await bridge._firebaseModule.signOut(bridge._firebaseAuth);
       }
-      bridge._manager?.ipc?.broadcast?.('em:auth:sign-out', {});
+      bridge._manager.ipc.broadcast('em:auth:sign-out', {});
       return { success: true };
     } catch (e) {
       logger.error('sign-out failed:', e.message);
@@ -203,7 +203,7 @@ const bridge = {
 
       // Broadcast the token to renderers so they can sign in with the SAME token.
       // Tokens expire in 1 hour and aren't stored.
-      bridge._manager?.ipc?.broadcast?.('em:auth:sign-in-with-token', { token });
+      bridge._manager.ipc.broadcast('em:auth:sign-in-with-token', { token });
 
       return { success: true, user: bridge._snapshotUser(cred.user) };
     } catch (e) {
@@ -244,10 +244,7 @@ const bridge = {
   // Fetch a fresh custom token for the currently-signed-in user.
   // Mirrors BXM: POST <apiUrl>/backend-manager with command 'user:create-custom-token'.
   async _fetchCustomToken(user) {
-    const apiUrl = bridge._manager?.getApiUrl?.();
-    if (!apiUrl) {
-      throw new Error('manager.getApiUrl() not available — cannot fetch custom token.');
-    }
+    const apiUrl = bridge._manager.getApiUrl();
 
     const idToken = await user.getIdToken(true);
 

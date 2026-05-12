@@ -145,7 +145,7 @@ function removeItem(items, idPath) {
 // Returns an object with find/has/update/remove/enable/show/hide/insertBefore/insertAfter/appendTo.
 function buildIdApi({ getItems, render, logger }) {
   const warnMissing = (op, idPath) => {
-    if (logger?.warn) logger.warn(`${op}: no item at id path "${idPath}"`);
+    logger.warn(`${op}: no item at id path "${idPath}"`);
   };
 
   return {

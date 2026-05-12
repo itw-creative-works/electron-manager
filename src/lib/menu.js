@@ -90,11 +90,6 @@ const menu = {
     }
 
     menu._electron = require('electron');
-    if (!menu._electron?.Menu) {
-      // renderer/preload — no Menu API
-      menu._initialized = true;
-      return;
-    }
 
     // Conventional path. No config knob — disable() at runtime if you don't want a menu.
     // appRoot resolves to project dir in dev and asar mount in packaged apps — both contain
@@ -133,8 +128,8 @@ const menu = {
     // Reflect current auto-updater state into the menu item now that the menu exists.
     // (The auto-updater initializes before menu in the boot sequence, so its initial state
     // wasn't reflected in the menu yet.)
-    if (manager?.autoUpdater?._updateMenuItem) {
-      try { manager.autoUpdater._updateMenuItem(); } catch (e) { /* ignore */ }
+    if (manager.autoUpdater._updateMenuItem) {
+      manager.autoUpdater._updateMenuItem();
     }
 
     logger.log(`initialize — top-level menus=${menu._items.length}`);
@@ -172,10 +167,10 @@ const menu = {
   _defaultTemplate() {
     const m = menu._manager;
     const isMac        = process.platform === 'darwin';
-    const productName  = m?.config?.app?.productName || 'App';
-    const brandUrl     = m?.config?.brand?.url || null;
-    const brandName    = m?.config?.brand?.name || productName;
-    const isDev        = !!(m?.isDevelopment?.());
+    const productName  = m.config.app?.productName || m.config.brand.name;
+    const brandUrl     = m.config.brand.url || null;
+    const brandName    = m.config.brand.name;
+    const isDev        = m.isDevelopment();
 
     // EM's built-in "Check for Updates..." item. Click defaults to invoking auto-updater
     // check; auto-updater hook updates label/enabled dynamically based on status.
@@ -185,7 +180,6 @@ const menu = {
       id: idPath,
       label: 'Check for Updates...',
       click: () => {
-        if (!m || !m.autoUpdater) return;
         const status = m.autoUpdater.getStatus();
         if (status.code === 'downloaded') m.autoUpdater.installNow();
         else m.autoUpdater.checkNow({ userInitiated: true });
@@ -200,7 +194,7 @@ const menu = {
       accelerator: 'CommandOrControl+,',
       visible: false,
       click: () => {
-        if (m?.windows?.show) m.windows.show('settings');
+        m.windows.show('settings');
       },
     };
 
@@ -330,8 +324,7 @@ const menu = {
           const { shell } = require('electron');
           // Route through getWebsiteUrl() so dev runs open localhost:4000 instead
           // of punching out to the live brand site.
-          const url = (typeof m?.getWebsiteUrl === 'function') ? m.getWebsiteUrl() : brandUrl;
-          shell.openExternal(url);
+          shell.openExternal(m.getWebsiteUrl());
         },
       });
     }
@@ -469,8 +462,8 @@ const menu = {
   destroy() {
     menu._items = [];
     menu._menu = null;
-    if (menu._electron?.Menu?.setApplicationMenu) {
-      try { menu._electron.Menu.setApplicationMenu(null); } catch (e) { /* ignore */ }
+    if (menu._electron) {
+      menu._electron.Menu.setApplicationMenu(null);
     }
   },
 

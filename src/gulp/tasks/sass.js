@@ -21,7 +21,7 @@ const packageRoot = Manager.getRootPath('main');
 module.exports = function sassTask(done) {
   const isProd = Manager.getMode().environment === 'production';
   const config = Manager.getConfig() || {};
-  const themeId = config?.theme?.id || 'classy';
+  const themeId = config.theme?.id || 'classy';
 
   const loadPaths = [
     path.join(packageRoot, 'dist', 'assets', 'css'),                    // for `@use 'electron-manager'`

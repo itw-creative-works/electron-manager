@@ -38,38 +38,28 @@ const protocol = {
 
     // Single-instance lock. If we don't get it, the original instance got our argv
     // via second-instance and we should exit immediately.
-    if (typeof app.requestSingleInstanceLock === 'function') {
-      protocol._hasLock = app.requestSingleInstanceLock();
-      if (!protocol._hasLock) {
-        logger.warn('single-instance lock lost — another copy of the app is running.');
-      } else {
-        logger.log('single-instance lock acquired.');
-      }
+    protocol._hasLock = app.requestSingleInstanceLock();
+    if (!protocol._hasLock) {
+      logger.warn('single-instance lock lost — another copy of the app is running.');
+    } else {
+      logger.log('single-instance lock acquired.');
     }
 
     // Register custom URL scheme. Always derived from brand.id — `<brand.id>://...` is
     // the one and only scheme. No config knob; if you need multiple schemes for the same app,
     // call `app.setAsDefaultProtocolClient(extra)` yourself in main.js.
-    const schemes = [];
-    const brandId = manager?.config?.brand?.id;
-    if (brandId) schemes.push(brandId);
+    const schemes = [manager.config.brand.id];
     protocol._schemes = schemes;
-    if (typeof app.setAsDefaultProtocolClient === 'function') {
-      schemes.forEach((scheme) => {
-        try {
-          // Windows + Linux need argv passing for cold-start to work properly when
-          // launched from `app.exe scheme://...` style invocations during dev.
-          if (process.platform === 'win32' || process.platform === 'linux') {
-            app.setAsDefaultProtocolClient(scheme, process.execPath, [process.cwd()]);
-          } else {
-            app.setAsDefaultProtocolClient(scheme);
-          }
-        } catch (e) {
-          logger.error(`failed to register scheme "${scheme}":`, e);
-        }
-      });
-      logger.log(`registered schemes=${JSON.stringify(schemes)}`);
-    }
+    schemes.forEach((scheme) => {
+      // Windows + Linux need argv passing for cold-start to work properly when
+      // launched from `app.exe scheme://...` style invocations during dev.
+      if (process.platform === 'win32' || process.platform === 'linux') {
+        app.setAsDefaultProtocolClient(scheme, process.execPath, [process.cwd()]);
+      } else {
+        app.setAsDefaultProtocolClient(scheme);
+      }
+    });
+    logger.log(`registered schemes=${JSON.stringify(schemes)}`);
 
     protocol._initialized = true;
   },

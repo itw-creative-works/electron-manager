@@ -79,11 +79,6 @@ const contextMenu = {
     }
 
     contextMenu._electron = require('electron');
-    if (!contextMenu._electron?.app) {
-      // renderer/preload — no Menu/BrowserWindow APIs to wire context menus on
-      contextMenu._initialized = true;
-      return;
-    }
 
     // Conventional path. No config knob — disable() at runtime if you don't want a context menu.
     // appRoot resolves to project dir in dev and asar mount in packaged apps — both contain
@@ -128,14 +123,13 @@ const contextMenu = {
   _popup(webContents, params) {
     if (contextMenu._disabled) return;             // disabled at runtime → no menu
     const { Menu } = contextMenu._electron;
-    if (!Menu) return;
 
     const items = contextMenu._buildItemsForEvent(params, webContents);
     if (items.length === 0) return; // suppress popup
 
     const template = items.map((item) => contextMenu._resolveItem(item));
     const builtMenu = Menu.buildFromTemplate(template);
-    builtMenu.popup({ window: webContents.getOwnerBrowserWindow?.() || undefined });
+    builtMenu.popup({ window: webContents.getOwnerBrowserWindow() || undefined });
   },
 
   // Construct the per-event builder + run the consumer's (or default) definition fn.
@@ -223,7 +217,7 @@ const contextMenu = {
     if (items.length > 0) items.push({ type: 'separator' });
     items.push({ id: 'reload', role: 'reload' });
 
-    if (m?.isDevelopment?.()) {
+    if (m.isDevelopment()) {
       items.push({ type: 'separator' });
       items.push({ id: 'inspect',         role: 'inspectElement' });
       items.push({ id: 'toggle-devtools', role: 'toggleDevTools' });

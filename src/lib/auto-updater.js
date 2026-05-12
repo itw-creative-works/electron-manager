@@ -145,7 +145,7 @@ const autoUpdater = {
         ['em:auto-updater:install-now', async () => autoUpdater.installNow()],
       ];
       for (const [chan, fn] of channels) {
-        manager.ipc.unhandle?.(chan);
+        manager.ipc.unhandle(chan);
         manager.ipc.handle(chan, fn);
       }
       // Activity ping from preload (debounced renderer-side mouse/keyboard/focus).
@@ -179,7 +179,7 @@ const autoUpdater = {
     // In tests (`manager.isTesting() === true`) both cadences collapse to
     // IDLE_TICK_MS_TESTING (500ms) so an integration test sees the full sequence
     // fire within seconds of a download.
-    const isTesting = !!manager?.isTesting?.();
+    const isTesting = manager.isTesting();
     const feedInterval = isTesting ? IDLE_TICK_MS_TESTING : autoUpdater._options.feedCheckIntervalMs;
     const idleInterval = isTesting ? IDLE_TICK_MS_TESTING : autoUpdater._options.idleEvalIntervalMs;
 
@@ -324,7 +324,7 @@ const autoUpdater = {
   },
 
   _idleThresholdMs() {
-    return autoUpdater._manager?.isTesting?.() ? IDLE_INSTALL_THRESHOLD_MS_TESTING : IDLE_INSTALL_THRESHOLD_MS;
+    return autoUpdater._manager.isTesting() ? IDLE_INSTALL_THRESHOLD_MS_TESTING : IDLE_INSTALL_THRESHOLD_MS;
   },
 
   _readyToCheck() {
@@ -384,7 +384,7 @@ const autoUpdater = {
     // user can't dismiss programmatically — exactly what we don't want firing
     // during automated runs. Tests that want to assert prompt behavior should
     // override `_promptToInstall` per-test (see auto-updater.test.js).
-    if (autoUpdater._manager?.isTesting?.()) {
+    if (autoUpdater._manager.isTesting()) {
       logger.log(`[testing] _promptToInstall(${version}) — skipped native dialog.`);
       return;
     }
@@ -392,10 +392,9 @@ const autoUpdater = {
     const { dialog, BrowserWindow } = require('electron');
     if (!dialog) return;        // renderer/preload context — no dialog API
 
-    const focusedWindow = BrowserWindow?.getFocusedWindow?.() || null;
-    const productName = autoUpdater._manager?.config?.app?.productName
-      || autoUpdater._manager?.config?.brand?.name
-      || 'this app';
+    const focusedWindow = BrowserWindow.getFocusedWindow();
+    const productName = autoUpdater._manager.config.app?.productName
+      || autoUpdater._manager.config.brand.name;
 
     // showMessageBox CAN reject (e.g. dialog destroyed, no display) — wrap just
     // the call. Synchronous setup above doesn't need a try.
@@ -440,9 +439,7 @@ const autoUpdater = {
     if (autoUpdater._activityHooksWired) return;
     autoUpdater._activityHooksWired = true;
 
-    // `app` is main-only; renderer/preload contexts have no `.on('browser-window-focus')`.
     const { app } = require('electron');
-    if (!app?.on) return;
     app.on('browser-window-focus', () => autoUpdater.markActive());
   },
 
@@ -480,45 +477,37 @@ const autoUpdater = {
   // manager.menu.remove('main/check-for-updates') in their integrations/menu/index.js.
   _updateMenuItem() {
     const m = autoUpdater._manager;
-    if (!m || !m.menu || typeof m.menu.update !== 'function') return;
     const { label, enabled } = autoUpdater._menuItemFieldsForState();
 
     // Patch whichever id-path exists. .update() returns false (and warns) if missing,
     // so try both without doubling up on warnings — silence by checking has() first.
-    try {
-      if (m.menu.has?.('main/check-for-updates')) {
-        m.menu.update('main/check-for-updates', { label, enabled });
-      } else if (m.menu.has?.('help/check-for-updates')) {
-        m.menu.update('help/check-for-updates', { label, enabled });
-      }
-    } catch (e) { /* menu not built yet */ }
+    if (m.menu.has('main/check-for-updates')) {
+      m.menu.update('main/check-for-updates', { label, enabled });
+    } else if (m.menu.has('help/check-for-updates')) {
+      m.menu.update('help/check-for-updates', { label, enabled });
+    }
   },
 
   // Reflect updater state into the tray's `check-for-updates` item, if present. Same
   // label/enabled semantics as the menu item — keeps both UIs in lockstep.
   _updateTrayItem() {
     const m = autoUpdater._manager;
-    if (!m || !m.tray || typeof m.tray.update !== 'function') return;
     const { label, enabled } = autoUpdater._menuItemFieldsForState();
 
-    try {
-      if (m.tray.has?.('check-for-updates')) {
-        m.tray.update('check-for-updates', { label, enabled });
-      }
-    } catch (e) { /* tray not built yet */ }
+    if (m.tray.has('check-for-updates')) {
+      m.tray.update('check-for-updates', { label, enabled });
+    }
   },
 
   // 30-day gate ────────────────────────────────────────────────────────────────────
 
   _reconcilePendingUpdate() {
     const m = autoUpdater._manager;
-    if (!m || !m.storage || typeof m.storage.get !== 'function') return;
-
     const pending = m.storage.get(`${STORAGE_KEY}.pendingUpdate`);
     if (!pending || !pending.downloadedAt) return;
 
-    const currentVersion = autoUpdater._manager?.getVersion?.();
-    if (currentVersion && pending.version === currentVersion) {
+    const currentVersion = autoUpdater._manager.getVersion();
+    if (pending.version === currentVersion) {
       logger.log(`Pending update v${pending.version} appears to be applied — clearing flag.`);
       m.storage.set(`${STORAGE_KEY}.pendingUpdate`, null);
       return;

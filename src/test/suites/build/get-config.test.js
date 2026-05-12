@@ -74,12 +74,14 @@ module.exports = {
       },
     },
     {
-      name: 'returns {} when config file missing',
+      name: 'returns seeded {brand:{}, app:{}} when config file missing',
       run: (ctx) => {
+        // getConfig() always seeds brand + app blocks so downstream callers can
+        // deref config.brand.X / config.app.X without optional-chaining at every site.
         const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'em-getconfig-empty-'));
         try {
           const cfg = loadConfigInDir(tmp);
-          ctx.expect(cfg).toEqual({});
+          ctx.expect(cfg).toEqual({ brand: {}, app: {} });
         } finally {
           fs.rmSync(tmp, { recursive: true, force: true });
         }

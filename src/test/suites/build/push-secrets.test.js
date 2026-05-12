@@ -97,9 +97,9 @@ KEY2=v2
     {
       name: 'resolveSecretValue: path-like value but missing file → returns value as-is',
       run: async (ctx) => {
-        const entry = { value: 'build/certs/does-not-exist.p12' };
+        const entry = { value: 'config/certs/does-not-exist.p12' };
         const out = await pushSecrets.resolveSecretValue(entry, '/tmp');
-        ctx.expect(out).toBe('build/certs/does-not-exist.p12');
+        ctx.expect(out).toBe('config/certs/does-not-exist.p12');
         ctx.expect(entry.isFilePath).toBeUndefined();
       },
     },
@@ -107,7 +107,7 @@ KEY2=v2
       name: 'resolveSecretValue: relative path resolves against projectRoot',
       run: async (ctx) => {
         const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'em-test-'));
-        const relName = 'build/certs/relative-cert.pem';
+        const relName = 'config/certs/relative-cert.pem';
         const fullPath = path.join(tmpDir, relName);
         fs.mkdirSync(path.dirname(fullPath), { recursive: true });
         fs.writeFileSync(fullPath, Buffer.from('REL'));

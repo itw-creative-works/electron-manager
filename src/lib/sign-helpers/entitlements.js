@@ -1,4 +1,4 @@
-// Generate dist/build/entitlements.mac.plist from EM defaults + consumer overrides.
+// Generate dist/config/entitlements.mac.plist from EM defaults + consumer overrides.
 //
 // Consumer config schema (in electron-manager.json):
 //   entitlements: {
@@ -85,7 +85,7 @@ function escapeXml(s) {
 function writeMacEntitlements(distRoot, consumerOverrides) {
   const merged  = mergeMacEntitlements(consumerOverrides);
   const xml     = renderPlist(merged);
-  const outPath = path.join(distRoot, 'build', 'entitlements.mac.plist');
+  const outPath = path.join(distRoot, 'config', 'entitlements.mac.plist');
   jetpack.write(outPath, xml);
   return outPath;
 }

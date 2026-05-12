@@ -108,7 +108,7 @@ async function runSignCommand(options) {
   }
 
   if (strategy === 'cloud') {
-    const provider = config?.targets?.win?.signing?.cloud?.provider;
+    const provider = config.targets?.win?.signing?.cloud?.provider;
     if (!provider) {
       throw new Error('strategy=cloud but no provider set (config.targets.win.signing.cloud.provider).');
     }

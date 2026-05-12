@@ -77,11 +77,6 @@ const tray = {
     }
 
     tray._electron = require('electron');
-    if (!tray._electron?.Tray) {
-      // renderer/preload — no Tray API
-      tray._initialized = true;
-      return;
-    }
 
     // Conventional path. No config knob — disable() at runtime if you don't want a tray.
     // appRoot resolves to project dir in dev and asar mount in packaged apps — both contain
@@ -120,14 +115,14 @@ const tray = {
     // back to sensible framework defaults so a consumer file is truly optional —
     // someone with no `src/integrations/tray/index.js` still gets a working tray.
     if (!tray._icon)    tray._icon    = tray._defaultIconPath();
-    if (!tray._tooltip) tray._tooltip = manager?.config?.app?.productName || 'App';
+    if (!tray._tooltip) tray._tooltip = manager.config.app?.productName || manager.config.brand.name;
 
     // Create the Tray now that items/icon/tooltip are in place.
     tray._render();
 
     // Reflect current auto-updater state into the tray check-for-updates item if present.
-    if (manager?.autoUpdater?._updateTrayItem) {
-      try { manager.autoUpdater._updateTrayItem(); } catch (e) { /* ignore */ }
+    if (manager.autoUpdater._updateTrayItem) {
+      manager.autoUpdater._updateTrayItem();
     }
 
     logger.log(`initialize — items=${tray._items.length} icon=${tray._icon || '(none)'}`);
@@ -158,7 +153,7 @@ const tray = {
     };
   },
 
-  // Resolve the runtime tray icon path. Reads from `<projectRoot>/dist/build/icons/<platform>/`
+  // Resolve the runtime tray icon path. Reads from `<projectRoot>/dist/config/icons/<platform>/`
   // which is populated by `gulp/build-config` using its 3-tier waterfall (consumer config →
   // consumer convention → EM bundled). So at runtime we just consume what build-config
   // already resolved — no need to re-walk the chain (and `__dirname` is unreliable inside
@@ -181,15 +176,15 @@ const tray = {
 
     // 1. Consumer config explicit path.
     const slotKey = `tray${platform === 'macos' ? 'Mac' : platform === 'windows' ? 'Windows' : 'Linux'}`;
-    const cfgVal = m?.config?.app?.icons?.[slotKey];
+    const cfgVal = m.config.app?.icons?.[slotKey];
     if (cfgVal && typeof cfgVal === 'string') {
       const abs = path.isAbsolute(cfgVal) ? cfgVal : path.join(projectRoot, cfgVal);
       if (fs.existsSync(abs)) return abs;
     }
 
-    // 2. dist/build/icons — populated by gulp/build-config (consumes the build-time waterfall).
+    // 2. dist/config/icons — populated by gulp/build-config (consumes the build-time waterfall).
     const linuxFallbackPlatform = platform === 'linux' ? 'windows' : platform;
-    const tryDistBuild = (plat, name) => path.join(projectRoot, 'dist', 'build', 'icons', plat, name);
+    const tryDistBuild = (plat, name) => path.join(projectRoot, 'dist', 'config', 'icons', plat, name);
     if (fs.existsSync(tryDistBuild(linuxFallbackPlatform, file))) {
       return tryDistBuild(linuxFallbackPlatform, file);
     }
@@ -209,8 +204,8 @@ const tray = {
   // Default template — id-tagged so consumers can target each item.
   _defaultTemplate() {
     const m = tray._manager;
-    const productName = m?.config?.app?.productName || 'App';
-    const brandUrl    = m?.config?.brand?.url || null;
+    const productName = m.config.app?.productName || m.config.brand.name;
+    const brandUrl    = m.config.brand.url || null;
 
     const items = [
       { id: 'title', label: productName, enabled: false },
@@ -219,7 +214,7 @@ const tray = {
         id: 'open',
         label: `Open ${productName}`,
         click: () => {
-          if (m?.windows?.show) m.windows.show('main');
+          m.windows.show('main');
         },
       },
       {
@@ -242,8 +237,7 @@ const tray = {
           const { shell } = require('electron');
           // Route through getWebsiteUrl() so dev runs open localhost:4000 instead
           // of punching out to the live brand site.
-          const url = (typeof m?.getWebsiteUrl === 'function') ? m.getWebsiteUrl() : brandUrl;
-          shell.openExternal(url);
+          shell.openExternal(m.getWebsiteUrl());
         },
       });
     }
@@ -380,8 +374,8 @@ const tray = {
 
   // Tear down (used by tests + by `disable()` below).
   destroy() {
-    if (tray._tray && !tray._tray.isDestroyed?.()) {
-      try { tray._tray.destroy(); } catch (e) { /* ignore */ }
+    if (tray._tray && !tray._tray.isDestroyed()) {
+      tray._tray.destroy();
     }
     tray._tray = null;
     tray._items = [];

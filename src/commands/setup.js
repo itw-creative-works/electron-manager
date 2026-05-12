@@ -398,19 +398,19 @@ async function provisionReleaseRepos() {
   }
 
   const targets = [];
-  if (config?.releases?.enabled !== false) {
+  if (config.releases?.enabled !== false) {
     targets.push({
       name:        'releases (auto-update feed)',
-      owner:       config?.releases?.owner || appOwner,
-      repo:        config?.releases?.repo || 'update-server',
+      owner:       config.releases?.owner || appOwner,
+      repo:        config.releases?.repo || 'update-server',
       description: `Public release artifacts + auto-update feed for ${appOwner}'s electron-manager apps. Managed by electron-manager.`,
     });
   }
-  if (config?.downloads?.enabled !== false) {
+  if (config.downloads?.enabled !== false) {
     targets.push({
       name:        'downloads (fixed-name mirror)',
-      owner:       config?.downloads?.owner || appOwner,
-      repo:        config?.downloads?.repo || 'download-server',
+      owner:       config.downloads?.owner || appOwner,
+      repo:        config.downloads?.repo || 'download-server',
       description: `Fixed-name download mirror for ${appOwner}'s electron-manager apps. Managed by electron-manager.`,
     });
   }

@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.4.1 — schema validator + config/ rename + presence-driven sentry/analytics + defensive-code sweep
+
+Harmonization pass: stricter config validation, BEM-style presence-driven flags, and a defensive-coding cleanup.
+
+### Added
+
+- **Schema validator** (`src/config/schema.js` + `src/utils/validate-config.js`) — pure-JS, simple `required: true|false|fn` shape. Runs at boot (hard-fails `manager.initialize()` if config is malformed with a numbered error list) AND in `gulp audit` (plus build-pipeline-specific extras like icon file existence). See [docs/config-schema.md](docs/config-schema.md).
+- Top-level `firebaseConfig` block: flat 8-key shape (apiKey, authDomain, databaseURL, projectId, storageBucket, messagingSenderId, appId, measurementId) matching BEM/BXM/web-manager canonical.
+
+### Changed
+
+- **BREAKING (consumer):** `build/` → `config/`. Certs, icons, and page-template all live under `config/` now. electron-builder `buildResources` updated. Aligns with BXM.
+- **BREAKING (consumer):** `.em-cache/` → `.cache/` to match UJM/BXM convention.
+- **BREAKING (config):** sentry + analytics are now presence-driven (BEM convention). No `enabled` flag — a non-empty `sentry.dsn` enables sentry; `analytics.providers.google.id` presence enables analytics.
+- **BREAKING (config):** `payment.plans` → `payment.products` (OMEGA canonical). Web-manager bumped to 4.1.42 with matching shape.
+- Removed dead `webManager: {}` config block.
+- `Manager.getConfig()` now seeds `brand` + `app` blocks so internal code can deref directly without `?.`.
+- Electron 41 → 42.
+- web-manager 4.1.41 → 4.1.42 (adds `_resolveFirebaseConfig()` supporting both flat + nested UJM-legacy shapes).
+
+### Fixed
+
+- `restart-manager` test-mode bail at 4 locations (`initialize`, `_send`, `ensureInstalled`, `_installRM`) — no register, no probe, no download, no `shell.openExternal` when `isTesting()`.
+- Defensive-coding sweep across `lib/`, `gulp/`, `commands/`: stripped ~34 unnecessary `?.` chains. Kept only legitimate ones (user-supplied config sub-fields, `chrome.*` / electron-store boundaries, pre-init state, regex/exception). Found and fixed one latent bug: `manager.webManager.getUser()` → `getCurrentUser()`.
+
+### Removed
+
+- `_isTesting()` private helper. Just call `manager.isTesting()` directly — same semantics, less indirection.
+
 ## 1.4.0 — analytics + context + usage + remote-config + restart-manager + userData/UA + try-catch audit
 
 Five new framework lib modules and tighter early-init behavior.

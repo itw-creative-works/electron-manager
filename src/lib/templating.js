@@ -55,10 +55,10 @@ const templating = {
     const vars = {
       brand: cfg.brand   || {},
       app:   appBlock,
-      theme: { appearance: cfg?.theme?.appearance || 'auto' },
+      theme: { appearance: cfg.theme?.appearance || 'auto' },
       page: {
         name:  pageName,
-        title: (extras && extras.title) || cfg?.app?.productName || cfg?.brand?.name || 'App',
+        title: (extras && extras.title) || cfg.app?.productName || cfg.brand?.name || 'App',
       },
       cacheBust: String((extras && extras.cacheBust) || Date.now()),
       // Slot for the body content. gulp/html sets this after rendering the inner view.

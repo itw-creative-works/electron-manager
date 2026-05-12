@@ -135,14 +135,14 @@ jobs:
       # the workflow decodes them back to disk for electron-builder + notarytool to read.
       - if: matrix.os == 'macos-latest'
         run: |
-          mkdir -p build/certs
-          echo "${{ secrets.CSC_LINK }}"      | base64 --decode > build/certs/dev-id.p12
-          echo "${{ secrets.APPLE_API_KEY }}" | base64 --decode > build/certs/AuthKey.p8
+          mkdir -p config/certs
+          echo "${{ secrets.CSC_LINK }}"      | base64 --decode > config/certs/dev-id.p12
+          echo "${{ secrets.APPLE_API_KEY }}" | base64 --decode > config/certs/AuthKey.p8
       - if: matrix.os == 'macos-latest'
         env:
-          CSC_LINK:         build/certs/dev-id.p12
+          CSC_LINK:         config/certs/dev-id.p12
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          APPLE_API_KEY:    build/certs/AuthKey.p8
+          APPLE_API_KEY:    config/certs/AuthKey.p8
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_TEAM_ID:    ${{ secrets.APPLE_TEAM_ID }}

@@ -9,7 +9,7 @@ Electron Manager (EM) is a comprehensive framework for building modern Electron 
 ### For Consuming Projects
 
 1. `npm install electron-manager --save-dev`
-2. `npx mgr setup` — scaffolds the project (writes `config/electron-manager.json`, `src/main.js`, `src/preload.js`, per-window renderer entries, and integrations skeletons in `src/integrations/{tray,menu,context-menu}/index.js`). `electron-builder.yml` and `entitlements.mac.plist` are NOT scaffolded — they're generated into `dist/build/` at build time.
+2. `npx mgr setup` — scaffolds the project (writes `config/electron-manager.json`, `src/main.js`, `src/preload.js`, per-window renderer entries, and integrations skeletons in `src/integrations/{tray,menu,context-menu}/index.js`). `electron-builder.yml` and `entitlements.mac.plist` are NOT scaffolded — they're generated into `dist/config/` at build time.
 3. `npm start` — dev (gulp → webpack → electron .)
 4. `npm run build` — local production build (compiles bundles only, no installer)
 5. `npm run package:quick` — fast packaged build for the host platform/arch only — produces a launchable `release/<platform>-<arch>/<ProductName>.app` (or `.exe`-folder/linux-unpacked) in ~20-30s. Skips DMG/zip/universal/notarize. Use this to smoke-test packaged-mode behavior locally without waiting for the full pipeline.
@@ -84,7 +84,7 @@ Boot sequence (main process — `manager.initialize()`):
 | `usage` | real | `opens` / `hoursTotal` / `hoursThisSession`. Tracks app launches + accumulates session length across clean exits (crashed sessions don't credit hours — `lastQuitAt` was never written). Persisted via `manager.storage`; before-quit handler records session end. |
 | `remote-config` | real | "Hot config" — fetches `${brand.url}/data/resources/main.json` (legacy convention) or override URL. Polls at the same cadence as auto-updater feed-check (default 1h). `manager.remoteConfig.get(path?)` for cache-first reads (instant, never blocks). Cached to storage so offline boots still have last-known values. `on('update', fn)` for fresh-fetch broadcasts. |
 | `analytics` | real | GA4 via Measurement Protocol. **Cross-platform identity** — `client_id = uuidv5(deviceId, projectId-namespace)` and `user_id = uuidv5(firebaseUid, projectId-namespace)`. Same projectId in BEM/UJM/web-manager/EM produces identical uuidv5 outputs → unified events for one human across all surfaces. Auto-fires `app_launch` (main), wires `login`/`logout` events to `webManager.onAuthChange`. Measurement ID in config (`analytics.providers.google.id`); secret in `process.env.GOOGLE_ANALYTICS_SECRET` (matches BEM convention) — webpack DefinePlugin bakes it into packaged bundles at build time. |
-| `restart-manager` | real | Auxiliary helper app (`restart-manager/download-server`) that handles relaunches via the `restart-manager://` URL scheme. Auto-registers ~15s after launch, auto-unregisters on clean quit. Auto-installs RM if missing — **mac**: signed/notarized `.zip` → unzip → open (no DMG mount, no prompts); **windows**: NSIS one-click installer; **linux**: opens `.deb` URL in browser (no sudo). Bails when `brand.id === 'restart-manager'` (RM doesn't manage itself), in dev (unless `EM_RESTART_MANAGER_DEV=1`), or when `restartManager.enabled === false`. Caps at 3 install attempts per process. |
+| `restart-manager` | real | Auxiliary helper app (`restart-manager/download-server`) that handles relaunches via the `restart-manager://` URL scheme. Auto-registers ~15s after launch, auto-unregisters on clean quit. Auto-installs RM if missing — **mac**: signed/notarized `.zip` → unzip → open (no DMG mount, no prompts); **windows**: NSIS one-click installer; **linux**: opens `.deb` URL in browser (no sudo). Bails when `manager.isTesting()` is true (no register, no probe, no download, no shell.openExternal — defense in depth at `initialize()`, `_send()`, `ensureInstalled()`, `_installRM()`), when `brand.id === 'restart-manager'` (RM doesn't manage itself), in dev (unless `EM_RESTART_MANAGER_DEV=1`), or when `restartManager.enabled === false`. Caps at 3 install attempts per process. |
 
 ### File-based feature definitions
 
@@ -176,7 +176,7 @@ open -n /path/to/MyApp.app --args --em-launched-at-login
 - **prepare-package** copies framework `src/` → `dist/` (BXM-style).
 - **Gulp** auto-loads tasks from `src/gulp/tasks/`.
 - **Webpack** — three targets (electron-main / electron-preload / electron-renderer), all bundled in production for source protection. DefinePlugin + BannerPlugin inject `EM_BUILD_JSON` into bundles.
-- **electron-builder** packages + publishes. `gulp/build-config` GENERATES `dist/electron-builder.yml` from EM defaults + `config/electron-manager.json` (no consumer-shipped `electron-builder.yml`). It also writes `dist/build/entitlements.mac.plist` (defaults + consumer overrides via `targets.mac.entitlements` config) and resolves icons via a 3-tier waterfall (config → `<consumer>/config/icons/<platform>/<slot>.png` → EM bundled defaults) into `dist/build/icons/`.
+- **electron-builder** packages + publishes. `gulp/build-config` GENERATES `dist/electron-builder.yml` from EM defaults + `config/electron-manager.json` (no consumer-shipped `electron-builder.yml`). It also writes `dist/config/entitlements.mac.plist` (defaults + consumer overrides via `targets.mac.entitlements` config) and resolves icons via a 3-tier waterfall (config → `<consumer>/config/icons/<platform>/<slot>.png` → EM bundled defaults) into `dist/config/icons/`.
 - **Strategy-pluggable Windows signing** — `targets.win.signing.strategy` config key (no env var) selects `self-hosted` (EV USB token) | `cloud` | `local`. The GH Actions workflow has a `windows-strategy` job that reads the JSON5 config to drive runner selection + job gating.
 
 ### Config flow
@@ -205,8 +205,28 @@ Notable defaults / behaviors:
 - **Page template**: EM-internal, no longer copied to `<consumer>/config/page-template.html`. Lives at `<em>/src/config/page-template.html`.
 - **`manager.quit({ force })`** / **`manager.relaunch({ force })`**: programmatic quit/relaunch entry points that flip `_allowQuit` so window-manager's hide-on-close trap doesn't swallow the close events. Auto-updater's `installNow()` flips `_allowQuit` automatically before calling `quitAndInstall()`.
 - **Icons**: 3-tier waterfall per slot/platform (config → `config/icons/<platform>/<slot>.png` → EM bundled). `@2x` retina auto-paired from `@1x`. Linux follows Windows resolution; Windows tray falls back to Windows app icon.
-- **Entitlements**: `targets.mac.entitlements` is an object map (key→bool/string/array). Consumer overrides EM's defaults; `null` removes a default. Plist generated to `dist/build/entitlements.mac.plist`.
+- **Entitlements**: `targets.mac.entitlements` is an object map (key→bool/string/array). Consumer overrides EM's defaults; `null` removes a default. Plist generated to `dist/config/entitlements.mac.plist`.
 - **Stable download names** (`gulp/mirror-downloads`): `Somiibo.dmg`, `Somiibo-Setup.exe`, `somiibo_amd64.deb`, `Somiibo.AppImage` — preserves legacy URLs. Apple Silicon gets `-arm64` suffix.
+
+### Schema validation
+
+Every field in `config/electron-manager.json` is declared in **`src/config/schema.js`** — the single source of truth for which fields exist, which are required, and what shape their values take. The validator engine in **`src/utils/validate-config.js`** is pure (no deps) and ~100 lines.
+
+**Validation runs in two places, same rules**:
+
+1. **`Manager.initialize()`** — hard-fails the app at boot if any required field is missing or any present field is invalid. So a misconfigured app never reaches the "white window of confusion" — it tells you exactly which field is broken with a numbered error list.
+2. **`gulp/tasks/audit.js`** — same schema, plus build-pipeline-specific extras (`brand.images.icon` file-existence in build/publish mode, `releases.repo` in publish mode, `src/main.js`/`src/preload.js` existence). These extras live in audit.js — not the schema — because they depend on build pipeline state rather than config shape.
+
+**Schema entry shape**:
+```js
+{ path: 'brand.id', type: 'string', required: true, match: /^[a-z][a-z0-9+\-.]*$/, description: '...' }
+```
+
+`required: true | false | (config) => bool`. The function form is for "this field is mandatory ONLY when another part of config is set" — e.g. `analytics.providers.google.id` only requires when `analytics.enabled === true`. No `'publish-only'` tier — build-only checks belong in `audit.js`.
+
+`match` / `enum` / `type` checks only run on PRESENCE. Missing field with `required:false` is silent. Missing field with `required:true` fires the "missing" error once; secondary rules don't pile on top.
+
+**Adding a new field**: add one entry to `src/config/schema.js`, optionally a default in `src/defaults/config/electron-manager.json`. That's it. See [docs/config-schema.md](docs/config-schema.md).
 
 ### Build modes
 
@@ -262,7 +282,7 @@ Implementation: `src/utils/attach-log-file.js` wraps `process.stdout.write` and 
 | Command | Status | Description |
 |---|---|---|
 | `setup` | real | scaffold consumer, ensure peer deps, write projectScripts |
-| `clean` | real | remove `dist/`, `release/`, `.em-cache/` |
+| `clean` | real | remove `dist/`, `release/`, `.cache/` |
 | `install` | real | install peer deps |
 | `version` | real | print versions |
 | `test` | real | run framework + project test suites |
@@ -309,6 +329,7 @@ API references for each subsystem live in `docs/`:
 - [docs/usage.md](docs/usage.md) — opens / hoursTotal / hoursThisSession; clean-exit accumulation
 - [docs/remote-config.md](docs/remote-config.md) — "hot config" fetched from brand site; override flags without re-releasing
 - [docs/restart-manager.md](docs/restart-manager.md) — auxiliary helper app for relaunches; auto-install via signed mac.zip / NSIS exe / browser-opened .deb
+- [docs/config-schema.md](docs/config-schema.md) — canonical schema + validator: required/match/enum/type with simple `required: true|false|fn`. Runs at boot AND in `gulp audit`
 - [docs/sentry.md](docs/sentry.md) — per-context split, auto auth attribution, dev-mode gating
 - [docs/templating.md](docs/templating.md) — `{{ }}` token replacement, page vars, HTML pipeline
 - [docs/logging.md](docs/logging.md) — runtime logger (main + preload + renderer → one `runtime.log`), `mgr logs` CLI, dev vs prod paths

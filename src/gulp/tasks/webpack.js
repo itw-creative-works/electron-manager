@@ -232,7 +232,7 @@ function resolveNativeExternals() {
 
   // Consumer-defined extras
   const config = Manager.getConfig();
-  const extra = config?.em?.webpack?.externals || [];
+  const extra = config.em?.webpack?.externals || [];
   extra.forEach((name) => {
     externals[name] = `commonjs2 ${name}`;
   });

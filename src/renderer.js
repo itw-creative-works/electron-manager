@@ -70,7 +70,7 @@ Manager.prototype._wireAuthBridge = async function () {
   };
 
   // Listen for sign-in-with-token broadcasts (main signed in via deep link, or another renderer signed in).
-  self.ipc.on?.('em:auth:sign-in-with-token', async ({ token }) => {
+  self.ipc.on('em:auth:sign-in-with-token', async ({ token }) => {
     if (!token || !auth?.signInWithCustomToken) return;
     try {
       await auth.signInWithCustomToken(token);
@@ -81,7 +81,7 @@ Manager.prototype._wireAuthBridge = async function () {
   });
 
   // Listen for sign-out broadcasts.
-  self.ipc.on?.('em:auth:sign-out', async () => {
+  self.ipc.on('em:auth:sign-out', async () => {
     if (!auth?.signOut) return;
     try {
       await auth.signOut();
@@ -93,7 +93,7 @@ Manager.prototype._wireAuthBridge = async function () {
 
   // Sync with main on load. If main has a different state, it'll send back instructions.
   try {
-    const result = await self.ipc.invoke?.('em:auth:sync-request', {
+    const result = await self.ipc.invoke('em:auth:sync-request', {
       contextUid: getCurrentUid(),
     });
 
@@ -114,13 +114,13 @@ Manager.prototype._wireAuthBridge = async function () {
 // Sign-out helper for renderer code (UI button etc.). Goes through main so all
 // renderers + main stay in sync via the broadcast.
 Manager.prototype.signOut = async function () {
-  if (!this.ipc?.invoke) return { success: false, error: 'no-ipc' };
+  if (!this.ipc) return { success: false, error: 'no-ipc' };
   return this.ipc.invoke('em:auth:sign-out');
 };
 
 // Read main's current user (sync answer from main, not the renderer's local Firebase).
 Manager.prototype.getMainUser = async function () {
-  if (!this.ipc?.invoke) return null;
+  if (!this.ipc) return null;
   return this.ipc.invoke('em:auth:get-user');
 };
 

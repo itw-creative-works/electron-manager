@@ -61,8 +61,8 @@ npx mgr setup
 Now drop your cert files:
 
 ```bash
-cp ~/Downloads/developer-id-application.p12 build/certs/
-cp ~/Downloads/AuthKey_XXXXXXXXXX.p8        build/certs/
+cp ~/Downloads/developer-id-application.p12 config/certs/
+cp ~/Downloads/AuthKey_XXXXXXXXXX.p8        config/certs/
 ```
 
 Edit `.env`:
@@ -71,10 +71,10 @@ Edit `.env`:
 GH_TOKEN="ghp_..."
 BACKEND_MANAGER_KEY="..."
 
-CSC_LINK="build/certs/developer-id-application.p12"
+CSC_LINK="config/certs/developer-id-application.p12"
 CSC_KEY_PASSWORD="<password>"
 
-APPLE_API_KEY="build/certs/AuthKey_XXXXXXXXXX.p8"
+APPLE_API_KEY="config/certs/AuthKey_XXXXXXXXXX.p8"
 APPLE_API_KEY_ID="XXXXXXXXXX"
 APPLE_API_ISSUER="00000000-0000-0000-0000-000000000000"
 APPLE_TEAM_ID="XXXXXXXXXX"
@@ -174,7 +174,7 @@ For details see [`docs/signing.md`](signing.md#windows-setup).
 - Check the App Store Connect notarization history at https://appstoreconnect.apple.com/apps for status / errors.
 
 ### "Hardened runtime requires entitlements"
-- EM generates `dist/build/entitlements.mac.plist` at build time from defaults + your `entitlements.mac` overrides in `config/electron-manager.json`.
+- EM generates `dist/config/entitlements.mac.plist` at build time from defaults + your `entitlements.mac` overrides in `config/electron-manager.json`.
 - For extra capabilities (camera, mic, etc.), add keys to `entitlements.mac`. See `docs/signing.md` for the override syntax.
 
 ### CI: GitHub Releases upload fails

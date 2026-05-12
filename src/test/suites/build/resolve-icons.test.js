@@ -38,8 +38,8 @@ module.exports = {
           const { resolveAndCopy } = require(path.join(__dirname, '..', '..', '..', 'lib', 'sign-helpers', 'resolve-icons.js'));
           const out = resolveAndCopy({ config: {}, projectRoot, distRoot, emDefaultsRoot });
 
-          ctx.expect(out.macos.app).toBe(path.join(distRoot, 'build', 'icons', 'macos', 'icon.png'));
-          ctx.expect(out.windows.app).toBe(path.join(distRoot, 'build', 'icons', 'windows', 'icon.png'));
+          ctx.expect(out.macos.app).toBe(path.join(distRoot, 'config', 'icons', 'macos', 'icon.png'));
+          ctx.expect(out.windows.app).toBe(path.join(distRoot, 'config', 'icons', 'windows', 'icon.png'));
           ctx.expect(jetpack.exists(out.macos.app)).toBeTruthy();
           ctx.expect(jetpack.exists(out.windows.app)).toBeTruthy();
         } finally {

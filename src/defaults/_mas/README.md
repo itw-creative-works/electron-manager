@@ -25,13 +25,13 @@ Team ID + appId at build time.
 
 When MAS support is implemented (currently stubbed in
 `config.targets.mac.mas` — see `docs/installer-options.md`), this folder will be
-the starting point for the entitlements EM auto-generates into `dist/build/`
+the starting point for the entitlements EM auto-generates into `dist/config/`
 when `mac.mas.enabled === true`. The structure should be similar to the existing
 `writeMacEntitlements` flow but with separate output files for `mas`, `mas.inherit`,
 and `mas.loginhelper`.
 
 The other MAS-specific concerns:
-- Provisioning profile copy (`config/embedded.provisionprofile` → `dist/build/`)
+- Provisioning profile copy (`config/embedded.provisionprofile` → `dist/config/`)
 - Separate `mas` target in `mac.target` (alongside `dmg` + `zip`)
 - `mas:` config block with `hardenedRuntime: false`, `gatekeeperAssess: false`,
   separate entitlement paths, and `publish: null` (App Store Connect submission

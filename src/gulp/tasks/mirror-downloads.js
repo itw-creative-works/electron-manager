@@ -20,7 +20,7 @@ const logger = Manager.logger('mirror-downloads');
 module.exports = function mirrorDownloads(done) {
   Promise.resolve().then(async () => {
     const config = Manager.getConfig() || {};
-    if (config?.downloads?.enabled === false) {
+    if (config.downloads?.enabled === false) {
       logger.log('downloads.enabled=false — skipping mirror.');
       return;
     }
@@ -53,11 +53,11 @@ module.exports = function mirrorDownloads(done) {
       return;
     }
 
-    const owner = config?.downloads?.owner || appOwner;
-    const repo  = config?.downloads?.repo  || 'download-server';
-    const tag   = config?.downloads?.tag   || 'installer';
+    const owner = config.downloads?.owner || appOwner;
+    const repo  = config.downloads?.repo  || 'download-server';
+    const tag   = config.downloads?.tag   || 'installer';
 
-    const productName = config?.app?.productName || (Manager.getPackage('project') || {}).name || 'app';
+    const productName = config.app?.productName || (Manager.getPackage('project') || {}).name || 'app';
 
     const artifacts = jetpack.list(releaseDir) || [];
     const eligible  = artifacts.filter(isUploadable);

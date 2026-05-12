@@ -62,12 +62,7 @@ const appState = {
     appState._manager = manager;
     appState._electron = require('electron');
 
-    const storage = manager?.storage;
-    if (!storage?.get) {
-      logger.warn('storage not available — app-state can only report ephemeral values.');
-      appState._initialized = true;
-      return;
-    }
+    const storage = manager.storage;
 
     const now = Date.now();
     const previous = storage.get(STORAGE_KEY) || {};
@@ -82,8 +77,8 @@ const appState = {
     // Version detection. Prefer the cross-context manager.getVersion() helper —
     // it tries `app.getVersion()` first (authoritative in main, reads asar
     // package.json in packaged builds) and falls back to project package.json.
-    const currentVersion  = manager?.config?.app?.version
-                         || manager?.getVersion?.()
+    const currentVersion  = manager.config.app?.version
+                         || manager.getVersion()
                          || tryGetVersionFromPackage()
                          || null;
     const previousVersion = previous.version || null;
@@ -120,7 +115,6 @@ const appState = {
 
   _wireGracefulQuit() {
     if (appState._quitWired) return;
-    if (!appState._electron?.app) return;
     appState._quitWired = true;
     const { app } = appState._electron;
 
@@ -128,16 +122,11 @@ const appState = {
     const onQuit = () => {
       if (cleared) return;
       cleared = true;
-      try {
-        const storage = appState._manager?.storage;
-        if (!storage?.get || !storage?.set) return;
-        const cur = storage.get(STORAGE_KEY) || {};
-        cur.sentinel  = false;
-        cur.lastQuitAt = Date.now();
-        storage.set(STORAGE_KEY, cur);
-      } catch (e) {
-        logger.error('graceful-quit cleanup threw:', e);
-      }
+      const storage = appState._manager.storage;
+      const cur = storage.get(STORAGE_KEY) || {};
+      cur.sentinel  = false;
+      cur.lastQuitAt = Date.now();
+      storage.set(STORAGE_KEY, cur);
     };
 
     app.on('before-quit', onQuit);
@@ -168,7 +157,7 @@ const appState = {
     // The CURRENT snapshot's lastQuitAt is null (we cleared it on init).
     // What the consumer wants is "when did we previously quit gracefully" — read storage live,
     // because at the moment of the call this launch hasn't quit yet.
-    const cur = appState._manager?.storage?.get?.(STORAGE_KEY) || {};
+    const cur = appState._manager.storage.get(STORAGE_KEY) || {};
     const ms  = cur.lastQuitAt;
     return ms ? new Date(ms) : null;
   },
@@ -190,16 +179,14 @@ const appState = {
   },
 
   launchedAtLogin() {
-    if (!appState._electron?.app?.getLoginItemSettings) return false;
-    try {
-      const s = appState._electron.app.getLoginItemSettings();
-      // Electron exposes `wasOpenedAtLogin` on macOS (via NSWorkspace) and
-      // `openAtLogin` plus a `launchItems` array on Windows. The shorthand:
-      // if the OS booted us via the login-item path, the field is true.
-      return Boolean(s.wasOpenedAtLogin);
-    } catch (e) {
-      return false;
-    }
+    // `getLoginItemSettings` exists on macOS + Windows; on Linux it just returns
+    // a stub object with openAtLogin=false. So the field check below is safe
+    // everywhere — no platform branch needed.
+    const s = appState._electron.app.getLoginItemSettings();
+    // Electron exposes `wasOpenedAtLogin` on macOS (via NSWorkspace) and
+    // `openAtLogin` plus a `launchItems` array on Windows. The shorthand:
+    // if the OS booted us via the login-item path, the field is true.
+    return Boolean(s.wasOpenedAtLogin);
   },
 
   launchedFromDeepLink() {
@@ -214,9 +201,7 @@ const appState = {
   // Test helper — wipe persisted state and reset the in-memory snapshot.
   // (Public, intentionally — used by integration tests + by consumers who want a "reset to factory" command.)
   reset() {
-    if (appState._manager?.storage?.delete) {
-      appState._manager.storage.delete(STORAGE_KEY);
-    }
+    appState._manager.storage.delete(STORAGE_KEY);
     appState._snapshot = null;
     appState._recoveredFromCrash = false;
     appState._launchedFromDeepLink = false;

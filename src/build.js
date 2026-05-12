@@ -133,13 +133,10 @@ Manager.getConfig = function () {
   const file = path.join(process.cwd(), 'config', 'electron-manager.json');
   const raw = jetpack.read(file);
 
-  if (!raw) {
-    return {};
-  }
+  const config = raw ? JSON5.parse(raw) : {};
 
-  const config = JSON5.parse(raw);
-
-  // Apply derived defaults.
+  // Apply derived defaults. Always seed `brand` + `app` so callers can deref
+  // `config.brand.X` / `config.app.X` without optional-chaining at every callsite.
   config.brand = config.brand || {};
   config.app   = config.app   || {};
   if (!config.app.appId       && config.brand.id)   config.app.appId       = `com.itwcreativeworks.${config.brand.id}`;

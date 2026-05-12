@@ -172,7 +172,7 @@ module.exports = {
         try {
           const err = await runAudit(tmp);
           ctx.expect(err).toBeDefined();
-          ctx.expect(err.message).toMatch(/startup\.mode "invisible" is invalid/);
+          ctx.expect(err.message).toMatch(/startup\.mode "invisible" is not allowed/);
         } finally {
           fs.rmSync(tmp, { recursive: true, force: true });
         }
@@ -189,7 +189,7 @@ module.exports = {
         try {
           const err = await runAudit(tmp);
           ctx.expect(err).toBeDefined();
-          ctx.expect(err.message).toMatch(/targets\.win\.signing\.strategy "banana" is invalid/);
+          ctx.expect(err.message).toMatch(/targets\.win\.signing\.strategy "banana" is not allowed/);
         } finally {
           fs.rmSync(tmp, { recursive: true, force: true });
         }
@@ -205,7 +205,7 @@ module.exports = {
         try {
           const err = await runAudit(tmp);
           ctx.expect(err).toBeDefined();
-          ctx.expect(err.message).toMatch(/brand\.id.*URL scheme/);
+          ctx.expect(err.message).toMatch(/brand\.id.*does not match.*deep-link scheme/);
         } finally {
           fs.rmSync(tmp, { recursive: true, force: true });
         }

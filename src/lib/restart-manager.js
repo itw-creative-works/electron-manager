@@ -72,25 +72,36 @@ const restartManager = {
     restartManager._initialized = true;
     restartManager._manager = manager;
 
-    const cfg = manager?.config?.restartManager || {};
+    const cfg = manager.config.restartManager || {};
     restartManager._enabled = cfg.enabled !== false;     // default on
 
-    // Bail #1: this app IS restart-manager. RM doesn't manage itself.
-    if (manager?.config?.brand?.id === 'restart-manager') {
+    // Bail #1: test mode. Absolutely nothing fires — no register, no unregister,
+    // no probe, no download, no shell.openExternal. Tests should never poke real
+    // OS state (protocol handlers, downloads dir, /Applications). The public
+    // methods (register/unregister/ensureInstalled/_send) also re-check this so
+    // a test that manually invokes one of them stays a no-op too.
+    if (manager.isTesting()) {
+      logger.log('skipping (test mode).');
+      restartManager._enabled = false;       // force-disable so direct calls bail too
+      return;
+    }
+
+    // Bail #2: this app IS restart-manager. RM doesn't manage itself.
+    if (manager.config.brand.id === 'restart-manager') {
       logger.log('skipping (this app is restart-manager itself).');
       return;
     }
 
-    // Bail #2: explicitly disabled by config.
+    // Bail #3: explicitly disabled by config.
     if (!restartManager._enabled) {
       logger.log('restartManager.enabled=false — skipping.');
       return;
     }
 
-    // Bail #3: dev mode unless explicitly opted in. Avoids spam during local dev
+    // Bail #4: dev mode unless explicitly opted in. Avoids spam during local dev
     // where RM almost certainly isn't installed and we'd just thrash retries.
     const devOptIn = process.env.EM_RESTART_MANAGER_DEV === '1';
-    if (manager?.isDevelopment?.() && !devOptIn) {
+    if (manager.isDevelopment() && !devOptIn) {
       logger.log('skipping in dev (set EM_RESTART_MANAGER_DEV=1 to test).');
       return;
     }
@@ -98,21 +109,17 @@ const restartManager = {
     // Schedule register after whenReady. Use a single timer so re-init guards
     // don't pile up timers; tests can shutdown() to clear it.
     const { app } = require('electron');
-    const delay = manager?.isDevelopment?.() ? REGISTER_DELAY_DEV_MS : REGISTER_DELAY_PROD_MS;
-    if (app?.whenReady) {
-      app.whenReady().then(() => {
-        restartManager._registerTimer = setTimeout(() => {
-          restartManager.register().catch((e) => logger.warn(`register failed: ${e.message}`));
-        }, delay);
-      });
-    }
+    const delay = manager.isDevelopment() ? REGISTER_DELAY_DEV_MS : REGISTER_DELAY_PROD_MS;
+    app.whenReady().then(() => {
+      restartManager._registerTimer = setTimeout(() => {
+        restartManager.register().catch((e) => logger.warn(`register failed: ${e.message}`));
+      }, delay);
+    });
 
     // On clean before-quit, unregister so RM stops watching us.
-    if (app?.on) {
-      app.on('before-quit', () => {
-        restartManager.unregister().catch((e) => logger.warn(`unregister failed: ${e.message}`));
-      });
-    }
+    app.on('before-quit', () => {
+      restartManager.unregister().catch((e) => logger.warn(`unregister failed: ${e.message}`));
+    });
 
     logger.log(`restart-manager initialized — register scheduled in ${delay}ms.`);
   },
@@ -124,6 +131,10 @@ const restartManager = {
 
   // Force the install path. Useful for "Reinstall Restart Manager" UI.
   async ensureInstalled() {
+    if (restartManager._manager.isTesting()) {
+      logger.log('ensureInstalled — skipping in test mode.');
+      return;
+    }
     return restartManager._installRM();
   },
 
@@ -133,17 +144,18 @@ const restartManager = {
   // to download + install + retry once.
   async _send(command) {
     if (!restartManager._enabled) return;
+    if (restartManager._manager.isTesting()) {
+      logger.log(`_send(${command}) — skipping in test mode.`);
+      return;
+    }
 
     const manager = restartManager._manager;
     const { app, shell } = require('electron');
-    if (!app) return;             // not main process
 
     const url = restartManager._buildUrl(command);
     // getApplicationNameForProtocol is sync. Returns the registered app name,
     // 'Electron' if we're the only handler (dev), or '' if no handler exists.
-    let handler = '';
-    try { handler = app.getApplicationNameForProtocol?.('restart-manager://') || ''; }
-    catch (_) { handler = ''; }
+    const handler = app.getApplicationNameForProtocol('restart-manager://') || '';
 
     logger.log(`_send(${command}) handler="${handler}"`);
 
@@ -192,10 +204,10 @@ const restartManager = {
 
     const url = new URL('restart-manager://message');
     const payload = {
-      name:        app?.getName?.() || manager?.config?.brand?.name || '',
-      id:          manager?.config?.brand?.id || '',
-      path:        app?.getPath?.('exe') || '',
-      environment: manager?.getEnvironment?.() || 'production',
+      name:        app.getName(),
+      id:          manager.config.brand.id,
+      path:        app.getPath('exe'),
+      environment: manager.getEnvironment(),
     };
     url.searchParams.set('command', command);
     url.searchParams.set('payload', JSON.stringify(payload));
@@ -205,8 +217,11 @@ const restartManager = {
   // Per-platform install. Mac/Windows download + invoke; Linux opens the .deb URL
   // in the browser (no sudo prompt).
   async _installRM() {
+    if (restartManager._manager.isTesting()) {
+      logger.log('_installRM — skipping in test mode.');
+      return;
+    }
     const { app, shell } = require('electron');
-    if (!app) throw new Error('no electron.app available');
 
     const platform = process.platform;
     const url = platform === 'darwin' ? restartManager._urls.mac

@@ -69,22 +69,18 @@ const analytics = {
     analytics._initialized = true;
     analytics._manager = manager;
 
-    const cfg = manager?.config?.analytics || {};
-    analytics._enabled = cfg.enabled !== false;       // default true
+    const cfg = manager.config.analytics || {};
 
-    if (!analytics._enabled) {
-      logger.log('analytics disabled via config.analytics.enabled=false');
-      return;
-    }
-
-    analytics._measurementId = cfg?.providers?.google?.id || null;
+    // Presence-driven: providers.google.id presence enables analytics. No separate
+    // `enabled` flag (matches BEM convention — credentials are the enable signal).
+    analytics._measurementId = cfg.providers?.google?.id || null;
     // Secret comes from env. In packaged builds, webpack's DefinePlugin replaces
     // `process.env.GOOGLE_ANALYTICS_SECRET` with the build-time literal so the
     // packaged app has it baked in without shipping .env.
     analytics._apiSecret = process.env.GOOGLE_ANALYTICS_SECRET || null;
 
     if (!analytics._measurementId) {
-      logger.warn('analytics: no measurement ID set (config.analytics.providers.google.id) — disabled.');
+      logger.log('analytics: no measurement ID set (config.analytics.providers.google.id) — disabled.');
       analytics._enabled = false;
       return;
     }
@@ -93,31 +89,29 @@ const analytics = {
       analytics._enabled = false;
       return;
     }
+    analytics._enabled = true;
 
     // Namespace = uuidv5 of the firebase project ID (or app id as fallback). Same
     // projectId in BEM/web-manager/EM → same namespace → same per-uid UUIDv5
     // everywhere. UUIDv5 needs a UUID-shaped namespace — we derive one from the
     // string projectId by hashing it into uuidv5.URL space (RFC 4122).
-    const projectId = manager?.config?.firebaseConfig?.projectId
-      || manager?.config?.brand?.id
-      || 'electron-manager';
+    const projectId = manager.config.firebaseConfig?.projectId
+      || manager.config.brand.id;
     analytics._namespace = uuidv5(projectId, uuidv5.URL);
 
     // client_id = stable per-device UUID. context.session.deviceId is async-resolved;
     // by the time analytics.initialize() runs (post-context init in boot sequence),
     // it's already populated. Fall back to a fresh UUID if for any reason it isn't.
-    const deviceId = manager?.context?.session?.deviceId || crypto.randomUUID();
+    const deviceId = manager.context.session.deviceId || crypto.randomUUID();
     analytics._clientId = uuidv5(deviceId, analytics._namespace);
 
     // Wire auth subscription so user_id flips automatically on login/logout.
-    if (typeof manager?.webManager?.onAuthChange === 'function') {
-      analytics._authUnsub = manager.webManager.onAuthChange((snap) => {
-        analytics._handleAuthChange(snap);
-      });
-      // Pull current state immediately in case auth already resolved.
-      const current = manager.webManager.getUser?.();
-      if (current?.uid) analytics._handleAuthChange(current);
-    }
+    analytics._authUnsub = manager.webManager.onAuthChange((snap) => {
+      analytics._handleAuthChange(snap);
+    });
+    // Pull current state immediately in case auth already resolved.
+    const current = manager.webManager.getCurrentUser();
+    if (current?.uid) analytics._handleAuthChange(current);
 
     // Compute initial user_properties from context + usage.
     analytics._userProperties = analytics._buildUserProperties();
@@ -140,15 +134,11 @@ const analytics = {
 
     // IPC: renderer → main analytics calls. Forward fires-and-forgets via send;
     // status query via invoke.
-    if (manager?.ipc) {
-      manager.ipc.unhandle?.('em:analytics:status');
-      manager.ipc.handle('em:analytics:status', () => analytics.toJSON());
-      // Use Set-deduped listener; named handler so re-init collapses duplicates.
-      if (typeof manager.ipc.on === 'function') {
-        manager.ipc.on('em:analytics:event',           analytics._onIpcEvent);
-        manager.ipc.on('em:analytics:set-user-properties', analytics._onIpcSetProps);
-      }
-    }
+    manager.ipc.unhandle('em:analytics:status');
+    manager.ipc.handle('em:analytics:status', () => analytics.toJSON());
+    // Use Set-deduped listener; named handler so re-init collapses duplicates.
+    manager.ipc.on('em:analytics:event',               analytics._onIpcEvent);
+    manager.ipc.on('em:analytics:set-user-properties', analytics._onIpcSetProps);
   },
 
   _onIpcEvent({ name, params } = {}) {
@@ -249,14 +239,15 @@ const analytics = {
   // GA4 param contract: each event needs engagement_time_msec (else session bounces),
   // and we add session_id + page_location so reports group properly.
   _enrichParams(params) {
-    const ctx = analytics._manager?.context || {};
-    const sessionStart = ctx.session?.startTime ? new Date(ctx.session.startTime).getTime() : Date.now();
+    const m = analytics._manager;
+    const ctx = m.context;
+    const sessionStart = ctx.session.startTime ? new Date(ctx.session.startTime).getTime() : Date.now();
     const engagement   = Math.max(1, Date.now() - sessionStart);
     return {
-      session_id:           ctx.session?.id || 'unknown',
+      session_id:           ctx.session.id || 'unknown',
       engagement_time_msec: engagement,
-      page_location:        params.page_location || `app://${analytics._manager?.config?.brand?.id || 'em'}`,
-      page_title:           params.page_title || analytics._manager?.config?.app?.productName || 'app',
+      page_location:        params.page_location || `app://${m.config.brand.id}`,
+      page_title:           params.page_title || m.config.app?.productName || m.config.brand.name,
       ...params,
     };
   },
@@ -264,19 +255,19 @@ const analytics = {
   // Compute user-properties from current context + usage. Re-run on auth change.
   _buildUserProperties() {
     const m = analytics._manager;
-    const ctx = m?.context || {};
-    const usage = m?.usage;
+    const ctx = m.context;
+    const usage = m.usage;
     const wrap = (v) => ({ value: v });
     const out = {
-      app_version:      wrap(ctx.app?.version || 'unknown'),
-      operating_system: wrap(ctx.client?.platform || 'unknown'),
-      device_category:  wrap(ctx.client?.mobile ? 'mobile' : 'desktop'),
-      country:          wrap(ctx.geolocation?.country || 'None'),
-      language:         wrap(ctx.client?.locale || 'None'),
+      app_version:      wrap(ctx.app.version || 'unknown'),
+      operating_system: wrap(ctx.client.platform || 'unknown'),
+      device_category:  wrap(ctx.client.mobile ? 'mobile' : 'desktop'),
+      country:          wrap(ctx.geolocation.country || 'None'),
+      language:         wrap(ctx.client.locale || 'None'),
       authenticated:    wrap(!!analytics._userId),
     };
-    if (usage?.opens) out.app_opens = wrap(usage.opens());
-    if (usage?.hoursTotal) out.app_hours_total = wrap(Math.round((usage.hoursTotal() || 0) * 100) / 100);
+    out.app_opens       = wrap(usage.opens());
+    out.app_hours_total = wrap(Math.round((usage.hoursTotal() || 0) * 100) / 100);
     return out;
   },
 

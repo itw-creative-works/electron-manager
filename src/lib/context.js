@@ -56,28 +56,20 @@ const context = {
     context.client.arch     = os.arch();
     context.client.mobile   = false;   // desktop framework — never true
 
-    // electron's `app` is only present in the main process. In renderer/preload
-    // the `electron` import surface has no `.app`; in plain Node it's a string
-    // (the binary path). require() doesn't throw in any of those — just check
-    // for the property.
     const { app } = require('electron');
-    if (app) {
-      context.client.userAgent = app.userAgentFallback || null;
-      context.client.locale    = app.getLocale?.() || null;
-      context.app.isPackaged   = !!app.isPackaged;
-    } else {
-      context.app.isPackaged   = false;
-    }
+    context.client.userAgent = app.userAgentFallback || null;
+    context.client.locale    = app.getLocale();
+    context.app.isPackaged   = app.isPackaged;
 
     // ─── app ──────────────────────────────────────────────────────────────────
-    context.app.version     = manager?.getVersion?.() || null;
-    context.app.environment = manager?.getEnvironment?.() || null;
+    context.app.version     = manager.getVersion();
+    context.app.environment = manager.getEnvironment();
 
     // ─── geolocation ──────────────────────────────────────────────────────────
     // Restore last-known from storage immediately so we always have SOMETHING to
     // work with (offline boot, ipify down, slow network, etc.). Then fire the
     // network fetch in the background — when it lands it overwrites + persists.
-    const cached = manager?.storage?.get?.(STORAGE_KEY) || null;
+    const cached = manager.storage.get(STORAGE_KEY) || null;
     if (cached?.geolocation) {
       Object.assign(context.geolocation, cached.geolocation);
     }
@@ -85,10 +77,8 @@ const context = {
     context._fetchGeolocation().catch((e) => logger.warn(`geolocation fetch failed: ${e.message}`));
 
     // IPC: renderer can read the full context block.
-    if (manager?.ipc) {
-      manager.ipc.unhandle?.('em:context:get');
-      manager.ipc.handle('em:context:get', () => context.toJSON());
-    }
+    manager.ipc.unhandle('em:context:get');
+    manager.ipc.handle('em:context:get', () => context.toJSON());
 
     logger.log(`context initialized — session=${context.session.id} deviceId=${context.session.deviceId} platform=${context.client.platform}`);
   },
@@ -101,15 +91,13 @@ const context = {
   async _resolveDeviceId() {
     const m = context._manager;
 
-    const stored = m?.storage?.get?.(`${STORAGE_KEY}.deviceId`);
+    const stored = m.storage.get(`${STORAGE_KEY}.deviceId`);
     if (stored) return stored;
 
     const mac = context._readFirstMac();
     const id = mac || crypto.randomUUID();
 
-    if (m?.storage?.set) {
-      m.storage.set(`${STORAGE_KEY}.deviceId`, id);
-    }
+    m.storage.set(`${STORAGE_KEY}.deviceId`, id);
     return id;
   },
 
@@ -145,9 +133,7 @@ const context = {
 
     context.geolocation.ip = ip;
     // Persist for next launch so an offline boot still has a usable IP.
-    if (context._manager?.storage?.set) {
-      context._manager.storage.set(`${STORAGE_KEY}.geolocation`, { ...context.geolocation });
-    }
+    context._manager.storage.set(`${STORAGE_KEY}.geolocation`, { ...context.geolocation });
   },
 
   // Test/teardown helper. Re-initialize is idempotent guarded; call this first

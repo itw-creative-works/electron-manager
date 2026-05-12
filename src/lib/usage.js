@@ -47,7 +47,7 @@ const usage = {
     usage._manager = manager;
     usage._sessionStart = Date.now();
 
-    const previous = manager?.storage?.get?.(STORAGE_KEY) || {};
+    const previous = manager.storage.get(STORAGE_KEY) || {};
     const now = new Date();
 
     // Step 2: credit prior session if it ended cleanly.
@@ -69,19 +69,15 @@ const usage = {
       lastQuitAt:   null,                                 // cleared; will be set on quit
     };
 
-    if (manager?.storage?.set) {
-      manager.storage.set(STORAGE_KEY, next);
-    }
+    manager.storage.set(STORAGE_KEY, next);
     usage._snapshot = next;
 
     // Wire the quit handler — single registration, idempotent if re-init runs.
     usage._wireQuitHandler();
 
     // IPC for renderer access to usage stats.
-    if (manager?.ipc) {
-      manager.ipc.unhandle?.('em:usage:get');
-      manager.ipc.handle('em:usage:get', () => usage.toJSON());
-    }
+    manager.ipc.unhandle('em:usage:get');
+    manager.ipc.handle('em:usage:get', () => usage.toJSON());
 
     logger.log(`usage initialized — opens=${next.opens} hoursTotal=${next.hoursTotal.toFixed(2)} installedAt=${next.installedAt}`);
   },
@@ -90,14 +86,10 @@ const usage = {
     if (usage._quitHandlerWired) return;
     usage._quitHandlerWired = true;
     const { app } = require('electron');
-    if (!app?.on) return;       // not in main (renderer/preload have no `app`) — no-op
     app.on('before-quit', () => {
-      try {
-        if (!usage._manager?.storage?.set) return;
-        const cur = usage._manager.storage.get(STORAGE_KEY) || usage._snapshot || {};
-        cur.lastQuitAt = new Date().toISOString();
-        usage._manager.storage.set(STORAGE_KEY, cur);
-      } catch (_) { /* best-effort; quit is in flight */ }
+      const cur = usage._manager.storage.get(STORAGE_KEY) || usage._snapshot || {};
+      cur.lastQuitAt = new Date().toISOString();
+      usage._manager.storage.set(STORAGE_KEY, cur);
     });
   },
 

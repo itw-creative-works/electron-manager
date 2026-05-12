@@ -151,12 +151,8 @@ const ipc = {
 
   // Send to a specific renderer's webContents.
   send(webContents, channel, payload) {
-    if (!webContents || webContents.isDestroyed?.()) return;
-    try {
-      webContents.send(channel, payload);
-    } catch (e) {
-      logger.error(`send to "${channel}" failed:`, e);
-    }
+    if (!webContents || webContents.isDestroyed()) return;
+    webContents.send(channel, payload);
   },
 
   // Test/inspection helpers

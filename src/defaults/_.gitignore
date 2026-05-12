@@ -4,13 +4,13 @@
 node_modules/
 /dist/
 /release/
-/.em-cache/
+/.cache/
 .env
 *.log
 /logs/
 
 # Apple signing artifacts — never commit these
-build/certs/
+config/certs/
 *.p12
 *.cer
 *.mobileprovision

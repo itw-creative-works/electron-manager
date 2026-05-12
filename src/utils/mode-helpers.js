@@ -66,7 +66,7 @@ function getVersion() {
   try {
     const path = require('path');
     const pkg = require(path.join(process.cwd(), 'package.json'));
-    return pkg?.version || null;
+    return pkg.version || null;
   } catch (_) {
     // Only legitimate failure: no package.json at cwd. Tolerate so build-time
     // tooling running outside a project root still loads cleanly.

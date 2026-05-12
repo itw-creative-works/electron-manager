@@ -18,6 +18,7 @@ On clean `before-quit` it auto-unregisters. The handshake is fire-and-forget —
 
 EM skips the entire dance when:
 
+- **`manager.isTesting() === true`** — absolutely nothing fires. No register, no unregister, no probe, no `getApplicationNameForProtocol`, no download, no `shell.openExternal`, no install. Tests must never touch real OS state (protocol handlers, downloads dir, `/Applications`). Defense in depth: the guard fires at `initialize()`, `_send()`, `ensureInstalled()`, and `_installRM()` — so even if a test manually invokes one of these methods after monkey-patching `_enabled`, it stays a no-op.
 - `manager.config.brand.id === 'restart-manager'` — RM doesn't manage itself.
 - `config.restartManager.enabled === false` — explicit opt-out.
 - `manager.isDevelopment() === true` and `EM_RESTART_MANAGER_DEV !== '1'` — silently skipped in dev. Set `EM_RESTART_MANAGER_DEV=1` to exercise the flow against a locally installed RM.
