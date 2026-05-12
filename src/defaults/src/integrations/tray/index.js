@@ -3,10 +3,11 @@
 // `manager` — the running EM Manager.
 // `tray`    — builder API + id-path API (find/update/remove/insertAfter/etc.).
 //
-// EM auto-resolves the tray icon via a 3-tier waterfall:
-//   1. config.app.icons.trayMac / trayWindows / trayLinux (explicit override)
-//   2. config/icons/<platform>/<file> (file convention)
-//   3. EM bundled default
+// EM auto-resolves the tray icon by convention (most specific wins):
+//   1. config/icons/<platform>/tray.png   (platform-specific override)
+//   2. config/icons/global/tray.png       (universal fallback for all platforms)
+//   3. config/icons/<platform>/icon.png   (slot fallback: tray → app icon)
+//   4. EM bundled default
 // And auto-sets the tooltip to config.app.productName.
 //
 // Default items shipped by EM (flat ids — no `tray/` prefix needed):
@@ -24,8 +25,9 @@ module.exports = ({ manager, tray }) => {
 
   // ───────── Examples (uncomment to use) ─────────
   //
-  // // Override the icon path (otherwise auto-resolved):
-  // tray.icon('src/assets/icons/tray-Template.png');
+  // // Override the icon path (otherwise auto-resolved from config/icons/macos/tray.png).
+  // // On macOS, the filename MUST end in `Template.png` for OS dark-mode auto-inversion.
+  // tray.icon('src/assets/icons/my-trayTemplate.png');
   //
   // // Override the tooltip (otherwise = productName):
   // tray.tooltip('My Custom Tooltip');

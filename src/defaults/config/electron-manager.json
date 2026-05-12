@@ -30,24 +30,15 @@
     category:        'productivity',
     languages:       ['en'],              // applied as mac.electronLanguages
     darkModeSupport: true,                // mac honors via NSRequiresAquaSystemAppearance; win/linux ignore
-    // Icon overrides. Each is an optional project-relative or absolute path. Resolution
-    // chain per slot, per platform: explicit config path → <projectRoot>/config/icons/<platform>/<slot>.png
-    // → EM's bundled default. Linux follows the Windows chain; Windows tray falls back to
-    // the Windows app icon if no tray-specific source resolves.
-    // @2x variants are auto-discovered: if your @1x source is `foo.png`, EM looks for
-    // `foo@2x.png` next to it and copies both. No need to specify @2x explicitly.
-    icons: {
-      // macOS
-      appMac:    null,    // app icon source (electron-builder converts to .icns)
-      trayMac:   null,    // 32x32 black template (auto-tints for menubar dark/light); @2x auto-paired
-      dmgMac:    null,    // 540x380 DMG installer background; @2x auto-paired
-      // Windows
-      appWindows:  null,  // app icon source (electron-builder converts to .ico)
-      trayWindows: null,  // optional; falls back to appWindows
-      // Linux (optional; falls back to Windows resolution by default)
-      appLinux:    null,
-      trayLinux:   null,
-    },
+    // Icons are convention-only. Drop PNGs at:
+    //   config/icons/global/<slot>.png       — universal default for all platforms
+    //   config/icons/macos/<slot>.png        — macOS override (beats global)
+    //   config/icons/windows/<slot>.png      — Windows override
+    //   config/icons/linux/<slot>.png        — Linux override (otherwise falls back to global → windows)
+    // Slots: icon, tray (mac+win+linux); dmg (mac-only).
+    // Native size only — EM downscales @1x variants from your @2x source automatically.
+    // macOS tray must be 32×32; EM renames the dist output to trayTemplate.png for the
+    // OS dark-mode auto-inversion magic.
   },
   // Per-target install/distribution config. The keys here map directly to the same
   // electron-builder concepts (`mac.target`, `win.target`, `linux.target`) but EM owns

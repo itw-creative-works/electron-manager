@@ -5,6 +5,7 @@ node_modules/
 /dist/
 /release/
 /.cache/
+/.claude/
 .env
 *.log
 /logs/

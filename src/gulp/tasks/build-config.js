@@ -38,7 +38,7 @@ module.exports = function buildConfig(done) {
 
     // 2. Resolve + copy icons (3-tier waterfall) into dist/config/icons/.
     const emDefaultsRoot = path.join(__dirname, '..', '..', 'defaults', 'config');
-    const icons = resolveAndCopy({ config, projectRoot, distRoot, emDefaultsRoot });
+    const icons = await resolveAndCopy({ config, projectRoot, distRoot, emDefaultsRoot });
     logger.log(`resolved icons: mac=${Object.keys(icons.macos).length}, win=${Object.keys(icons.windows).length}, linux=${Object.keys(icons.linux).length}`);
 
     // Build the full config object from EM defaults + consumer overrides.

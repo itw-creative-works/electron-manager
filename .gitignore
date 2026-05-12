@@ -41,7 +41,10 @@ node_modules/
 # Build output
 /dist/
 /release/
-/.em-cache/
+/.cache/
+
+# Claude Code runtime state (scheduled tasks lock, etc.)
+/.claude/
 
 # Runner state (Windows EV-token runner workspace; per-org actions/runner installs)
 /.gh-runners/

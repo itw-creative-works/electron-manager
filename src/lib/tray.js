@@ -169,35 +169,37 @@ const tray = {
     const platform = process.platform === 'darwin' ? 'macos'
       : process.platform === 'win32' ? 'windows'
       : 'linux';
-    const file = platform === 'macos' ? 'trayTemplate.png' : 'tray.png';
+    // INPUT name (what consumers ship in config/icons/<platform>/ or global/) is always tray.png.
+    // OUTPUT name (what gulp/build-config writes into dist/config/icons/macos/) is
+    // trayTemplate.png on mac — the `Template` suffix is a macOS magic marker that
+    // makes the OS auto-invert the icon in dark mode.
+    const inFile  = 'tray.png';
+    const outFile = platform === 'macos' ? 'trayTemplate.png' : 'tray.png';
     const fallbackFile = 'icon.png'; // tray → app icon if absent
 
     const projectRoot = require('../utils/app-root.js')();
-    const m = tray._manager;
 
-    // 1. Consumer config explicit path.
-    const slotKey = `tray${platform === 'macos' ? 'Mac' : platform === 'windows' ? 'Windows' : 'Linux'}`;
-    const cfgVal = m.config.app?.icons?.[slotKey];
-    if (cfgVal && typeof cfgVal === 'string') {
-      const abs = path.isAbsolute(cfgVal) ? cfgVal : path.join(projectRoot, cfgVal);
-      if (fs.existsSync(abs)) return abs;
-    }
-
-    // 2. dist/config/icons — populated by gulp/build-config (consumes the build-time waterfall).
+    // 1. dist/config/icons — populated by gulp/build-config (which already resolved
+    // the platform/global/bundled waterfall at build time).
     const linuxFallbackPlatform = platform === 'linux' ? 'windows' : platform;
     const tryDistBuild = (plat, name) => path.join(projectRoot, 'dist', 'config', 'icons', plat, name);
-    if (fs.existsSync(tryDistBuild(linuxFallbackPlatform, file))) {
-      return tryDistBuild(linuxFallbackPlatform, file);
+    if (fs.existsSync(tryDistBuild(linuxFallbackPlatform, outFile))) {
+      return tryDistBuild(linuxFallbackPlatform, outFile);
     }
     // tray slot missing → fall back to app icon.
     if (fs.existsSync(tryDistBuild(linuxFallbackPlatform, fallbackFile))) {
       return tryDistBuild(linuxFallbackPlatform, fallbackFile);
     }
 
-    // 3. Consumer file convention (skipped-build fallback).
-    const tryConventional = (name) => path.join(projectRoot, 'config', 'icons', platform, name);
-    if (fs.existsSync(tryConventional(file))) return tryConventional(file);
-    if (fs.existsSync(tryConventional(fallbackFile))) return tryConventional(fallbackFile);
+    // 2. Consumer convention waterfall (skipped-build fallback — rare, testing scenarios).
+    //    platform/<file> → global/<file> → [linux only] windows/<file> → platform/icon.png → global/icon.png.
+    const tryConv = (subdir, name) => path.join(projectRoot, 'config', 'icons', subdir, name);
+    if (fs.existsSync(tryConv(platform, inFile))) return tryConv(platform, inFile);
+    if (fs.existsSync(tryConv('global', inFile))) return tryConv('global', inFile);
+    if (platform === 'linux' && fs.existsSync(tryConv('windows', inFile))) return tryConv('windows', inFile);
+    // Tray fallback to app icon.
+    if (fs.existsSync(tryConv(platform, fallbackFile))) return tryConv(platform, fallbackFile);
+    if (fs.existsSync(tryConv('global', fallbackFile))) return tryConv('global', fallbackFile);
 
     return null;
   },

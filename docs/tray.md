@@ -11,7 +11,11 @@ No config block. Path is conventional: `src/integrations/tray/index.js`. To opt 
 ```js
 // src/integrations/tray/index.js
 module.exports = ({ manager, tray }) => {
-  tray.icon('src/assets/icons/tray-Template.png');
+  // EM auto-resolves the tray icon from config/icons/<platform>/tray.png at build
+  // time, so explicit tray.icon() is OPTIONAL. Call it only to override.
+  // Note: on macOS, if you pass your own path, the filename MUST end in
+  // `Template.png` for the OS to auto-invert it in dark mode.
+  // tray.icon('src/assets/icons/my-trayTemplate.png');
   tray.tooltip(manager.config?.app?.productName);
 
   // Easiest: start from EM's default template.

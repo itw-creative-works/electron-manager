@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.4.4 — icon convention simplified: ship native @2x only, drop app.icons block, global/ + per-platform layout
+
+Icon resolution is now convention-only with retina derivation. Consumers ship ONE file per slot at the native (@2x) size; EM downscales the @1x sibling automatically.
+
+### Added
+
+- **`docs/icons.md`** — convention layout (`global/` + `macos/` + `windows/` + `linux/`), resolution chain, retina rules, macOS Template magic, scenarios for "one icon everywhere" vs "platform-specific".
+- **`config/icons/global/<slot>.png`** — universal fallback directory. Used by any platform that has no platform-specific override.
+- **`sharp` + `gulp-responsive-modern`** dependencies — sharp handles the @1x downscaling at build time. `gulp-responsive-modern` is added for parity with BXM's icon pipeline (we call sharp directly since `resolve-icons.js` runs sync inside `build-config`, not as a gulp stream).
+- **`outFile` slot field** in `SLOTS` — separates input filename from output filename. macOS tray uses this: input is `tray.png` (consumer-friendly, matches Windows/Linux); output is `trayTemplate.png` (macOS magic marker for dark-mode auto-inversion).
+
+### Changed
+
+- **BREAKING: `app.icons` config block removed.** No more `appMac` / `trayMac` / `dmgMac` / etc. Icons are discovered by file convention only. All consumers should remove the `icons: { ... }` block from `app:`.
+- **BREAKING (file convention): bundled defaults and consumer files now ship at native (@2x) size.** EM derives `<slot>.png` (downscaled) and `<slot>@2x.png` (the source) into `dist/config/icons/<platform>/`. Consumers no longer ship `<name>@2x.png` files.
+  - macOS tray: 32×32 native
+  - macOS DMG background: 1080×760 native
+- **BREAKING (file convention): macOS tray input file is now `tray.png`** (was `trayTemplate.png`). EM renames the dist output to `trayTemplate.png` for OS dark-mode magic.
+- **Resolution waterfall** is now: `<platform>/<slot>` → `global/<slot>` → (Linux only) `windows/<slot>` → bundled `<platform>/<slot>` → (Linux only) bundled `windows/<slot>`. Most specific wins.
+- **`resolveAndCopy()` is now async** (sharp is async-only). `gulp/build-config.js` awaits it.
+- **Linux fallback chain extended** to walk through the consumer's `windows/` dir AND the bundled `windows/` dir before giving up. Preserves the legacy "Linux apps reuse Windows assets" behavior without consumer config.
+- **EM scaffold consumer-facing comment** in `defaults/config/electron-manager.json` rewritten to describe the new convention.
+- **DP migrated** (sister deployment-playground-desktop): icons block removed, @1x files deleted, `trayTemplate.png` → `tray.png`.
+
+### Removed
+
+- `app.icons.appMac` / `trayMac` / `dmgMac` / `appWindows` / `trayWindows` / `appLinux` / `trayLinux` config keys.
+- Bundled `@2x` PNG files (`dmg@2x.png`, `trayTemplate@2x.png`, `trayTemplate.png` — the small @1x). Replaced with single `tray.png` (32×32 native) and `dmg.png` (1080×760 native).
+
+### Fixed
+
+- `.gitignore`: added `/.claude/` (Claude Code's `scheduled_tasks.lock` runtime state from `/loop` invocations should never be committed). Renamed stale `/.em-cache/` → `/.cache/` to match the rename done in v1.4.1.
+
 ## 1.4.3 — consumer CLAUDE.md auto-sync + isFrameworkSelfTest + merge idempotency fix
 
 ### Added
