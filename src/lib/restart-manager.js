@@ -102,8 +102,8 @@ const restartManager = {
     // Bail #4: dev mode unless explicitly opted in. Avoids spam during local dev
     // where RM almost certainly isn't installed and we'd just thrash retries.
     const devOptIn = process.env.EM_RESTART_MANAGER_DEV === '1';
-    if (manager.isDevelopment() && !devOptIn) {
-      logger.log('skipping in dev (set EM_RESTART_MANAGER_DEV=1 to test).');
+    if (!manager.isProduction() && !devOptIn) {
+      logger.log('skipping outside production (set EM_RESTART_MANAGER_DEV=1 to test).');
       return;
     }
 

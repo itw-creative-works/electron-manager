@@ -11,11 +11,13 @@ module.exports = {
   description: 'startup paths + global user agent',
   tests: [
     {
-      name: 'userData path includes "(Development)" suffix in test/dev mode',
+      name: 'userData path includes "(Development)" suffix in non-production (test/dev) mode',
       run: (ctx) => {
         const { app } = require('electron');
         const userData = app.getPath('userData');
-        // Test harness runs unpackaged → manager.isDevelopment() === true → suffix applied.
+        // Suffix is applied for any non-production run (gated on !isProduction()). Under the
+        // test harness isProduction() === false, so the suffix is applied — isolating test
+        // data from a production-installed copy of the app on the same machine.
         ctx.expect(typeof userData).toBe('string');
         ctx.expect(userData.endsWith(' (Development)')).toBe(true);
       },

@@ -1,26 +1,15 @@
-// Backend URL helpers + environment resolver, shared across all Manager contexts
-// (main / renderer / preload / build). Mirror web-manager's contract so EM apps can
-// hit the same dev/prod backends as UJM and BXM consumers.
+// Backend URL helpers, shared across all Manager contexts (main / renderer / preload /
+// build). Mirror web-manager's contract so EM apps can hit the same dev/prod backends as
+// UJM and BXM consumers.
 //
-// `getEnvironment()` returns 'production' or 'development'. Two layers:
-//   1. If we have a Manager instance with config loaded, prefer config.em.environment
-//      (the consumer's runtime decision — what backend should this app talk to?).
-//   2. Otherwise fall back to the build-time signal: EM_BUILD_MODE=true → production,
-//      else development. Applies during gulp / build-time scripts before any config
-//      is loaded.
-// One semantic, two fallback layers — same answer in main, renderer, preload, build.
+// `getEnvironment()` is the SINGLE SOURCE OF TRUTH and lives in src/utils/mode-helpers.js
+// (alongside the is*() family; mirrors BEM/UJM/BXM). It returns exactly ONE of
+// 'development' | 'testing' | 'production' (mutually exclusive; testing wins).
 //
-// `getFunctionsUrl()` and `getApiUrl()` route through `this.getEnvironment()` to
-// resolve dev/prod, falling back to an explicit `environment` arg when the caller
-// wants to override.
-
-function getEnvironment() {
-  const cfgEnv = this?.config?.em?.environment;
-  if (cfgEnv === 'development' || cfgEnv === 'production') return cfgEnv;
-  // Fall back to the build-time mode signal. EM_BUILD_MODE=true is set during a
-  // production build (npm run build / npm run release); absent everywhere else.
-  return process.env.EM_BUILD_MODE === 'true' ? 'production' : 'development';
-}
+// `getFunctionsUrl()` / `getApiUrl()` / `getWebsiteUrl()` route through
+// `this.getEnvironment()` and resolve to LOCAL urls in BOTH development AND testing —
+// callers normally pass NO argument. An explicit `environment` arg is an override
+// (used mainly by tests to pin a specific environment's mapping).
 
 function getFunctionsUrl(environment) {
   const env = environment || this.getEnvironment();
@@ -30,7 +19,8 @@ function getFunctionsUrl(environment) {
     throw new Error('firebaseConfig.projectId not set in config/electron-manager.json');
   }
 
-  if (env === 'development') {
+  // Local for development OR testing; production otherwise.
+  if (env === 'development' || env === 'testing') {
     return `http://localhost:5001/${projectId}/us-central1`;
   }
 
@@ -40,7 +30,8 @@ function getFunctionsUrl(environment) {
 function getApiUrl(environment) {
   const env = environment || this.getEnvironment();
 
-  if (env === 'development') {
+  // Local for development OR testing; production otherwise.
+  if (env === 'development' || env === 'testing') {
     return 'http://localhost:5002';
   }
 
@@ -60,7 +51,8 @@ function getApiUrl(environment) {
 function getWebsiteUrl(environment) {
   const env = environment || this.getEnvironment();
 
-  if (env === 'development') {
+  // Local for development OR testing; production otherwise.
+  if (env === 'development' || env === 'testing') {
     return 'https://localhost:4000';
   }
 
@@ -71,16 +63,14 @@ function getWebsiteUrl(environment) {
   return url;
 }
 
-// Mix the helpers into a Manager constructor's prototype + the constructor itself.
-// Note: build.js defines its own `getEnvironment` (older contract — pure build-mode
-// driven). attachTo overrides that with the new config-aware version, so callers in
-// gulp tasks see the same fallback behavior as runtime callers.
+// Mix the URL helpers into a Manager constructor's prototype + the constructor itself.
+// getEnvironment() is NOT attached here — it's the SSOT in src/utils/mode-helpers.js.
+// These helpers call `this.getEnvironment()`, so mode-helpers' attachTo() must run before
+// (or alongside) this one — every Manager entry point attaches mode-helpers first.
 function attachTo(Manager) {
-  Manager.prototype.getEnvironment   = getEnvironment;
   Manager.prototype.getFunctionsUrl  = getFunctionsUrl;
   Manager.prototype.getApiUrl        = getApiUrl;
   Manager.prototype.getWebsiteUrl    = getWebsiteUrl;
-  Manager.getEnvironment   = getEnvironment;
   Manager.getFunctionsUrl  = getFunctionsUrl;
   Manager.getApiUrl        = getApiUrl;
   Manager.getWebsiteUrl    = getWebsiteUrl;
@@ -88,7 +78,6 @@ function attachTo(Manager) {
 
 module.exports = {
   attachTo,
-  getEnvironment,
   getFunctionsUrl,
   getApiUrl,
   getWebsiteUrl,

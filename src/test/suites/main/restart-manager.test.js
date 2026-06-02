@@ -56,13 +56,14 @@ module.exports = {
       },
     },
     {
-      name: 'dev mode without EM_RESTART_MANAGER_DEV: bail (no timer scheduled)',
+      name: 'non-production without EM_RESTART_MANAGER_DEV: bail (no timer scheduled)',
       run: (ctx) => {
-        // Test harness is unpackaged → manager.isDevelopment() === true. So default
-        // initialize() should already have bailed and not scheduled a timer.
-        // (And EM_RESTART_MANAGER_DEV is not set in tests.)
+        // The harness runs under EM_TEST_MODE → getEnvironment() === 'testing', so
+        // isProduction() === false. restart-manager bails outside production (gate:
+        // `!manager.isProduction() && !devOptIn`), so initialize() should NOT have
+        // scheduled a timer. (EM_RESTART_MANAGER_DEV is not set in tests.)
         ctx.expect(process.env.EM_RESTART_MANAGER_DEV).not.toBe('1');
-        ctx.expect(ctx.manager.isDevelopment()).toBe(true);
+        ctx.expect(ctx.manager.isProduction()).toBe(false);
         ctx.expect(ctx.manager.restartManager._registerTimer).toBe(null);
       },
     },

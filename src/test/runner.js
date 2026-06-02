@@ -47,6 +47,10 @@ async function run(options = {}) {
   console.log('');
   console.log(chalk.bold('  Electron Manager Tests'));
 
+  // Run the optional test/_init.js setup() hooks (framework + consumer) ONCE,
+  // before any suite. There is no cleanup hook — tests clean up after themselves.
+  await runInitSetups();
+
   const results = { passed: 0, failed: 0, skipped: 0, tests: [] };
 
   if (sources.framework.length > 0) {
@@ -403,6 +407,64 @@ function relativizePath(file, source) {
     return path.relative(path.join(__dirname, 'suites'), file);
   }
   return path.relative(path.join(process.cwd(), 'test'), file);
+}
+
+// ---------------------------------------------------------------------------
+// test/_init.js — pre-test lifecycle hook (setup only)
+//
+// Mirrors the backend framework's hook so all four frameworks share one shape.
+// A project may add `<cwd>/test/_init.js` exporting a FUNCTION —
+// `module.exports = (ctx) => ({ setup })` — called with `{ projectRoot }` and
+// returning an object with an async `setup({ projectRoot })` that runs ONCE
+// before any suite (e.g. to scaffold a fixture file the boot layer needs).
+// There is no `cleanup` hook: tests clean up after themselves. Unlike the
+// backend framework, there is no `accounts` field here — these frameworks have
+// no auth/user system.
+// ---------------------------------------------------------------------------
+
+function loadInit(testDir, label) {
+  const initPath = path.join(testDir, '_init.js');
+
+  if (!jetpack.exists(initPath)) {
+    return {};
+  }
+
+  try {
+    const fn = require(initPath);
+
+    if (typeof fn !== 'function') {
+      console.log(chalk.red(`  ✗ ${label} test/_init.js must export a function: module.exports = (ctx) => ({ ... })`));
+      return {};
+    }
+
+    const mod = fn({ projectRoot: process.cwd() });
+    return mod && typeof mod === 'object' ? mod : {};
+  } catch (e) {
+    console.log(chalk.red(`  ✗ Failed to load ${label} test/_init.js: ${e.message}`));
+    return {};
+  }
+}
+
+async function runInitSetups() {
+  const frameworkTestsDir = path.resolve(__dirname, '../../test');
+  const projectTestsDir = path.join(process.cwd(), 'test');
+
+  const hooks = [
+    loadInit(frameworkTestsDir, 'framework'),
+    loadInit(projectTestsDir, 'project'),
+  ];
+
+  const setups = hooks.filter((h) => typeof h.setup === 'function').map((h) => h.setup);
+
+  for (const setup of setups) {
+    process.stdout.write(chalk.gray('  Running test/_init.js setup... '));
+    try {
+      await setup({ projectRoot: process.cwd() });
+      console.log(chalk.green('✓'));
+    } catch (e) {
+      console.log(chalk.red(`✗ (${e.message})`));
+    }
+  }
 }
 
 module.exports = { run, SkipError };

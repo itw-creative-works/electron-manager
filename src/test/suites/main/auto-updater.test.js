@@ -762,17 +762,21 @@ module.exports = {
       },
     },
     {
-      name: 'manager.isDevelopment() returns true when running unpackaged',
+      name: 'manager.isDevelopment() is false during tests (testing takes precedence)',
       run: (ctx) => {
-        // Test environment runs `electron .` (unpackaged), so isPackaged === false → isDevelopment === true.
+        // The test runs unpackaged, but EM_TEST_MODE=true → testing wins, so this is a
+        // TEST environment, not development. isDevelopment() is therefore false.
         ctx.expect(typeof ctx.manager.isDevelopment).toBe('function');
-        ctx.expect(ctx.manager.isDevelopment()).toBe(true);
+        ctx.expect(ctx.manager.isDevelopment()).toBe(false);
+        ctx.expect(ctx.manager.isTesting()).toBe(true);
       },
     },
     {
-      name: 'manager.isProduction() is the inverse of isDevelopment',
+      name: 'manager environments are mutually exclusive (exactly one true)',
       run: (ctx) => {
-        ctx.expect(ctx.manager.isProduction()).toBe(!ctx.manager.isDevelopment());
+        const flags = [ctx.manager.isDevelopment(), ctx.manager.isTesting(), ctx.manager.isProduction()];
+        ctx.expect(flags.filter(Boolean).length).toBe(1);
+        ctx.expect(ctx.manager.isProduction()).toBe(false);
       },
     },
     {

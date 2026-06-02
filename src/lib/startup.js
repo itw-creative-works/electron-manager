@@ -111,12 +111,12 @@ const startup = {
     return 'none';
   },
 
-  // Should we suppress dev-only login-item changes? Routes through manager.isDevelopment()
-  // (the cross-context "are we running unpackaged" helper). EM_FORCE_LOGIN_ITEM=1 bypasses
-  // the dev guard so you can intentionally test the login-item flow in dev.
+  // Should we suppress login-item changes? Suppressed in any non-production run (dev OR
+  // testing) so we never touch the real user's OS login items outside a packaged build.
+  // EM_FORCE_LOGIN_ITEM=1 bypasses the guard so you can intentionally exercise the flow.
   _isDev() {
     if (process.env.EM_FORCE_LOGIN_ITEM === '1') return false;
-    return startup._manager.isDevelopment();
+    return !startup._manager.isProduction();
   },
 
   // Returns the resolved user-launch mode, defaulting to 'normal' for unknown values.

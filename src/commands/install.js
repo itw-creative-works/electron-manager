@@ -12,7 +12,7 @@ module.exports = async function (options) {
   const type = options._[1] || 'prod';
 
   try {
-    if (['prod', 'p', 'production'].includes(type)) {
+    if (['live', 'prod', 'p', 'production'].includes(type)) {
       logger.log('Installing production...');
       await run(`npm uninstall ${package.name}`);
       await run(`npm install ${package.name}@latest --save-dev`);

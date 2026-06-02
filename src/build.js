@@ -110,8 +110,12 @@ Manager.actLikeProduction = function () {
 };
 Manager.prototype.actLikeProduction = Manager.actLikeProduction;
 
-// `getEnvironment()` lives in src/utils/url-helpers.js — same impl across all four
-// Managers. Mixed in via the attachTo() call at the bottom of this file.
+// getEnvironment() is the SINGLE SOURCE OF TRUTH and lives in src/utils/mode-helpers.js
+// (alongside isDevelopment/isProduction/isTesting — the natural environment-helper family).
+// It's mixed into ALL FOUR EM Manager entry points (main / renderer / preload / build) via
+// the mode-helpers attachTo() call at the bottom of each, so every context resolves the
+// environment identically. (EM has four separate Manager constructors that share code only
+// through these mixins — unlike UJM/BXM, where one build.js Manager serves every context.)
 
 Manager.getMode = function () {
   return {

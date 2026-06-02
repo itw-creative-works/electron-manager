@@ -1,7 +1,8 @@
-// Tests for src/utils/url-helpers.js — getEnvironment / getFunctionsUrl /
-// getApiUrl / getWebsiteUrl. Each helper routes through `this.config` and
-// `this.getEnvironment()`, so the manager (already bootstrapped by the test
-// harness) is the natural object under test.
+// Tests for src/utils/url-helpers.js — getFunctionsUrl / getApiUrl / getWebsiteUrl —
+// plus the getEnvironment() resolution they depend on (getEnvironment itself is the
+// SSOT defined in src/utils/mode-helpers.js; these tests exercise it through the
+// Manager because the URL helpers route through `this.config` and `this.getEnvironment()`).
+// The manager (already bootstrapped by the test harness) is the natural object under test.
 
 module.exports = {
   type: 'suite',
@@ -9,37 +10,54 @@ module.exports = {
   description: 'url-helpers (cross-context)',
   tests: [
     {
-      name: 'getEnvironment: returns config.em.environment when set',
+      name: 'getEnvironment: testing (EM_TEST_MODE) wins; else config.em.environment',
       run: (ctx) => {
         const m = ctx.manager;
         const orig = m.config?.em?.environment;
+        const origTest = process.env.EM_TEST_MODE;
         m.config.em = m.config.em || {};
         try {
+          // Testing takes precedence over the config override.
+          process.env.EM_TEST_MODE = 'true';
+          m.config.em.environment = 'production';
+          ctx.expect(m.getEnvironment()).toBe('testing');
+          // With testing cleared, the config override is honored.
+          delete process.env.EM_TEST_MODE;
           m.config.em.environment = 'development';
           ctx.expect(m.getEnvironment()).toBe('development');
           m.config.em.environment = 'production';
           ctx.expect(m.getEnvironment()).toBe('production');
         } finally {
           m.config.em.environment = orig;
+          if (origTest === undefined) delete process.env.EM_TEST_MODE; else process.env.EM_TEST_MODE = origTest;
         }
       },
     },
     {
-      name: 'getEnvironment: falls back to EM_BUILD_MODE when config has no env',
+      // In the MAIN process, app.isPackaged is the authoritative signal and beats the
+      // EM_BUILD_MODE fallback. The test harness is unpackaged, so once testing + config are
+      // cleared, getEnvironment() resolves to 'development' from app.isPackaged === false —
+      // regardless of EM_BUILD_MODE. (The EM_BUILD_MODE fallback only applies where `app` is
+      // unavailable: renderer / preload / plain Node — covered by the build-layer manager test.)
+      name: 'getEnvironment: app.isPackaged (unpackaged → development) wins over EM_BUILD_MODE in main',
       run: (ctx) => {
         const m = ctx.manager;
         const origEnv  = m.config?.em?.environment;
         const origBuild = process.env.EM_BUILD_MODE;
+        const origTest = process.env.EM_TEST_MODE;
         if (m.config.em) delete m.config.em.environment;
+        delete process.env.EM_TEST_MODE; // isolate from testing precedence
         try {
+          // Unpackaged harness → 'development' even with EM_BUILD_MODE set (app.isPackaged wins).
           process.env.EM_BUILD_MODE = 'true';
-          ctx.expect(m.getEnvironment()).toBe('production');
+          ctx.expect(m.getEnvironment()).toBe('development');
           delete process.env.EM_BUILD_MODE;
           ctx.expect(m.getEnvironment()).toBe('development');
         } finally {
           if (origEnv !== undefined) m.config.em.environment = origEnv;
           if (origBuild !== undefined) process.env.EM_BUILD_MODE = origBuild;
           else delete process.env.EM_BUILD_MODE;
+          if (origTest !== undefined) process.env.EM_TEST_MODE = origTest;
         }
       },
     },
@@ -87,6 +105,14 @@ module.exports = {
       name: 'getApiUrl: dev returns http://localhost:5002',
       run: (ctx) => {
         ctx.expect(ctx.manager.getApiUrl('development')).toBe('http://localhost:5002');
+      },
+    },
+    {
+      name: 'getApiUrl: testing also returns http://localhost:5002 (local, not prod)',
+      run: (ctx) => {
+        // Testing resolves to the local URL just like development — tests must hit the
+        // local emulator, never the production API.
+        ctx.expect(ctx.manager.getApiUrl('testing')).toBe('http://localhost:5002');
       },
     },
     {
@@ -152,14 +178,18 @@ module.exports = {
       },
     },
     {
-      name: 'getWebsiteUrl: respects current environment when no arg passed',
+      name: 'getWebsiteUrl: respects current environment (config override) when no arg passed',
       run: (ctx) => {
         const m = ctx.manager;
         const origEnv = m.config.em?.environment;
+        const origTest = process.env.EM_TEST_MODE;
         m.config.em = m.config.em || {};
         m.config.brand = m.config.brand || {};
         const origUrl = m.config.brand.url;
         m.config.brand.url = 'https://example.com';
+        // Clear EM_TEST_MODE so the config override is exercised — otherwise testing wins
+        // (correctly) and every URL resolves local regardless of config.
+        delete process.env.EM_TEST_MODE;
         try {
           m.config.em.environment = 'development';
           ctx.expect(m.getWebsiteUrl()).toBe('https://localhost:4000');
@@ -168,6 +198,7 @@ module.exports = {
         } finally {
           if (origEnv !== undefined) m.config.em.environment = origEnv;
           else delete m.config.em.environment;
+          if (origTest !== undefined) process.env.EM_TEST_MODE = origTest;
           m.config.brand.url = origUrl;
         }
       },

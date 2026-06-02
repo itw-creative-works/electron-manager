@@ -1,15 +1,25 @@
 # ========== Default Values ==========
 # Electron Manager (EM) — consumer project
 
-> **Auto-managed file.** Everything between `# ========== Default Values ==========` and `# ========== Custom Values ==========` is owned by `electron-manager` and rewritten on every `npx mgr setup`. Put your own project-specific notes BELOW the `Custom Values` marker — that section is preserved verbatim across setups.
-
 ## Framework
 
 This project consumes **Electron Manager** (EM) — a comprehensive framework for building modern Electron desktop apps. EM provides one-line-import bootstrap per Electron process, a modular feature library with file-based extensibility, a multi-platform build/release pipeline (DMG / NSIS / deb / AppImage), and a built-in four-layer test framework.
 
-**Framework's own docs** (read these for deep-dives; both paths point to the same files, the absolute path works regardless of working directory):
-- Top-level overview: `/Users/ian/Developer/Repositories/ITW-Creative-Works/electron-manager/CLAUDE.md` (or `node_modules/electron-manager/CLAUDE.md`)
-- Subsystem references: `/Users/ian/Developer/Repositories/ITW-Creative-Works/electron-manager/docs/` (or `node_modules/electron-manager/docs/`)
+## 🚨 READ THE FRAMEWORK DOCS FIRST
+
+**Before doing ANY work on this codebase, Claude MUST read the framework documentation — that is where the architecture, conventions, APIs, and gotchas live. Skipping these will result in solutions that conflict with framework patterns.**
+
+**Required reading:**
+- **`node_modules/electron-manager/CLAUDE.md`** — top-level overview + index
+- **`node_modules/electron-manager/docs/`** — subsystem deep references (read the relevant ones for the task at hand)
+
+## 🚨 READ WEB-MANAGER TOO
+
+**EM ships `web-manager` as a runtime singleton inside the renderer process** — it powers auth, Firebase, reactive `data-wm-bind` directives, analytics, error tracking, and utilities (`escapeHTML`, etc.). Any task that touches auth flows, Firestore reads/writes, subscription resolution, push notifications, or DOM bindings means you are working with web-manager as much as with EM.
+
+**Required reading:**
+- **`node_modules/web-manager/CLAUDE.md`** — top-level overview + index
+- **`node_modules/web-manager/docs/`** — module deep references (Auth, Bindings, Firestore, Notifications, etc.)
 
 ## Quick start
 
@@ -20,7 +30,11 @@ npm run package     # full local production package (DMG/zip/universal-mac, NSIS
 npm run package:quick   # fast packaged build for the host platform/arch only (~20-30s)
 npm run release     # signed + published release (requires certs)
 npx mgr test        # run framework + project test suites
+npx mgr install dev  # use LOCAL electron-manager source (to test framework edits)
+npx mgr install live # restore the published electron-manager from npm
 ```
+
+> Editing the EM framework source while working here? Run `npx mgr install dev` so this project picks up your uncommitted framework changes (it otherwise uses its installed `node_modules/electron-manager`). Run `npx mgr install live` to switch back.
 
 ## Where things live
 
@@ -56,6 +70,8 @@ new (require('electron-manager/renderer'))().initialize();
 In main: `manager.storage`, `manager.ipc`, `manager.windows`, `manager.tray`, `manager.menu`, `manager.contextMenu`, `manager.startup`, `manager.appState`, `manager.deepLink`, `manager.autoUpdater`, `manager.sentry`, `manager.webManager`, `manager.context`, `manager.usage`, `manager.remoteConfig`, `manager.analytics`, `manager.restartManager`.
 
 In renderer: `window.em.storage`, `window.em.ipc`, `window.em.logger`, `EM_BUILD_JSON.config`.
+
+<!-- Everything above this marker is owned by the framework and rewritten on every `npx mgr setup`. Add your project-specific notes below — they are preserved across setups. -->
 
 # ========== Custom Values ==========
 

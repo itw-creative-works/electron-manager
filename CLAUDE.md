@@ -6,6 +6,19 @@
 
 Electron Manager (EM) is a comprehensive framework for building modern Electron desktop apps. Sister project to Browser Extension Manager (BXM) and Ultimate Jekyll Manager (UJM). Provides one-line-import bootstrap per Electron process, modular feature library with file-based extensibility, a multi-platform build/release pipeline, and a built-in test framework.
 
+## Recommended skills
+
+- **`EM:patterns`** — SSOT for Electron Manager architecture, lib modules, build/release pipeline, and test framework patterns. Auto-loads on EM-specific keywords (`manager.windows`, `manager.tray`, `electron-builder`, `npx mgr setup`, etc.) and when touching files in `src/lib/`, `src/integrations/`, `src/gulp/`, `src/commands/`, `config/electron-manager.json`, etc.
+- **`js:patterns`** — JavaScript/Node.js conventions: file structure, JSDoc, defensive coding (`?.` usage), template literals, `package.json` conventions. Auto-loads when creating new `.js` files or touching JS module structure.
+
+## 🚨 READ WEB-MANAGER TOO
+
+**EM ships `web-manager` as a runtime singleton inside the renderer process** — it powers auth, Firebase, reactive `data-wm-bind` directives, analytics, error tracking, and utilities (`escapeHTML`, etc.). Any task that touches auth flows, Firestore reads/writes, subscription resolution, push notifications, or DOM bindings means you are working with web-manager as much as with EM.
+
+**Required reading:**
+- **`node_modules/web-manager/CLAUDE.md`** — top-level overview + index
+- **`node_modules/web-manager/docs/`** — module deep references (Auth, Bindings, Firestore, Notifications, etc.)
+
 ## Quick Start
 
 ### For Consuming Projects
@@ -23,7 +36,7 @@ Electron Manager (EM) is a comprehensive framework for building modern Electron 
 
 1. `npm install`
 2. `npm start` — watch + compile `src/` → `dist/` via prepare-package
-3. Test in a consumer project: `npm i ../electron-manager` (file: link)
+3. Test in a consumer project: from inside the consumer, run `npx mgr install dev` to swap EM to this local repo — required whenever you edit the framework source and want the consumer to pick up the changes (the consumer otherwise keeps its installed `node_modules/electron-manager`). Reverse with `npx mgr install live`.
 4. `npm test` — runs the framework's own suites
 
 ## Architecture
@@ -99,7 +112,7 @@ Every field in `config/electron-manager.json` is declared in `src/config/schema.
 
 ### Cross-context helpers
 
-Four Managers (main / renderer / preload / build-time) all mix in shared helpers via `attachTo(Manager)`: `isDevelopment()`, `isProduction()`, `isTesting()`, `getWebsiteUrl()`, `getEnvironment()`, `getFunctionsUrl()`, `getApiUrl()`. Use these instead of grepping `process.env` ad-hoc. See [docs/cross-context-helpers.md](docs/cross-context-helpers.md).
+Four Managers (main / renderer / preload / build-time) all mix in shared helpers via `attachTo(Manager)`: `isDevelopment()`, `isProduction()`, `isTesting()`, `getWebsiteUrl()`, `getEnvironment()`, `getFunctionsUrl()`, `getApiUrl()`. Use these instead of grepping `process.env` ad-hoc. `getEnvironment()` returns `'development' | 'testing' | 'production'` (mutually exclusive — testing wins over dev); gate side effects on the INTENTIONAL check (`isProduction()` for prod-only, `isDevelopment() || isTesting()` for local-or-test) — never `!isDevelopment()`. See [docs/environment-detection.md](docs/environment-detection.md).
 
 ### Test framework
 
@@ -146,6 +159,17 @@ See [docs/releasing.md](docs/releasing.md) for the end-to-end flow.
 - **Zero-trust URL handling — `sanitizeURL` for `shell.openExternal` and friends.** Any dynamic URL passed to `shell.openExternal`, `BrowserWindow.loadURL`, `window.location.href =`, etc. MUST be gated through `require('./utils/sanitize-url.js')` first. Returns the URL unchanged when its protocol is `http:`/`https:`, and `''` for anything else (`javascript:`, `data:`, `file:`, `vbscript:`, `chrome:`, custom schemes). Canonical pattern: `const safe = sanitizeURL(url); if (safe) shell.openExternal(safe);`. Hardcoded protocol URLs constructed internally (e.g. `restart-manager://` built by `_buildUrl`) bypass — not attacker-controllable. See `src/utils/sanitize-url.js` and the `js:patterns/xss-escaping` skill.
 - **`ELECTRON_RUN_AS_NODE` is stripped at the CLI boundary.** When set, Electron silently runs as plain Node — `app` is undefined, no BrowserWindow. The variable leaks from common parent processes (VS Code's Claude Code extension runs as a `node.mojom.NodeService` utility process with the var set). `bin/electron-manager` and `src/gulp/main.js` both `delete process.env.ELECTRON_RUN_AS_NODE` at the top.
 
+## Doc-update parity
+
+Whenever you make a behavioral change (new command, new flag, new pattern, removed feature), update:
+
+1. **`README.md`** — user-facing summary
+2. **`CLAUDE.md`** (this file) — architecture overview, one paragraph or cross-link
+3. **`docs/<topic>.md`** — the meat. If a topic doesn't have a doc yet, create one.
+4. **`CHANGELOG.md`** — if the project keeps one
+
+Don't ship behavioral changes with stale docs. Validate first, then document — write docs that describe shipped reality, not intentions.
+
 ## Documentation
 
 API references for each subsystem live in `docs/`. **Whenever you make a behavioral change, update both this overview AND the relevant `docs/*.md` deep reference.** Treat docs as a first-class deliverable, not an afterthought.
@@ -181,6 +205,6 @@ API references for each subsystem live in `docs/`. **Whenever you make a behavio
 - [docs/test-framework.md](docs/test-framework.md) — writing tests, running them, layers
 - [docs/test-boot-layer.md](docs/test-boot-layer.md) — boot test layer
 - [docs/build-system.md](docs/build-system.md) — gulp, webpack, electron-builder pipeline
-- [docs/cross-context-helpers.md](docs/cross-context-helpers.md) — `isDevelopment`/`isTesting`/`getApiUrl` etc., adding new helpers
+- [docs/environment-detection.md](docs/environment-detection.md) — `isDevelopment`/`isTesting`/`getApiUrl` etc., adding new helpers
 
 `PROGRESS.md` tracks pass-by-pass progress and decisions.

@@ -26,27 +26,91 @@ module.exports = {
       },
     },
     {
-      name: 'getEnvironment is production when EM_BUILD_MODE=true',
+      name: 'getEnvironment is testing when EM_TEST_MODE=true (takes precedence)',
       run: (ctx) => {
-        const prev = process.env.EM_BUILD_MODE;
-        process.env.EM_BUILD_MODE = 'true';
+        const prevTest = process.env.EM_TEST_MODE;
+        const prevBuild = process.env.EM_BUILD_MODE;
+        process.env.EM_TEST_MODE = 'true';
+        process.env.EM_BUILD_MODE = 'true'; // even with build mode set, testing wins
         try {
-          ctx.expect(Manager.getEnvironment()).toBe('production');
+          ctx.expect(Manager.getEnvironment()).toBe('testing');
         } finally {
-          if (prev === undefined) delete process.env.EM_BUILD_MODE;
-          else process.env.EM_BUILD_MODE = prev;
+          if (prevTest === undefined) delete process.env.EM_TEST_MODE; else process.env.EM_TEST_MODE = prevTest;
+          if (prevBuild === undefined) delete process.env.EM_BUILD_MODE; else process.env.EM_BUILD_MODE = prevBuild;
         }
       },
     },
     {
-      name: 'getEnvironment is development when EM_BUILD_MODE unset',
+      name: 'getEnvironment is production when EM_BUILD_MODE=true (and not testing)',
       run: (ctx) => {
-        const prev = process.env.EM_BUILD_MODE;
-        delete process.env.EM_BUILD_MODE;
+        const prevTest = process.env.EM_TEST_MODE;
+        const prevBuild = process.env.EM_BUILD_MODE;
+        delete process.env.EM_TEST_MODE;
+        process.env.EM_BUILD_MODE = 'true';
         try {
+          ctx.expect(Manager.getEnvironment()).toBe('production');
+        } finally {
+          if (prevTest !== undefined) process.env.EM_TEST_MODE = prevTest;
+          if (prevBuild === undefined) delete process.env.EM_BUILD_MODE; else process.env.EM_BUILD_MODE = prevBuild;
+        }
+      },
+    },
+    {
+      // EM defaults to 'production' when no signal is present (no app.isPackaged in plain Node,
+      // no EM_TEST_MODE/EM_BUILD_MODE, no NODE_ENV=development). EM's deployed RUNTIME can
+      // legitimately reach here without a dev signal (a shipped binary), so production is the
+      // safe default. NODE_ENV=development is the explicit dev override (tested separately).
+      name: 'getEnvironment defaults to production when no dev/test signal is present',
+      run: (ctx) => {
+        const prevTest = process.env.EM_TEST_MODE;
+        const prevBuild = process.env.EM_BUILD_MODE;
+        const prevNode = process.env.NODE_ENV;
+        delete process.env.EM_TEST_MODE;
+        delete process.env.EM_BUILD_MODE;
+        delete process.env.NODE_ENV;
+        try {
+          ctx.expect(Manager.getEnvironment()).toBe('production');
+          // NODE_ENV=development is the explicit local-dev override.
+          process.env.NODE_ENV = 'development';
           ctx.expect(Manager.getEnvironment()).toBe('development');
         } finally {
-          if (prev !== undefined) process.env.EM_BUILD_MODE = prev;
+          if (prevTest !== undefined) process.env.EM_TEST_MODE = prevTest;
+          if (prevBuild !== undefined) process.env.EM_BUILD_MODE = prevBuild;
+          if (prevNode === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = prevNode;
+        }
+      },
+    },
+    {
+      // The core invariant of the SSOT refactor: is*() DERIVE from getEnvironment(), so they
+      // can NEVER disagree with it, and exactly one is always true. (In plain Node `app` is
+      // unavailable, so getEnvironment() resolves via the env-var / config fallback.)
+      name: 'invariant: is*() exactly matches getEnvironment() + mutually exclusive (every scenario)',
+      run: (ctx) => {
+        const prevTest = process.env.EM_TEST_MODE;
+        const prevBuild = process.env.EM_BUILD_MODE;
+        const prevNode = process.env.NODE_ENV;
+        const scenarios = [
+          { env: { EM_TEST_MODE: 'true', EM_BUILD_MODE: 'true' }, expect: 'testing' },
+          { env: { EM_BUILD_MODE: 'true' },                       expect: 'production' },
+          { env: { NODE_ENV: 'development' },                     expect: 'development' },
+          { env: {},                                              expect: 'production' }, // EM defaults prod (shipped artifact)
+        ];
+        try {
+          for (const s of scenarios) {
+            delete process.env.EM_TEST_MODE; delete process.env.EM_BUILD_MODE; delete process.env.NODE_ENV;
+            for (const k of Object.keys(s.env)) process.env[k] = s.env[k];
+            const e = Manager.getEnvironment();
+            ctx.expect(e).toBe(s.expect);
+            ctx.expect(Manager.isDevelopment()).toBe(e === 'development');
+            ctx.expect(Manager.isTesting()).toBe(e === 'testing');
+            ctx.expect(Manager.isProduction()).toBe(e === 'production');
+            const trueCount = [Manager.isDevelopment(), Manager.isTesting(), Manager.isProduction()].filter(Boolean).length;
+            ctx.expect(trueCount).toBe(1);
+          }
+        } finally {
+          if (prevTest === undefined) delete process.env.EM_TEST_MODE; else process.env.EM_TEST_MODE = prevTest;
+          if (prevBuild === undefined) delete process.env.EM_BUILD_MODE; else process.env.EM_BUILD_MODE = prevBuild;
+          if (prevNode === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = prevNode;
         }
       },
     },

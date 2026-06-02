@@ -6,7 +6,7 @@ const logger = new LoggerLite('sentry');
 
 const DEFAULTS = {
   dsn:            '',
-  environment:    null,                  // null = auto-detect from EM_BUILD_MODE
+  environment:    null,                  // null = auto-detect from getEnvironment()
   tracesSampleRate: 0.1,
   attachScreenshot: false,
 };
@@ -26,7 +26,13 @@ function resolveConfig(manager) {
     return { shouldEnable: false, options: opts, reason: 'no dsn set' };
   }
 
-  // Dev gating: in development, default to disabled unless EM_SENTRY_FORCE=true.
+  // Dev gating: enable sentry only in a real production BUILD, unless EM_SENTRY_FORCE=true.
+  // This intentionally keys on the build-time signal (EM_BUILD_MODE) — NOT the runtime
+  // getEnvironment() — because "should we ship telemetry" is a property of the build, not
+  // of the current process. A dev machine (no EM_BUILD_MODE) and a test run both correctly
+  // resolve to non-production here, so telemetry stays disabled. (getEnvironment()'s
+  // no-signal default is 'production' for RUNTIME gating; that's the wrong default for this
+  // build-time question, which is why we read EM_BUILD_MODE directly.)
   const isProduction = process.env.EM_BUILD_MODE === 'true';
   const forced = process.env.EM_SENTRY_FORCE === 'true';
   if (!isProduction && !forced) {

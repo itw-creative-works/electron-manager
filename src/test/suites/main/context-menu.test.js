@@ -24,7 +24,15 @@ module.exports = {
       run: (ctx) => {
         const path = require('path');
         const fs   = require('fs');
-        const consumerFile = path.join(process.cwd(), 'src', 'integrations', 'context-menu', 'index.js');
+        // Resolve the file the SAME way the lib does — via app-root.js, not process.cwd().
+        // In the test harness, appRoot() === app.getAppPath() === the EM harness dir, which
+        // differs from process.cwd() (the consumer project dir when run from a consumer).
+        // Comparing against process.cwd() made this assert a false mismatch in consumers:
+        // the consumer has src/integrations/context-menu/index.js, but the manager never
+        // looks there — it looks under appRoot(). Keying the expectation off appRoot() makes
+        // the invariant self-consistent in both the EM self-test and any consumer run.
+        const appRoot = require('../../../utils/app-root.js')();
+        const consumerFile = path.join(appRoot, 'src', 'integrations', 'context-menu', 'index.js');
         const hasConsumer = fs.existsSync(consumerFile);
         ctx.expect(ctx.manager.contextMenu.hasCustomDefinition()).toBe(hasConsumer);
       },

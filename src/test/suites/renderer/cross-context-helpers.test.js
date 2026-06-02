@@ -37,11 +37,16 @@ module.exports = {
       },
     },
     {
-      name: 'isProduction() is the inverse of isDevelopment()',
+      name: 'environments are mutually exclusive — exactly one of dev/testing/prod is true',
       run: (ctx) => {
         const dev  = window.__emTestManager.isDevelopment();
+        const test = window.__emTestManager.isTesting();
         const prod = window.__emTestManager.isProduction();
-        ctx.expect(prod).toBe(!dev);
+        // We run under EM_TEST_MODE=true → testing wins; dev and prod are both false.
+        ctx.expect(test).toBe(true);
+        ctx.expect(dev).toBe(false);
+        ctx.expect(prod).toBe(false);
+        ctx.expect([dev, test, prod].filter(Boolean).length).toBe(1);
       },
     },
     {
@@ -55,12 +60,14 @@ module.exports = {
       },
     },
     {
-      name: 'getEnvironment(): returns config.em.environment when set',
+      name: 'getEnvironment(): testing (EM_TEST_MODE) takes precedence over config.em.environment',
       run: (ctx) => {
+        // The test runner sets EM_TEST_MODE=true, which wins over any config override —
+        // getEnvironment() always reports 'testing' here regardless of em.environment.
         window.__emTestManager.setConfig('em.environment', 'production');
-        ctx.expect(window.__emTestManager.getEnvironment()).toBe('production');
+        ctx.expect(window.__emTestManager.getEnvironment()).toBe('testing');
         window.__emTestManager.setConfig('em.environment', 'development');
-        ctx.expect(window.__emTestManager.getEnvironment()).toBe('development');
+        ctx.expect(window.__emTestManager.getEnvironment()).toBe('testing');
         // Reset.
         window.__emTestManager.setConfig('em.environment', 'production');
       },
@@ -105,12 +112,15 @@ module.exports = {
       },
     },
     {
-      name: 'getWebsiteUrl: respects current environment when no arg passed',
+      name: 'getWebsiteUrl: no-arg resolves local under testing; explicit arg overrides',
       run: (ctx) => {
-        window.__emTestManager.setConfig('em.environment', 'development');
-        ctx.expect(window.__emTestManager.getWebsiteUrl()).toBe('https://localhost:4000');
+        // The renderer always runs under EM_TEST_MODE (testing wins), so the no-arg form
+        // correctly resolves LOCAL regardless of config — that's the safety guarantee.
         window.__emTestManager.setConfig('em.environment', 'production');
-        ctx.expect(window.__emTestManager.getWebsiteUrl()).toBe('https://example.com');
+        ctx.expect(window.__emTestManager.getWebsiteUrl()).toBe('https://localhost:4000');
+        // An explicit env arg bypasses the current environment and pins the mapping.
+        ctx.expect(window.__emTestManager.getWebsiteUrl('production')).toBe('https://example.com');
+        ctx.expect(window.__emTestManager.getWebsiteUrl('development')).toBe('https://localhost:4000');
       },
     },
   ],

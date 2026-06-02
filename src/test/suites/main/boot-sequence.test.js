@@ -65,10 +65,10 @@ module.exports = {
       run: (ctx) => ctx.expect(ctx.manager.windows._initialized).toBe(true),
     },
     {
-      name: 'getEnvironment returns development when EM_BUILD_MODE unset',
+      name: 'getEnvironment returns testing under the test harness',
       run: (ctx) => {
-        // The harness spawn doesn't set EM_BUILD_MODE.
-        ctx.expect(['development', 'production']).toContain(ctx.manager.getEnvironment());
+        // The harness spawn sets EM_TEST_MODE=true → testing wins over everything.
+        ctx.expect(ctx.manager.getEnvironment()).toBe('testing');
       },
     },
   ],

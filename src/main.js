@@ -186,11 +186,11 @@ Manager.prototype.initialize = async function (consumerConfig, options) {
   self.startup._electron = electron || null;
   self.startup.applyEarly();
 
-  // 1b. Append "(Development)" to userData path in dev. MUST run before storage.initialize()
-  //     because electron-store reads `app.getPath('userData')` at construction time. Mirrors
-  //     legacy electron-manager's behavior — keeps dev session data, app state, etc. isolated
-  //     from production-installed copies of the same app on the same machine.
-  if (self.isDevelopment()) {
+  // 1b. Append "(Development)" to userData path in any non-production run (dev OR testing).
+  //     MUST run before storage.initialize() because electron-store reads
+  //     `app.getPath('userData')` at construction time. Keeps dev/test session data, app
+  //     state, etc. isolated from production-installed copies of the same app on the machine.
+  if (!self.isProduction()) {
     const before = app.getPath('userData');
     const after  = `${before} (Development)`;
     app.setPath('userData', after);

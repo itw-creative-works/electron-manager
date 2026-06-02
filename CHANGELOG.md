@@ -1,5 +1,39 @@
-# Changelog
+# CHANGELOG
 
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
+
+## Changelog Categories
+
+- `BREAKING` for breaking changes.
+- `Added` for new features.
+- `Changed` for changes in existing functionality.
+- `Deprecated` for soon-to-be removed features.
+- `Removed` for now removed features.
+- `Fixed` for any bug fixes.
+- `Security` in case of vulnerabilities.
+
+---
+## 1.5.0 — env-detection SSOT (mode/url-helpers) + test/_init.js hook + consumer-default scaffolding + docs reorg
+
+### Added
+
+- **`test/_init.js` pre-test lifecycle hook.** The test runner loads an optional `test/_init.js` from BOTH test roots (framework + consumer project) and runs its `setup()` ONCE before any suite (it is not run as a test itself; the `_`-prefix keeps it out of discovery). The module **must export a function** — `module.exports = (ctx) => ({ setup })` — called with `{ projectRoot }`. There is no `cleanup` hook (tests clean up after themselves) and no `accounts` field (no auth/user system, unlike the backend framework). Mirrors the same hook across all four OMEGA frameworks. See [docs/test-framework.md](docs/test-framework.md).
+- **Consumer-shipped defaults via `src/defaults/`** — a boilerplate `test/_init.js`, `CHANGELOG.md`, and `docs/` scaffold now ship to consumers on first setup (copied if absent, never overwriting an existing file). `copyDefaults` now only skips `_`-prefixed *directory* segments (e.g. `_legacy/`) — a `_`-prefixed *filename* like `test/_init.js` ships verbatim.
+
+### Changed
+
+- **Environment detection consolidated onto `getEnvironment()` as SSOT** ([src/utils/mode-helpers.js](src/utils/mode-helpers.js)). `getEnvironment()` is the single reader of the raw signals (folding in `app.isPackaged`) and returns exactly one of `development | testing | production` (mutually exclusive, testing wins); `isDevelopment`/`isProduction`/`isTesting` now DERIVE from it so they can never disagree. Precedence: testing → `config.em.environment` → `app.isPackaged` → `EM_BUILD_MODE` → default `production` (a deployed runtime may lack a signal). `getEnvironment` moved OUT of url-helpers.js to live WITH the `is*()` family in mode-helpers, and is mixed into all context Managers via `attachTo(Manager)`. The URL helpers (`getApiUrl`/`getFunctionsUrl`/`getWebsiteUrl`) route through it.
+- **`sentry/core.js` intentionally keys on the build-time `EM_BUILD_MODE` signal** (not runtime `getEnvironment()`) — "should we ship telemetry" is a build-time question.
+- **Install-command alias parity** ([src/commands/install.js](src/commands/install.js)) — accepts the unified set across all four frameworks (`dev|d|development|local|l` / `live|prod|p|production`); docs advertise the canonical `dev` + `live`.
+- **Docs reorg** — `docs/cross-context-helpers.md` renamed to `docs/environment-detection.md` with a mirrored 9-section structure shared across BEM/EM/UJM/BXM; CLAUDE.md / test-framework docs updated to match.
+
+### Fixed
+
+- **`context-menu` definition-presence test** keyed off `process.cwd()`, which differs from the `app-root.js` path the lib actually resolves against in the test harness — so it falsely mismatched when run from a consumer (consumer has `src/integrations/context-menu/index.js` but the manager looks under appRoot). Now keyed off `app-root.js`, so the invariant is self-consistent in both the EM self-test and any consumer run.
+
+---
 ## 1.4.4 — icon convention simplified: ship native @2x only, drop app.icons block, global/ + per-platform layout
 
 Icon resolution is now convention-only with retina derivation. Consumers ship ONE file per slot at the native (@2x) size; EM downscales the @1x sibling automatically.

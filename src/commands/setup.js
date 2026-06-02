@@ -287,12 +287,15 @@ async function copyDefaults() {
   for (const src of files) {
     const rel = path.relative(defaultsDir, src);
     const segments = rel.split(path.sep);
-    // Skip "archive" directories — anything under a path segment starting with `_` and
+    // Skip "archive" DIRECTORIES — any non-final path segment starting with `_` and
     // followed by a non-`.` character. Used for reference material that ships in EM's npm
     // package but should NOT be copied to consumers (e.g. `_mas/` reference plists).
-    // The `_.env` / `_.gitignore` convention is preserved — those are FILES starting with
-    // `_.` and have their leading `_` stripped on copy below.
-    if (segments.some((s) => s.startsWith('_') && !s.startsWith('_.'))) {
+    // The check is restricted to directory segments (all but the last) so a `_`-prefixed
+    // FILENAME still ships — e.g. `test/_init.js` copies verbatim (the test runner skips it
+    // from discovery on its own). The `_.env` / `_.gitignore` FILES are likewise not
+    // skipped; their leading `_` strips on copy below.
+    const dirSegments = segments.slice(0, -1);
+    if (dirSegments.some((s) => s.startsWith('_') && !s.startsWith('_.'))) {
       continue;
     }
     // Convert leading `_.` to `.` so dotfiles ship past npm's filter
