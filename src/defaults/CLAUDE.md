@@ -74,6 +74,12 @@ In main: `manager.storage`, `manager.ipc`, `manager.windows`, `manager.tray`, `m
 
 In renderer: `window.em.storage`, `window.em.ipc`, `window.em.logger`, `EM_BUILD_JSON.config`.
 
+## Dependency resolution
+
+- **Do NOT install framework dependencies directly** (`firebase`, `fs-jetpack`, `web-manager`, etc.). EM's webpack config resolves them through the framework's own `node_modules/`. If something doesn't resolve, the issue is in EM's webpack config — not your `package.json`.
+- **web-manager owns Firebase.** Never `require('firebase')` or `import('firebase/app')`. Use `require('web-manager')` → `webManager.auth()`, `webManager.firestore()` in renderers. In main process, use `manager.webManager` (the EM bridge).
+- **`Manager.require(name)`** resolves from EM's module context at runtime for unbundled code (gulp tasks, test fixtures).
+
 <!-- Everything above this marker is owned by the framework and rewritten on every `npx mgr setup`. Add your project-specific notes below — they are preserved across setups. -->
 
 # ========== Custom Values ==========
