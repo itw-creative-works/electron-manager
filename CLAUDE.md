@@ -127,6 +127,10 @@ Four Managers (main / renderer / preload / build-time) all mix in shared helpers
 
 Every gulp invocation tees stdout+stderr to `<projectRoot>/logs/dev.log` (path via `EM_LOG_FILE`; disable with `EM_LOG_FILE=false`). When debugging via Claude, prefer `cat logs/dev.log` over copy-pasting terminal scrollback. See [docs/logging.md](docs/logging.md).
 
+### CDP debugging (Claude ↔ Electron)
+
+`serve` forwards all `--` CLI flags to the Electron child process. Set `EM_CDP_PORT=9222` (or pass `--remote-debugging-port=9222` via `--`) to expose Chrome DevTools Protocol on that port, enabling Claude to screenshot, click, type, evaluate JS, and read console logs in the running app via the `chrome-devtools-electron` MCP upstream. See [docs/cdp-debugging.md](docs/cdp-debugging.md).
+
 ## CLI
 
 `npx mgr <command>` (aliases `em`, `electron-manager`):
@@ -154,6 +158,7 @@ See [docs/releasing.md](docs/releasing.md) for the end-to-end flow.
 
 - **🚫 NEVER run `npm start` / `npx mgr launch` / `npm test`** unless the user explicitly asks. Assume the user is already running the app or dev process. Running these commands kills the user's process and wastes time. Instead, **check output logs** after editing files to confirm changes compiled and took effect.
 - **After editing files**, verify the gulp watcher recompiled successfully. Check for webpack/sass errors in the console output. A change that breaks the build is not a completed change.
+- **Live-test UI changes via CDP.** After code changes compile, use the `chrome-devtools-electron` MCP tools (screenshots, click, evaluate JS, console logs) to verify the change works in the running app. This is the primary way to confirm UI/renderer changes — type-checking and test suites verify code correctness, not feature correctness. See [docs/cdp-debugging.md](docs/cdp-debugging.md) and `~/.claude/mcp-server/servers/chrome-devtools-electron/CLAUDE.md`.
 
 ## File Conventions
 
@@ -217,5 +222,6 @@ API references for each subsystem live in `docs/`. **Whenever you make a behavio
 - [docs/test-boot-layer.md](docs/test-boot-layer.md) — boot test layer
 - [docs/build-system.md](docs/build-system.md) — gulp, webpack, electron-builder pipeline
 - [docs/environment-detection.md](docs/environment-detection.md) — `isDevelopment`/`isTesting`/`getApiUrl` etc., adding new helpers
+- [docs/cdp-debugging.md](docs/cdp-debugging.md) — Claude ↔ Electron via CDP, `EM_CDP_PORT`, MCP setup
 
 `PROGRESS.md` tracks pass-by-pass progress and decisions.

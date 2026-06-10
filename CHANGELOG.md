@@ -15,6 +15,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `Security` in case of vulnerabilities.
 
 ---
+## 1.6.0 — Consumer dependency resolution + CDP debugging
+
+### Added
+- **Webpack `resolve.modules`**: All three webpack configs (main/preload/renderer) now include the framework's own `node_modules/` in `resolve.modules`. Consumer code can `require('fs-jetpack')`, `require('web-manager')`, or any other EM dep — webpack resolves through the framework. Mirrors the pattern BXM and UJM already had.
+- **`Manager.require(name)`** on main-process Manager (static + prototype). Lets consumer runtime code load EM's bundled dependencies from EM's module context. Mirrors BEM's `Manager.require()`.
+- **CDP debugging**: `serve` now forwards `--` CLI flags to the Electron child process. Set `EM_CDP_PORT=9222` (or pass `--remote-debugging-port=9222`) to expose Chrome DevTools Protocol for Claude MCP integration. Includes startup verification that logs the CDP endpoint.
+- **`docs/cdp-debugging.md`**: Full reference for the CDP debugging workflow.
+
+---
 ## 1.5.2 — remote-scripts: emergency remote code execution via brand website
 
 ### Added

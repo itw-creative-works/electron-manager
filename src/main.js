@@ -377,6 +377,17 @@ function loadConfigFromFile(filepath) {
 // src/build.js. All four Manager constructors mix them in via their respective
 // `attachTo(Manager)` calls — see the bottom of this file.
 
+// Require — lets consumer main-process code load EM's bundled dependencies at runtime
+// (e.g. `manager.require('fs-jetpack')`). Resolves from EM's module context, not the
+// consumer's. Mirrors BEM's Manager.require(). For build-time (webpack) resolution,
+// the webpack config's resolve.modules handles this automatically.
+Manager.prototype.require = function (name) {
+  return require(name);
+};
+Manager.require = function (name) {
+  return require(name);
+};
+
 // Mix in shared cross-context helpers — same code path used in renderer, preload, build.
 require('./utils/mode-helpers.js').attachTo(Manager);
 require('./utils/url-helpers.js').attachTo(Manager);

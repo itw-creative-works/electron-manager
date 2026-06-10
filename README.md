@@ -34,6 +34,7 @@ npm install electron-manager --save-dev
 npx mgr setup            # scaffolds project; auto-resolves & writes correct .nvmrc from electron version
 nvm use                  # switch to the Node version Electron uses (one-time per shell)
 npm start                # dev: gulp → webpack → electron .
+EM_CDP_PORT=9222 npm start  # dev + expose Chrome DevTools Protocol for Claude/MCP debugging
 npm run build            # local production build (bundles only, no installer)
 npm run package:quick    # fast packaged build for host platform/arch (.app/.exe-folder/linux-unpacked, ~20-30s) — for smoke-testing packaged behavior
 npm run package          # full local production package (DMG/zip/universal-mac, NSIS-win, deb+AppImage-linux)

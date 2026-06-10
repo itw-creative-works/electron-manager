@@ -8,7 +8,20 @@ const glob = require('glob').globSync;
 const webpack = require('webpack');
 const jetpack = require('fs-jetpack');
 
-const projectRoot = Manager.getRootPath('project');
+const projectRoot   = Manager.getRootPath('project');
+const frameworkRoot = Manager.getRootPath();
+
+// Shared resolve config — lets consumer code `require()` any of EM's bundled
+// dependencies (fs-jetpack, web-manager, etc.) without installing them directly.
+// Webpack checks the consumer's node_modules first (default), then falls back to
+// the framework's node_modules. Mirrors how UJM/BXM resolve web-manager deps.
+const sharedResolve = {
+  modules: [
+    path.join(projectRoot, 'node_modules'),
+    path.join(frameworkRoot, 'node_modules'),
+    'node_modules',
+  ],
+};
 
 module.exports = function webpackTask(done) {
   const mode = Manager.getMode();
@@ -131,6 +144,7 @@ function makeMainConfig(buildJson, isProd) {
       // Native modules — consumer can extend via config.em.webpack.externals
       ...resolveNativeExternals(),
     },
+    resolve: sharedResolve,
     plugins: buildJsonPlugins(buildJson),
     optimization: {
       minimize: isProd,
@@ -160,6 +174,7 @@ function makePreloadConfig(buildJson, isProd) {
     externals: {
       electron: 'commonjs2 electron',
     },
+    resolve: sharedResolve,
     plugins: buildJsonPlugins(buildJson),
     optimization: {
       minimize: isProd,
@@ -198,6 +213,7 @@ function makeRendererConfig(buildJson, isProd) {
       filename: '[name].bundle.js',
       module:   false,
     },
+    resolve: sharedResolve,
     plugins: buildJsonPlugins(buildJson),
     optimization: {
       minimize: isProd,
