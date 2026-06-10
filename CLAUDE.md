@@ -154,6 +154,12 @@ Every gulp invocation tees stdout+stderr to `<projectRoot>/logs/dev.log` (path v
 
 See [docs/releasing.md](docs/releasing.md) for the end-to-end flow.
 
+## Dependency Resolution
+
+- **Consumer code can `require()` any EM dependency** — webpack's `resolve.modules` includes the framework's own `node_modules/`. Consumer projects do NOT need to `npm install firebase`, `fs-jetpack`, `web-manager`, or any other EM transitive dep. If a dep doesn't resolve, the fix is in EM's webpack config — not the consumer's `package.json`.
+- **web-manager owns Firebase.** Consumer code NEVER imports Firebase directly (`require('firebase')` / `import('firebase/app')`). Use `require('web-manager')` → `webManager.auth()`, `webManager.firestore()` in renderers. In main process, use `manager.webManager` (the EM bridge). Same rule in BXM and UJM.
+- **`Manager.require(name)`** resolves from EM's module context at runtime (static + prototype). Use in gulp tasks or unbundled code (e.g. test fixtures). Webpack `resolve.modules` handles the bundled case.
+
 ## Development Workflow
 
 - **🚫 NEVER run `npm start` / `npx mgr launch` / `npm test`** unless the user explicitly asks. Assume the user is already running the app or dev process. Running these commands kills the user's process and wastes time. Instead, **check output logs** after editing files to confirm changes compiled and took effect.
