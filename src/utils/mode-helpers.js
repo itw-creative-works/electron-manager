@@ -55,8 +55,13 @@ function getEnvironment() {
   //    than env vars). In renderer/preload, `electron` has no `app`; from plain Node (gulp/CLI),
   //    `require('electron')` returns the binary path string — `.app` is undefined in both, so we
   //    fall through to the build signals below.
-  const { app } = require('electron');
-  if (app && typeof app.isPackaged === 'boolean') return app.isPackaged ? 'production' : 'development';
+  //    In renderer bundles (target: 'web'), require is not available — skip entirely.
+  if (typeof require !== 'undefined') {
+    try {
+      const { app } = require('electron');
+      if (app && typeof app.isPackaged === 'boolean') return app.isPackaged ? 'production' : 'development';
+    } catch (_) {}
+  }
 
   // 4. Build-time / Node signals. EM_BUILD_MODE=true is set during a production build
   //    (npm run build / npm run release); NODE_ENV=development is the dev fallback.
@@ -97,8 +102,12 @@ function isTesting() {
 // packaged app. Renderers that need the version should ask main via IPC, or read
 // `EM_BUILD_JSON.package.version` (injected by webpack DefinePlugin).
 function getVersion() {
-  const { app } = require('electron');
-  if (app && typeof app.getVersion === 'function') return app.getVersion();
+  if (typeof require !== 'undefined') {
+    try {
+      const { app } = require('electron');
+      if (app && typeof app.getVersion === 'function') return app.getVersion();
+    } catch (_) {}
+  }
   // Build-time scripts / non-Electron contexts: read project package.json.
   try {
     const path = require('path');

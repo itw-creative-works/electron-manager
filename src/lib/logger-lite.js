@@ -18,22 +18,36 @@
 // Outside Electron entirely (e.g. when build/CLI code requires this module — should
 // be rare; build/CLI use `lib/logger.js` instead) it falls back to console-only.
 
-const path = require('path');
-const fs   = require('fs');
-
 // Channel used by renderer/preload to forward log calls to main. Public for the
 // preload contextBridge to attach to.
 const FORWARD_CHANNEL = 'em:log:forward';
 
-// `electron` is a peer dep that's always installed in EM's contexts. In plain
-// Node (gulp/CLI/tests), require returns the binary-path string — destructuring
-// `app` returns undefined, which is what we use to detect "not in main".
-const electron = require('electron');
-const isElectron = !!(electron && typeof electron === 'object');
+// Detect context. In renderer bundles (target: 'web'), Node modules like 'electron'
+// don't exist — all detection returns false, and the logger becomes console-only +
+// IPC forwarding to main. No top-level `require('electron')` — that would get bundled
+// by webpack and crash in the browser-like renderer context.
+//
+// We lazy-load Node modules (path, fs, electron, electron-log) inside the functions
+// that actually need them (ensureMainFileTransport, tryForwardToMain) so webpack's
+// renderer bundle never sees them.
+const _isBrowser = typeof window !== 'undefined' && typeof require === 'undefined';
+let _electron = null;
+let _isElectron = false;
+let _isMain = false;
 
-// Are we running in main? In renderer/preload the `app` module is undefined.
-// Coerce to a real boolean so `_internals.isMain` exposes a boolean (not undefined).
-const isMain = !!(isElectron && electron.app && typeof electron.app.getPath === 'function');
+if (!_isBrowser) {
+  try {
+    _electron = require('electron');
+    _isElectron = !!(_electron && typeof _electron === 'object');
+    _isMain = !!(_isElectron && _electron.app && typeof _electron.app.getPath === 'function');
+  } catch (_) {
+    // Not in an Electron context (plain Node CLI, etc.)
+  }
+}
+
+// Public aliases for backward compat (exposed via _internals).
+const isElectron = _isElectron;
+const isMain = _isMain;
 
 // Cache the resolved electron-log module + its file transport's path so we can
 // expose `getLogFilePath()` synchronously without re-resolving.
@@ -47,17 +61,19 @@ function ensureMainFileTransport() {
   if (_initAttempted) return;
   _initAttempted = true;
 
-  if (!isMain) return;
+  if (!_isMain) return;
 
   let log;
   try {
     log = require('electron-log/main');
   } catch (e) {
-    // electron-log isn't installed in this environment — fall back to console only.
     return;
   }
 
-  const { app } = electron;
+  // Lazy-load Node modules — only runs in main process, never bundled into renderer.
+  const path = require('path');
+  const fs   = require('fs');
+  const { app } = _electron;
 
   // Resolve the target log file path based on packaged state. See module header.
   const isPackaged = app.isPackaged === true;
@@ -99,8 +115,8 @@ function ensureMainFileTransport() {
   // Listen for renderer/preload log forwards. The preload-side LoggerLite sends an
   // `em:log:forward` message and we replay it through the same transport, so all
   // logs (main + renderer + preload) end up in one file with one timestamp source.
-  if (electron.ipcMain && typeof electron.ipcMain.on === 'function') {
-    electron.ipcMain.on(FORWARD_CHANNEL, (event, payload) => {
+  if (_electron.ipcMain && typeof _electron.ipcMain.on === 'function') {
+    _electron.ipcMain.on(FORWARD_CHANNEL, (event, payload) => {
       // payload = { name, level, args }
       try {
         if (!payload || typeof payload !== 'object') return;
@@ -126,10 +142,10 @@ function ensureMainFileTransport() {
 // We try both; whichever works first wins.
 function tryForwardToMain(name, level, args) {
   // Path 1: direct.
-  if (electron) {
+  if (_electron) {
     try {
-      if (electron.ipcRenderer && typeof electron.ipcRenderer.send === 'function') {
-        electron.ipcRenderer.send(FORWARD_CHANNEL, { name, level, args: serializeArgs(args) });
+      if (_electron.ipcRenderer && typeof _electron.ipcRenderer.send === 'function') {
+        _electron.ipcRenderer.send(FORWARD_CHANNEL, { name, level, args: serializeArgs(args) });
         return true;
       }
     } catch (e) {

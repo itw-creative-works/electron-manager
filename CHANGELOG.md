@@ -15,6 +15,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `Security` in case of vulnerabilities.
 
 ---
+## 1.6.1 — Renderer contextIsolation compatibility
+
+### Fixed
+- **Renderer webpack target**: Changed from `electron-renderer` to `web`. With `contextIsolation: true` (Electron's secure default since v12), the renderer runs in a browser-like sandbox — `electron-renderer` target assumed Node globals (`require`, `global`, `process`) that don't exist. Now uses `target: 'web'` with `globalObject: 'globalThis'`, `ProvidePlugin` for `global`, and `resolve.fallback` for Node built-ins.
+- **`logger-lite.js`**: Lazy-load `electron`, `path`, `fs`, `electron-log` inside the main-process code path only. Previously, top-level `require('electron')` was bundled into the renderer and crashed on load.
+- **`mode-helpers.js`** / **`app-root.js`**: Guard `require('electron')` with `typeof require !== 'undefined'` so shared cross-context helpers don't crash in the renderer bundle.
+
+---
 ## 1.6.0 — Consumer dependency resolution + CDP debugging
 
 ### Added

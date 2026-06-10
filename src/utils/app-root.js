@@ -17,7 +17,12 @@
 module.exports = function appRoot() {
   // In main, `electron.app.getAppPath` is the right answer. In renderer/preload
   // / plain Node, `app` is undefined — fall through to cwd.
-  const electron = require('electron');
-  if (electron?.app?.getAppPath) return electron.app.getAppPath();
-  return process.cwd();
+  // In renderer bundles (target: 'web'), require is not available — skip.
+  if (typeof require !== 'undefined') {
+    try {
+      const electron = require('electron');
+      if (electron?.app?.getAppPath) return electron.app.getAppPath();
+    } catch (_) {}
+  }
+  return typeof process !== 'undefined' ? process.cwd() : '/';
 };

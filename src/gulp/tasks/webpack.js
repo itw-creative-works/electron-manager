@@ -202,19 +202,56 @@ function makeRendererConfig(buildJson, isProd) {
     entry[name] = path.join(componentsDir, rel);
   });
 
+  // target: 'web' — the renderer with contextIsolation: true is a browser-like
+  // environment without Node globals (require, process, global, etc.). 'web' tells
+  // webpack to polyfill/fallback Node built-ins (fs, path, crypto, etc.) rather than
+  // emitting runtime require() calls that would crash. Libraries bundled through
+  // web-manager (Firebase, etc.) get browser-compatible shims this way.
   return {
     name:    'renderer',
-    target:  'electron-renderer',
+    target:  'web',
     mode:    isProd ? 'production' : 'development',
     devtool: isProd ? false : 'source-map',
     entry,
     output: {
-      path:     path.join(projectRoot, 'dist', 'assets', 'js', 'components'),
-      filename: '[name].bundle.js',
-      module:   false,
+      path:         path.join(projectRoot, 'dist', 'assets', 'js', 'components'),
+      filename:     '[name].bundle.js',
+      module:       false,
+      globalObject: 'globalThis',
     },
-    resolve: sharedResolve,
-    plugins: buildJsonPlugins(buildJson),
+    resolve: {
+      ...sharedResolve,
+      // For 'web' target: provide empty fallbacks for Node built-ins that libraries
+      // import but don't actually use in the browser. Firebase/web-manager's browser
+      // builds don't need these — the imports are dead code paths for Node-only features.
+      fallback: {
+        fs:             false,
+        path:           false,
+        os:             false,
+        crypto:         false,
+        http:           false,
+        https:          false,
+        http2:          false,
+        net:            false,
+        tls:            false,
+        dns:            false,
+        child_process:  false,
+        stream:         false,
+        zlib:           false,
+        util:           false,
+        url:            false,
+        assert:         false,
+        events:         false,
+        buffer:         false,
+        querystring:    false,
+        string_decoder: false,
+        electron:       false,
+      },
+    },
+    plugins: [
+      ...buildJsonPlugins(buildJson),
+      new webpack.ProvidePlugin({ global: 'globalThis' }),
+    ],
     optimization: {
       minimize: isProd,
     },

@@ -41,7 +41,8 @@ Manager.prototype.initialize = async function (overrides) {
 
   // Boot web-manager so Firebase Auth is available in this renderer.
   try {
-    self.webManager = require('web-manager').default || require('web-manager');
+    const wmMod = require('web-manager');
+    self.webManager = wmMod.default || wmMod;
     if (self.webManager?.initialize) {
       await self.webManager.initialize(self.config);
     }
