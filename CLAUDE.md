@@ -31,6 +31,10 @@ Electron Manager (EM) is a comprehensive framework for building modern Electron 
 6. `npm run package` — full local production package (DMG/zip/universal-mac, NSIS-win, deb+AppImage-linux). ~3min on mac.
 7. `npm run release` — signed + published release (requires certs)
 8. `npx mgr test` — runs framework + project test suites
+   - `npx mgr test build/config` — run a specific test by path (relative to `test/`)
+   - `npx mgr test em:build/config` — run only framework tests matching a path
+   - `npx mgr test project:custom-test` — run only consumer project tests matching a path
+   - Prefix with `TEST_EXTENDED_MODE=true` for tests that hit real external APIs
 
 ### For Framework Development (This Repository)
 
@@ -144,6 +148,11 @@ Every gulp invocation tees stdout+stderr to `<projectRoot>/logs/dev.log` (path v
 | `release` | trigger consumer's GH Actions Build & Release workflow, poll-stream logs |
 
 See [docs/releasing.md](docs/releasing.md) for the end-to-end flow.
+
+## Development Workflow
+
+- **🚫 NEVER run `npm start` / `npx mgr launch` / `npm test`** unless the user explicitly asks. Assume the user is already running the app or dev process. Running these commands kills the user's process and wastes time. Instead, **check output logs** after editing files to confirm changes compiled and took effect.
+- **After editing files**, verify the gulp watcher recompiled successfully. Check for webpack/sass errors in the console output. A change that breaks the build is not a completed change.
 
 ## File Conventions
 

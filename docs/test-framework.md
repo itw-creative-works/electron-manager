@@ -37,6 +37,26 @@ EM_TEST_DEBUG=1 npx mgr test          # see Electron stderr (otherwise drained s
 
 In EM itself, `npm test` does the same.
 
+### Filtering tests
+
+Pass a path (relative to `test/`) as a positional argument to run specific tests:
+
+```bash
+# Run a single test file
+npx mgr test build/config
+
+# Run only EM framework tests
+npx mgr test em:build/config
+
+# Run only consumer project tests
+npx mgr test project:custom-test
+
+# Combine with extended mode
+TEST_EXTENDED_MODE=true npx mgr test build/config
+```
+
+The filter matches against the test file path. `em:` and `project:` prefixes scope the filter to framework-only or project-only tests respectively. Without a prefix, both are searched.
+
 ### Layers
 
 - **build** — runs in plain Node. Fast.

@@ -15,6 +15,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `Security` in case of vulnerabilities.
 
 ---
+## 1.5.1 — test-filter docs + dev-workflow guard in CLAUDE.md
+
+### Added
+
+- **Test filtering documentation** — documented positional path arg, `em:`/`project:` scope prefixes, and `TEST_EXTENDED_MODE` in CLAUDE.md quick-start, `docs/test-framework.md`, and consumer-default `src/defaults/CLAUDE.md`.
+- **Development Workflow section** in CLAUDE.md — warns against running `npm start` / `npx mgr launch` / `npm test` without explicit user request; advises checking output logs instead.
+
+---
 ## 1.5.0 — env-detection SSOT (mode/url-helpers) + test/_init.js hook + consumer-default scaffolding + docs reorg
 
 ### Added

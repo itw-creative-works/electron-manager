@@ -30,6 +30,9 @@ npm run package     # full local production package (DMG/zip/universal-mac, NSIS
 npm run package:quick   # fast packaged build for the host platform/arch only (~20-30s)
 npm run release     # signed + published release (requires certs)
 npx mgr test        # run framework + project test suites
+npx mgr test build/config         # run a specific test by path (relative to test/)
+npx mgr test em:build/config      # run only framework tests matching a path
+npx mgr test project:custom-test  # run only consumer project tests matching a path
 npx mgr install dev  # use LOCAL electron-manager source (to test framework edits)
 npx mgr install live # restore the published electron-manager from npm
 ```
