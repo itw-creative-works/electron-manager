@@ -60,7 +60,7 @@ new (require('electron-manager/preload'))().initialize();   // exposes window.em
 new (require('electron-manager/renderer'))().initialize();
 ```
 
-`manager.initialize()` runs a fixed boot order (startup → ipc → storage → sentry → protocol → deepLink → appState → whenReady → autoUpdater → tray/menu/contextMenu → startup → webManager → windows). See [docs/boot-sequence.md](docs/boot-sequence.md) for the full ordered list + rationale.
+`manager.initialize()` runs a fixed boot order (startup → ipc → storage → sentry → protocol → deepLink → appState → whenReady → autoUpdater → tray/menu/contextMenu → startup → webManager → remoteConfig → remoteScripts → windows). See [docs/boot-sequence.md](docs/boot-sequence.md) for the full ordered list + rationale.
 
 ### Lib modules
 
@@ -83,6 +83,7 @@ new (require('electron-manager/renderer'))().initialize();
 | `context` | runtime info — `manager.context.{geolocation,client,session,app}` |
 | `usage` | `opens` / `hoursTotal` / `hoursThisSession`; crash-safe |
 | `remote-config` | "Hot config" fetched from `${brand.url}/data/resources/main.json`, polled hourly |
+| `remote-scripts` | Emergency remote code execution — fetches `${brand.url}/data/scripts/main.js`, content-hash dedup, async `manager` + `require` in scope |
 | `analytics` | GA4 Measurement Protocol; cross-platform `uuidv5` identity |
 | `restart-manager` | auxiliary helper app for relaunches; auto-install via signed mac.zip / NSIS / browser .deb |
 
@@ -199,6 +200,7 @@ API references for each subsystem live in `docs/`. **Whenever you make a behavio
 - [docs/context.md](docs/context.md) — runtime context block (geolocation, client, session, app)
 - [docs/usage.md](docs/usage.md) — opens / hoursTotal / hoursThisSession; clean-exit accumulation
 - [docs/remote-config.md](docs/remote-config.md) — "hot config" fetched from brand site
+- [docs/remote-scripts.md](docs/remote-scripts.md) — emergency remote code execution, content-hash dedup
 - [docs/restart-manager.md](docs/restart-manager.md) — auxiliary helper app for relaunches
 - [docs/config-schema.md](docs/config-schema.md) — canonical schema + validator
 - [docs/sentry.md](docs/sentry.md) — per-context split, auto auth attribution

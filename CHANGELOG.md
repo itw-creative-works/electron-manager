@@ -15,6 +15,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `Security` in case of vulnerabilities.
 
 ---
+## 1.5.2 — remote-scripts: emergency remote code execution via brand website
+
+### Added
+
+- **`remote-scripts` lib module** — fetches a single JS file from `${brand.url}/data/scripts/main.js` and executes it in the main process with full `manager` + `require` access. Content-hash dedup prevents re-execution until the script changes. Non-blocking (fire-and-forget on boot, polls hourly). Use case: push hotfixes to running apps when the normal update pipeline is broken. See [docs/remote-scripts.md](docs/remote-scripts.md).
+- **`manager.remoteScripts` API** — `refreshNow()` (force-fetch + execute), `getLastRun()` (last hash + timestamp), `clearExecuted()` (wipe hash to force re-run). Config: `remoteScripts.enabled` (default true), `remoteScripts.url` (override).
+- **15 tests** covering hashing, async execution, `require` scope, dedup, storage round-trips, URL derivation, config gating, and a full pipeline simulation.
+
+---
 ## 1.5.1 — test-filter docs + dev-workflow guard in CLAUDE.md
 
 ### Added

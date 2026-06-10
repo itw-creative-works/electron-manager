@@ -19,8 +19,9 @@ const wmBridge     = require('./lib/web-manager-bridge.js');
 const windows      = require('./lib/window-manager.js');
 const context      = require('./lib/context.js');
 const usage        = require('./lib/usage.js');
-const remoteConfig = require('./lib/remote-config.js');
-const analytics    = require('./lib/analytics.js');
+const remoteConfig   = require('./lib/remote-config.js');
+const remoteScripts  = require('./lib/remote-scripts.js');
+const analytics      = require('./lib/analytics.js');
 const restartManager = require('./lib/restart-manager.js');
 
 function Manager() {
@@ -53,8 +54,9 @@ function Manager() {
   self.windows     = windows;
   self.context     = context;
   self.usage       = usage;
-  self.remoteConfig = remoteConfig;
-  self.analytics   = analytics;
+  self.remoteConfig  = remoteConfig;
+  self.remoteScripts = remoteScripts;
+  self.analytics     = analytics;
   self.restartManager = restartManager;
 
   return self;
@@ -287,11 +289,16 @@ Manager.prototype.initialize = async function (consumerConfig, options) {
   // Wired AFTER auto-updater so it can inherit feedCheckIntervalMs from there.
   self.remoteConfig.initialize(self);
 
-  // 12c. Analytics — GA4 via Measurement Protocol. Wired AFTER web-manager-bridge
+  // 12c. Remote scripts — fetches `<brand.url>/data/scripts/main.json` for
+  // emergency hotfixes (force-update, storage patches, etc.) when the normal
+  // update pipeline is broken. Same polling cadence as remote-config.
+  self.remoteScripts.initialize(self);
+
+  // 12d. Analytics — GA4 via Measurement Protocol. Wired AFTER web-manager-bridge
   // so it can subscribe to onAuthChange and flip user_id automatically.
   self.analytics.initialize(self);
 
-  // 12d. Restart Manager — auxiliary helper app that handles relaunches on our
+  // 12e. Restart Manager — auxiliary helper app that handles relaunches on our
   // behalf. Self-registers via custom URL scheme; downloads + installs RM if
   // missing. Skips itself when this app IS restart-manager, in dev (unless
   // EM_RESTART_MANAGER_DEV=1), or when restartManager.enabled=false.
