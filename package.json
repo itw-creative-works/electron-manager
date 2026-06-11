@@ -1,6 +1,6 @@
 {
   "name": "electron-manager",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "Electron Manager — all-in-one development framework for Electron apps",
   "main": "dist/index.js",
   "exports": {
@@ -76,10 +76,13 @@
   },
   "keywords": [
     "electron",
+    "desktop-app",
+    "cross-platform",
     "electron-builder",
     "electron-updater",
-    "framework",
+    "auto-update",
     "gulp",
+    "sass",
     "webpack"
   ],
   "author": "ITW Creative Works",

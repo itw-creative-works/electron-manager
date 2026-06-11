@@ -35,6 +35,14 @@ EM-internal channels are prefixed `em:` (e.g. `em:storage:get`, `em:storage:chan
 - `invoke()` rejects with a clear message if no handler is registered for the channel.
 - Handler errors propagate through `invoke()` (both main-local and renderer-side) — your renderer's `await window.em.ipc.invoke(...)` will reject with the original error message.
 
+## Zero-trust payloads
+
+Registration is validated for you (above) — payload CONTENT is not. Treat every payload reaching a `handle()` / `on()` callback as untrusted input: renderers can be compromised, and apps that embed remote web content (e.g. external pages in `WebContentsView`s) expose the IPC surface to code you don't control.
+
+- **Validate shape and values before acting** — types match, IDs are well-formed, enums are from the expected set, paths resolve inside the expected roots.
+- **Gate any URL arriving via IPC** through `sanitize-url.js` before `shell.openExternal` / `loadURL` (the zero-trust URL rule — see [common-mistakes.md](common-mistakes.md)).
+- **Never feed raw payload values** into filesystem paths, shell commands, or `webContents.executeJavaScript`.
+
 ## Boot order
 
 `ipc` initializes **before** `storage` so that storage (and every other feature) can register handlers via `ipc.handle`. This is the canonical pattern: don't touch `ipcMain` directly.

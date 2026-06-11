@@ -238,6 +238,7 @@ API references for each subsystem live in `docs/`. **Whenever you make a behavio
 - [docs/build-system.md](docs/build-system.md) — gulp, webpack, electron-builder pipeline
 - [docs/environment-detection.md](docs/environment-detection.md) — `isDevelopment`/`isTesting`/`getApiUrl` etc., adding new helpers
 - [docs/common-mistakes.md](docs/common-mistakes.md) — the canonical "don't do this" list
+- [docs/audit.md](docs/audit.md) — full-audit check catalog (U-xx universal / EM-xx / F-xx IDs with severity + scope), protocol + fix loop
 - [docs/cdp-debugging.md](docs/cdp-debugging.md) — Claude ↔ Electron via CDP, `EM_CDP_PORT`, MCP setup
 
 `PROGRESS.md` tracks pass-by-pass progress and decisions.

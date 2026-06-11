@@ -15,6 +15,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `Security` in case of vulnerabilities.
 
 ---
+## 1.7.1 — Audit check catalog, IPC zero-trust payload rules, npm keywords
+
+### Added
+- **`docs/audit.md` — full-audit check catalog (`/omega:em audit`) + `docs/ipc.md` "Zero-trust payloads" section.** The audit doc carries ID'd, severity-graded checks with scope auto-detect (consumer vs framework via package.json): mirrored universal checks (U-01..U-14 — tests at every layer, renderer XSS escaping, secrets/certs, schema-validated config canon, doc parity, dead code, dep health, …), EM-specific checks (EM-01..EM-08 — `sanitize-url.js` gating on dynamic URLs, `app.getAppPath()` over `process.cwd()`, awaited `windows.create()` + always-create `main`, zero-trust IPC payloads, icon conventions, file-based integrations, presence-driven flags, renderer a11y), and framework-repo checks (F-01..F-04). Findings persist to `.temp/audit/claude-audit.md`; fixes run as a severity-ordered TodoWrite loop ending with a green `npx mgr test`. `docs/ipc.md` gains the payload-content rules EM-04 enforces (validate shape/values before acting, sanitize IPC-delivered URLs, never feed raw payloads into fs paths/shell/`executeJavaScript`) — payload content was previously undocumented (only channel registration was). Wired to the `omega:em` router's Audit process; `docs/audit.md` is mirrored across UJM/BEM/BXM. Indexed in CLAUDE.md.
+
+### Changed
+- **package.json `keywords` improved** — added the discovery terms `desktop-app`, `cross-platform`, `auto-update`, `sass` and dropped the generic `framework` (now: `electron`, `desktop-app`, `cross-platform`, `electron-builder`, `electron-updater`, `auto-update`, `gulp`, `sass`, `webpack`). npm-listing metadata only; no behavior change. Mirrored across UJM/BEM/BXM.
+
+---
 ## 1.7.0 — Boot-layer self-test, test targeting + extended mode, log parity
 
 ### Added
