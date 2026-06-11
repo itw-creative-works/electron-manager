@@ -35,9 +35,22 @@ async function runBootTests({ tests, projectRoot, emDistRoot }) {
   // webpack's `require('electron-manager/main')`) and electron (the runner's binary lookup
   // + the spawned bundle's `require('electron')`). Everything else (gulp, electron-store,
   // etc.) resolves through the upward node_modules walk because the fixture lives inside the
-  // EM repo. No-op for a real consumer that already has its own node_modules.
-  ensureFixtureDeps(effectiveRoot, path.resolve(emDistRoot, '..'));
+  // EM repo. No-op for a real consumer that already has its own node_modules. The links are
+  // tracked and ALWAYS removed in the finally — the electron-manager link points at the EM
+  // repo root, which CONTAINS the fixture, so leaving it behind forms an infinite directory
+  // cycle inside dist/ that crashes the next prepare-package tree walk (ENAMETOOLONG) and
+  // with it `npm publish`.
+  const createdLinks = ensureFixtureDeps(effectiveRoot, path.resolve(emDistRoot, '..'));
 
+  try {
+    return await bootProject({ tests, effectiveRoot, emDistRoot });
+  } finally {
+    removeFixtureDeps(createdLinks);
+  }
+}
+
+// Build + spawn + inspect — the actual boot run against effectiveRoot.
+async function bootProject({ tests, effectiveRoot, emDistRoot }) {
   // Locate electron.
   let electronBin;
   try {
@@ -215,7 +228,9 @@ function runGulpBuild(projectRoot) {
 //   - electron → EM's own electron, so the runner's `require('<root>/node_modules/electron')`
 //     binary lookup + the spawned bundle's `require('electron')` resolve.
 // Creates only what's MISSING — a no-op for a real consumer (EM_TEST_BOOT_PROJECT pointed at
-// an installed app already has both). Runtime-only + gitignored; never committed.
+// an installed app already has both). Returns the link paths it created so the caller can
+// remove exactly those (and ONLY those) after the run. Runtime-only; the fixture .gitignore
+// is belt-and-suspenders for crashed runs.
 function ensureFixtureDeps(effectiveRoot, emRoot) {
   const nodeModules = path.join(effectiveRoot, 'node_modules');
   const linkType = process.platform === 'win32' ? 'junction' : 'dir';
@@ -223,6 +238,7 @@ function ensureFixtureDeps(effectiveRoot, emRoot) {
     ['electron-manager', emRoot],
     ['electron',         path.join(emRoot, 'node_modules', 'electron')],
   ];
+  const created = [];
 
   for (const [name, target] of links) {
     const linkPath = path.join(nodeModules, name);
@@ -232,12 +248,29 @@ function ensureFixtureDeps(effectiveRoot, emRoot) {
     try {
       fs.mkdirSync(nodeModules, { recursive: true });
       fs.symlinkSync(target, linkPath, linkType);
+      created.push(linkPath);
     } catch (e) {
       // Best-effort — if it mattered, the gulp build / electron lookup below surfaces a
       // far clearer error than anything we'd throw here.
       if (process.env.EM_TEST_DEBUG) {
         console.log(chalk.gray(`      [boot] could not link ${name}: ${e.message}`));
       }
+    }
+  }
+
+  return created;
+}
+
+// Remove the symlinks ensureFixtureDeps created THIS run — never anything else, so a real
+// consumer's node_modules is untouched (nothing was created for it). Removal is required,
+// not just tidy: a leftover electron-manager → repo-root link inside dist/ is an infinite
+// directory cycle that breaks the next prepare-package walk (`npm run prepare`/`npm publish`).
+function removeFixtureDeps(links) {
+  for (const linkPath of links) {
+    try {
+      fs.unlinkSync(linkPath);                                   // POSIX symlinks
+    } catch (_) {
+      try { fs.rmdirSync(linkPath); } catch (_) { /* Windows junctions; best-effort */ }
     }
   }
 }
