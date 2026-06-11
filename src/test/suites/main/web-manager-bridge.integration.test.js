@@ -17,14 +17,14 @@ const ADMIN_KEY = process.env.EM_TEST_FIREBASE_ADMIN_KEY
                 || process.env.GOOGLE_APPLICATION_CREDENTIALS
                 || null;
 const USER_UID = process.env.EM_TEST_USER_UID || 'em-test-user';
-// Integration tests are opt-in. `npx mgr test --integration` (or `EM_TEST_INTEGRATION=1`) runs
-// them; default is skip. Legacy `EM_TEST_SKIP_INTEGRATION=1` still forces skip.
-const INTEGRATION_OPTED_IN = process.env.EM_TEST_INTEGRATION === '1';
-const FORCE_SKIP            = process.env.EM_TEST_SKIP_INTEGRATION === '1';
+// These hit REAL Firebase, so they're gated behind extended mode (the cross-framework
+// `TEST_EXTENDED_MODE` opt-in). `npx mgr test --extended` (or TEST_EXTENDED_MODE=true) runs
+// them; default is skip so `npx mgr test` stays fast + offline-safe.
+const EXTENDED_OPTED_IN = process.env.TEST_EXTENDED_MODE === 'true'
+                       || process.env.TEST_EXTENDED_MODE === '1';
 
 function checkSkipReason() {
-  if (FORCE_SKIP) return 'EM_TEST_SKIP_INTEGRATION=1';
-  if (!INTEGRATION_OPTED_IN) return 'integration tests skipped — pass --integration or set EM_TEST_INTEGRATION=1';
+  if (!EXTENDED_OPTED_IN) return 'extended tests skipped — pass --extended or set TEST_EXTENDED_MODE=true';
   if (!ADMIN_KEY) return 'no EM_TEST_FIREBASE_ADMIN_KEY / GOOGLE_APPLICATION_CREDENTIALS';
   if (!fs.existsSync(ADMIN_KEY)) return `service-account file not found at ${ADMIN_KEY}`;
   try {

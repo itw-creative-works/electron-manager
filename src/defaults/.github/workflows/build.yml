@@ -89,9 +89,9 @@ jobs:
       - name: Run framework + project test suites
         run: xvfb-run --auto-servernum -- npx mgr test --reporter json
         env:
-          # Skip integration suites that require live backend creds. Set to '1' on a separate
-          # workflow if you want to run them.
-          EM_TEST_INTEGRATION: '0'
+          # Skip extended suites that hit real external services (live backend creds, real
+          # network). Set TEST_EXTENDED_MODE: 'true' on a separate workflow to run them.
+          TEST_EXTENDED_MODE: ''
 
   build:
     name: Build (${{ matrix.os }})

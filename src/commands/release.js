@@ -7,8 +7,8 @@
 //   2. A few seconds of waiting while GH spins up the run.
 //   3. Live polling of every job's logs at 5s intervals, printing NEW lines as they
 //      arrive (job-prefixed) so it looks like streaming.
-//   4. Everything teed to <root>/logs/build.log with ANSI codes preserved on stdout
-//      and stripped from the file (matches the dev/start log convention).
+//   4. Everything teed to <root>/logs/ci.log with ANSI codes preserved on stdout
+//      and stripped from the file (matches the dev/build log convention).
 //   5. Exit 0 on success, 1 on any job failure.
 //
 // Why poll instead of stream? GH Actions doesn't expose live stdout — logs are only
@@ -79,13 +79,13 @@ module.exports = async function release(options = {}) {
 
   logger.log(`Run started: ${run.html_url}`);
 
-  // 4. Set up the build log tee.
+  // 4. Set up the CI log tee.
   const logsDir = path.join(projectRoot, 'logs');
   jetpack.dir(logsDir);
-  const buildLogPath = path.join(logsDir, 'build.log');
+  const ciLogPath = path.join(logsDir, 'ci.log');
   // Truncate so each release run starts fresh.
-  fs.writeFileSync(buildLogPath, `# release run ${run.html_url}\n# started ${new Date().toISOString()}\n\n`);
-  const logFile = fs.createWriteStream(buildLogPath, { flags: 'a' });
+  fs.writeFileSync(ciLogPath, `# release run ${run.html_url}\n# started ${new Date().toISOString()}\n\n`);
+  const logFile = fs.createWriteStream(ciLogPath, { flags: 'a' });
 
   // Spinner state. We tick every 250ms even between polls so the terminal feels alive.
   // The spinner line uses \r to overwrite itself; before printing real content we clear
@@ -192,10 +192,10 @@ module.exports = async function release(options = {}) {
         const success = state.conclusion === 'success';
         const symbol  = success ? '✓' : '✗';
         logger.log(`${symbol} Run ${state.conclusion} — ${state.html_url}`);
-        logger.log(`Logs: ${path.relative(projectRoot, buildLogPath)}`);
+        logger.log(`Logs: ${path.relative(projectRoot, ciLogPath)}`);
         if (!success) {
           process.exitCode = 1;
-          throw new Error(`Release run failed (conclusion=${state.conclusion}). See ${buildLogPath} or ${state.html_url}.`);
+          throw new Error(`Release run failed (conclusion=${state.conclusion}). See ${ciLogPath} or ${state.html_url}.`);
         }
         return;
       }

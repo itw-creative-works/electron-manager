@@ -1,5 +1,6 @@
 // Verifies the early-init customizations applied in main.js#initialize:
-//   - userData path gets " (Development)" appended in dev (matches legacy EM)
+//   - userData path gets an environment suffix: " (Testing)" under the test
+//     harness, " (Development)" in dev, untouched in production
 //   - app.userAgentFallback is set to a branded template via node-powertools.template
 //
 // These are observable side-effects of `manager.initialize()` so we just inspect
@@ -11,15 +12,31 @@ module.exports = {
   description: 'startup paths + global user agent',
   tests: [
     {
-      name: 'userData path includes "(Development)" suffix in non-production (test/dev) mode',
+      name: 'userData path includes "(Testing)" suffix under the test harness',
       run: (ctx) => {
         const { app } = require('electron');
         const userData = app.getPath('userData');
-        // Suffix is applied for any non-production run (gated on !isProduction()). Under the
-        // test harness isProduction() === false, so the suffix is applied — isolating test
-        // data from a production-installed copy of the app on the same machine.
+        // EM_TEST_MODE=true → isTesting() → dedicated " (Testing)" dir, wiped at
+        // boot, so test runs never read or pollute dev ("(Development)") or
+        // production data on the same machine.
         ctx.expect(typeof userData).toBe('string');
-        ctx.expect(userData.endsWith(' (Development)')).toBe(true);
+        ctx.expect(userData.endsWith(' (Testing)')).toBe(true);
+      },
+    },
+    {
+      name: 'testing userData dir is freshly created (wiped at boot)',
+      run: (ctx) => {
+        const fs = require('fs');
+        const path = require('path');
+        const { app } = require('electron');
+        const userData = app.getPath('userData');
+        // The wipe ran before storage.initialize(); only files written by THIS
+        // boot may exist. A marker from a previous run must never survive.
+        const marker = path.join(userData, '__em-wipe-marker');
+        ctx.expect(fs.existsSync(marker)).toBe(false);
+        // Leave a marker so the NEXT run proves the wipe (self-perpetuating check).
+        fs.mkdirSync(userData, { recursive: true });
+        fs.writeFileSync(marker, String(Date.now()));
       },
     },
     {

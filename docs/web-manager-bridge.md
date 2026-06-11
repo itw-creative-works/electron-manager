@@ -187,20 +187,18 @@ manager.deepLink.on('user/profile/:id', (ctx) => {
 
 `web-manager-bridge.test.js` covers the dispatch logic, IPC handler shape, sync-request comparison, and the `auth/token` deep-link integration — all without hitting Firebase.
 
-### Integration tests (skip without creds)
+### Extended tests (skip without opt-in + creds)
 
-`web-manager-bridge.integration.test.js` actually mints custom tokens via `firebase-admin` and signs in. To run:
+`web-manager-bridge.integration.test.js` actually mints custom tokens via `firebase-admin` and signs in — it hits REAL Firebase, so it's gated behind extended mode (the cross-framework `TEST_EXTENDED_MODE` opt-in; see [test-framework.md](test-framework.md#extended-vs-normal-mode)). To run:
 
 ```bash
 npm i -D firebase-admin                                   # already in EM's devDeps
 export EM_TEST_FIREBASE_ADMIN_KEY=/path/to/service-account.json
 export EM_TEST_USER_UID=em-test-user                      # optional, defaults to em-test-user
-npx mgr test
+npx mgr test --extended                                   # or: TEST_EXTENDED_MODE=true npx mgr test
 ```
 
-If `EM_TEST_FIREBASE_ADMIN_KEY` (or `GOOGLE_APPLICATION_CREDENTIALS`) isn't set, the suite skips cleanly with a clear reason. CI without creds → tests stay green.
-
-`EM_TEST_SKIP_INTEGRATION=1` forces skip even when creds are present.
+Without the extended-mode opt-in the suite skips cleanly with a clear reason; same when `EM_TEST_FIREBASE_ADMIN_KEY` (or `GOOGLE_APPLICATION_CREDENTIALS`) isn't set. CI without creds → tests stay green.
 
 ## Implementation notes
 

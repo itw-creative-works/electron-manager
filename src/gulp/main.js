@@ -18,12 +18,14 @@ const projectRoot = Manager.getRootPath('project');
 // Load .env file from project root
 require('dotenv').config({ path: path.join(projectRoot, '.env') });
 
-// Tee all stdout/stderr to <projectRoot>/logs/dev.log for easy `tail -f` / grep / Claude inspection.
+// Tee all stdout/stderr to <projectRoot>/logs/<dev|build>.log for easy `tail -f` / grep / Claude
+// inspection. build.log for production builds/packages (EM_BUILD_MODE=true), dev.log for `npm start`.
 // Disable via EM_LOG_FILE=false. Override path via EM_LOG_FILE=<path>.
 const attachLogFile = require('../utils/attach-log-file.js');
 const logFileEnv = process.env.EM_LOG_FILE;
 if (logFileEnv !== 'false' && logFileEnv !== '0') {
-  const logPath = (logFileEnv && logFileEnv !== 'true') ? logFileEnv : path.join(projectRoot, 'logs', 'dev.log');
+  const defaultName = Manager.isBuildMode() ? 'build.log' : 'dev.log';
+  const logPath = (logFileEnv && logFileEnv !== 'true') ? logFileEnv : path.join(projectRoot, 'logs', defaultName);
   attachLogFile(logPath);
   logger.log(`Logs tee'd to ${logPath}`);
 }

@@ -85,7 +85,7 @@ function ensureMainFileTransport() {
     // linux: ~/.config/<AppName>/logs
     logsDir = app.getPath('logs');
   } else {
-    // In dev, write to the consumer project's logs/ dir alongside build.log + dev.log.
+    // In dev, write to the consumer project's logs/ dir alongside dev.log + build.log.
     // process.cwd() is the consumer project root when launched via `npm start`.
     logsDir = path.join(process.cwd(), 'logs');
   }

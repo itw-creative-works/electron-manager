@@ -1,0 +1,3 @@
+// Minimal theme entry for the boot-layer self-test fixture — pulls in the EM/classy
+// theme so the sass build path is exercised exactly like a real consumer's.
+@use 'electron-manager' as *;

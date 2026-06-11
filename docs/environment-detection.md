@@ -85,4 +85,4 @@ Write the function in a `src/utils/<topic>-helpers.js` module, expose `attachTo(
 
 ## See also
 
-- [test-framework.md](test-framework.md) — `EM_TEST_MODE` is set automatically by the test runners; `--integration` gates real external APIs.
+- [test-framework.md](test-framework.md) — `EM_TEST_MODE` is set automatically by the test runners; extended mode (`--extended` / `TEST_EXTENDED_MODE`) gates real external APIs.

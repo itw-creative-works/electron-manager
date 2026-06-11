@@ -13,6 +13,10 @@ Match the framework's four layers — Electron Manager's test runner discovers f
 | `test/renderer/` | Hidden BrowserWindow | Renderer-side logic, DOM, preload bridge |
 | `test/boot/` | Consumer's actual built bundle | End-to-end smoke tests (does the app boot, does main show a window, do IPC handlers register) |
 
+## Coverage
+
+Every feature ships with tests at every layer it has a surface in — logic (`build`/`main`), UI (`renderer`), end-to-end (`boot`). Skip a layer only when the feature genuinely has no surface there; "the logic test covers it" does not excuse the UI test.
+
 ## Quick example
 
 ```js

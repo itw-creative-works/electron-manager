@@ -37,12 +37,13 @@ class SkipError extends Error {
 
 async function run(options = {}) {
   options.layer    = options.layer    || 'all';
+  options.target   = options.target   || null;
   options.filter   = options.filter   || null;
   options.reporter = options.reporter || 'pretty';
 
   const startTime = Date.now();
 
-  const sources = discoverTestFiles();
+  const sources = discoverTestFiles(options.target);
 
   console.log('');
   console.log(chalk.bold('  Electron Manager Tests'));
@@ -362,7 +363,56 @@ function reportResults(results, durationMs) {
   console.log(chalk.gray(`\n    Total: ${total} tests in ${durationMs}ms\n`));
 }
 
-function discoverTestFiles() {
+// Parse a positional test target into a source filter + path part.
+// Source prefixes (standardized across all OMEGA frameworks):
+//   'mgr:' / 'em:' / 'framework:' → framework tests  ('mgr:' is the universal alias)
+//   'project:'                    → project tests
+//   no prefix                     → both sources, matched by path
+// Supported forms:
+//   'project:'              → { source: 'project',   pathPart: null }   (all project tests)
+//   'project:main/tab'      → { source: 'project',   pathPart: 'main/tab' }
+//   'mgr:' / 'em:'          → { source: 'framework', pathPart: null }   (all framework tests)
+//   'mgr:build/config'      → { source: 'framework', pathPart: 'build/config' }
+//   'main/tab'  (no prefix) → { source: null,        pathPart: 'main/tab' }  (both sources)
+//   null / ''               → { source: null,        pathPart: null }   (everything)
+function parseTarget(target) {
+  if (!target) {
+    return { source: null, pathPart: null };
+  }
+
+  const m = String(target).match(/^(project|mgr|em|framework):(.*)$/);
+  if (m) {
+    const source = m[1] === 'project' ? 'project' : 'framework';
+    return { source, pathPart: m[2] || null };
+  }
+
+  return { source: null, pathPart: target };
+}
+
+// Narrow a source's file list by the parsed target. A source-prefixed target
+// excludes the other source entirely; the path part (if any) matches by
+// relative path prefix.
+function filterBySource(source, files, sourceFilter, pathPart) {
+  if (sourceFilter && sourceFilter !== source) {
+    return [];
+  }
+  if (!pathPart) {
+    return files;
+  }
+
+  return files.filter((file) => {
+    const rel = relativizePath(file, source);
+    const relNoExt = rel.replace(/\.js$/, '').replace(/\.test$/, '');
+    const partNoExt = pathPart.replace(/\.js$/, '').replace(/\.test$/, '');
+    return rel.startsWith(pathPart)
+      || relNoExt === partNoExt
+      || relNoExt.startsWith(partNoExt + '/')
+      || rel.includes(pathPart);
+  });
+}
+
+function discoverTestFiles(target) {
+  const { source: sourceFilter, pathPart } = parseTarget(target);
   const framework = [];
   const project = [];
 
@@ -399,7 +449,10 @@ function discoverTestFiles() {
     });
   }
 
-  return { framework, project };
+  return {
+    framework: filterBySource('framework', framework, sourceFilter, pathPart),
+    project:   filterBySource('project',   project,   sourceFilter, pathPart),
+  };
 }
 
 function relativizePath(file, source) {

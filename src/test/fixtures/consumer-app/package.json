@@ -1,0 +1,7 @@
+{
+  "name": "em-fixture-consumer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Minimal EM consumer app — boot-layer self-test fixture (built + booted by src/test/runners/boot.js).",
+  "main": "dist/main.bundle.js"
+}

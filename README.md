@@ -40,6 +40,8 @@ npm run package:quick    # fast packaged build for host platform/arch (.app/.exe
 npm run package          # full local production package (DMG/zip/universal-mac, NSIS-win, deb+AppImage-linux)
 npm run release          # signed + published release via GitHub Actions
 npx mgr test             # run framework + project test suites
+npx mgr test project:    # only YOUR project tests (mgr: = only the framework's own tests; add a path to narrow)
+npx mgr test --extended  # opt into tests that hit real external services (or TEST_EXTENDED_MODE=true)
 ```
 
 ## Icons
@@ -69,13 +71,15 @@ Resolution per slot/platform (most specific wins): `<platform>/<slot>` → `glob
 
 ## Logs
 
-Three logs in `<projectRoot>/logs/`, each with its own purpose:
+Five logs in `<projectRoot>/logs/`, each with its own purpose:
 
 | File | What | Lifetime |
 |---|---|---|
 | `runtime.log` | Your packaged app's runtime — main + preload + renderer all converge here via electron-log | Persistent, rotates at 10 MB |
-| `dev.log` | Gulp pipeline output — sass, webpack, html, electron child stdout from `npm start` | Truncated each run |
-| `build.log` | `npm run release` — streamed GH Actions output during a CI release | Truncated each run |
+| `dev.log` | Gulp pipeline output — sass, webpack, html, electron child stdout from `npm start` | Truncated each `npm start` |
+| `build.log` | Gulp pipeline output for production builds/packages (`npm run build` / `package` / `publish`, i.e. `EM_BUILD_MODE=true`) | Truncated each build |
+| `test.log` | `npx mgr test` runner output (suite names, pass/fail, harness boot lines) | Truncated each test run |
+| `ci.log` | `npm run release` — streamed GH Actions output during a CI release | Truncated each release |
 
 ```bash
 npx mgr logs                  # tail last 50 of runtime.log

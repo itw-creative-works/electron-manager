@@ -188,11 +188,25 @@ Manager.prototype.initialize = async function (consumerConfig, options) {
   self.startup._electron = electron || null;
   self.startup.applyEarly();
 
-  // 1b. Append "(Development)" to userData path in any non-production run (dev OR testing).
-  //     MUST run before storage.initialize() because electron-store reads
-  //     `app.getPath('userData')` at construction time. Keeps dev/test session data, app
-  //     state, etc. isolated from production-installed copies of the same app on the machine.
-  if (!self.isProduction()) {
+  // 1b. Isolate the userData path per environment. MUST run before
+  //     storage.initialize() because electron-store reads `app.getPath('userData')`
+  //     at construction time.
+  //       production  → <name>                 (untouched)
+  //       development → <name> (Development)   (dev runs never touch installed-app data)
+  //       testing     → <name> (Testing)       (wiped at boot — every test run starts
+  //                                             from a clean slate; post-run state stays
+  //                                             on disk for inspection until the next run.
+  //                                             Set EM_TEST_KEEP_USERDATA=1 to skip the wipe.)
+  if (self.isTesting()) {
+    const before = app.getPath('userData');
+    const after  = `${before} (Testing)`;
+    const keep   = process.env.EM_TEST_KEEP_USERDATA === '1';
+    if (!keep) {
+      require('fs').rmSync(after, { recursive: true, force: true });
+    }
+    app.setPath('userData', after);
+    self.logger.log(`userData path: ${before} -> ${after} (testing mode, ${keep ? 'kept' : 'wiped at boot'})`);
+  } else if (!self.isProduction()) {
     const before = app.getPath('userData');
     const after  = `${before} (Development)`;
     app.setPath('userData', after);

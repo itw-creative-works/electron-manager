@@ -1,5 +1,11 @@
 // Build-layer tests for src/utils/attach-log-file.js — tee process.stdout/stderr to a file
 // with ANSI stripping. Each test attaches, writes, detaches, then inspects the file.
+//
+// CRITICAL: these tests run INSIDE a live `npx mgr test` process whose own output is being
+// teed to logs/test.log by the singleton. So they must NOT touch the singleton — exercising
+// attach()/detach() on it would detach the live tee mid-run and truncate logs/test.log. Each
+// test uses its OWN `createTee()` instance, which stacks under the live singleton tee and
+// restores it cleanly on detach.
 
 const path = require('path');
 const fs   = require('fs');
@@ -17,6 +23,7 @@ module.exports = {
         ctx.expect(typeof mod).toBe('function');
         ctx.expect(typeof mod.detach).toBe('function');
         ctx.expect(typeof mod.stripAnsi).toBe('function');
+        ctx.expect(typeof mod.createTee).toBe('function');
       },
     },
     {
@@ -31,14 +38,16 @@ module.exports = {
       name: 'attach + stdout.write + detach: file contains the writes',
       run: async (ctx) => {
         const attach = require(path.join(__dirname, '..', '..', '..', 'utils', 'attach-log-file.js'));
+        // Isolated instance — stacks under the live test.log tee, never clobbers it.
+        const tee = attach.createTee();
         const tmpPath = path.join(os.tmpdir(), `em-log-${Date.now()}.log`);
         try {
-          const stream = attach(tmpPath);
+          const stream = tee.attach(tmpPath);
           process.stdout.write('hello world\n');
           process.stdout.write('\x1B[31mcolored\x1B[0m line\n');
           // Wait for stream to flush before detaching + reading.
           await new Promise((resolve) => stream.write('', resolve));
-          attach.detach();
+          tee.detach();
           // detach() ends the stream; wait for the close event.
           await new Promise((resolve) => stream.on('close', resolve));
 
@@ -47,7 +56,7 @@ module.exports = {
           ctx.expect(contents).toContain('colored line');
           ctx.expect(contents).not.toContain('\x1B[');
         } finally {
-          attach.detach();
+          tee.detach();
           try { fs.unlinkSync(tmpPath); } catch (e) {}
         }
       },
@@ -56,13 +65,14 @@ module.exports = {
       name: 'idempotent: attaching twice with same path returns same stream',
       run: (ctx) => {
         const attach = require(path.join(__dirname, '..', '..', '..', 'utils', 'attach-log-file.js'));
+        const tee = attach.createTee();
         const tmpPath = path.join(os.tmpdir(), `em-log-idem-${Date.now()}.log`);
         try {
-          const s1 = attach(tmpPath);
-          const s2 = attach(tmpPath);
+          const s1 = tee.attach(tmpPath);
+          const s2 = tee.attach(tmpPath);
           ctx.expect(s1).toBe(s2);
         } finally {
-          attach.detach();
+          tee.detach();
           try { fs.unlinkSync(tmpPath); } catch (e) {}
         }
       },
@@ -71,8 +81,9 @@ module.exports = {
       name: 'attach with falsy path returns null and does nothing',
       run: (ctx) => {
         const attach = require(path.join(__dirname, '..', '..', '..', 'utils', 'attach-log-file.js'));
-        ctx.expect(attach(null)).toBe(null);
-        ctx.expect(attach('')).toBe(null);
+        const tee = attach.createTee();
+        ctx.expect(tee.attach(null)).toBe(null);
+        ctx.expect(tee.attach('')).toBe(null);
       },
     },
   ],

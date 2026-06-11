@@ -31,8 +31,11 @@ npm run package:quick   # fast packaged build for the host platform/arch only (~
 npm run release     # signed + published release (requires certs)
 npx mgr test        # run framework + project test suites
 npx mgr test build/config         # run a specific test by path (relative to test/)
-npx mgr test em:build/config      # run only framework tests matching a path
+npx mgr test project:             # run ONLY your project tests (all of them)
 npx mgr test project:custom-test  # run only consumer project tests matching a path
+npx mgr test mgr:                 # run ONLY framework tests (universal alias; em:/framework: are equivalent)
+npx mgr test em:build/config      # run only framework tests matching a path
+# (output is teed to logs/ — dev.log on `npm start`, build.log on `npm run build`, test.log on `npx mgr test`; cat instead of scrolling scrollback)
 npx mgr install dev  # use LOCAL electron-manager source (to test framework edits)
 npx mgr install live # restore the published electron-manager from npm
 ```
@@ -79,6 +82,10 @@ In renderer: `window.em.storage`, `window.em.ipc`, `window.em.logger`, `EM_BUILD
 - **Do NOT install framework dependencies directly** (`firebase`, `fs-jetpack`, `web-manager`, etc.). EM's webpack config resolves them through the framework's own `node_modules/`. If something doesn't resolve, the issue is in EM's webpack config — not your `package.json`.
 - **web-manager owns Firebase.** Never `require('firebase')` or `import('firebase/app')`. Use `require('web-manager')` → `webManager.auth()`, `webManager.firestore()` in renderers. In main process, use `manager.webManager` (the EM bridge).
 - **`Manager.require(name)`** resolves from EM's module context at runtime for unbundled code (gulp tasks, test fixtures).
+
+## Testing
+
+Every feature ships with tests at every layer it has a surface in: **logic** (`test/build/`, `test/main/`), **UI** (`test/renderer/` — real events on the real DOM), and **end-to-end** (`test/boot/`). Skip a layer only when the feature genuinely has no surface there — "the logic test covers it" does not excuse the UI test. See `test/README.md` and `node_modules/electron-manager/docs/test-framework.md`.
 
 <!-- Everything above this marker is owned by the framework and rewritten on every `npx mgr setup`. Add your project-specific notes below — they are preserved across setups. -->
 

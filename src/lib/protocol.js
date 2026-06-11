@@ -50,15 +50,15 @@ const protocol = {
     // call `app.setAsDefaultProtocolClient(extra)` yourself in main.js.
     const schemes = [manager.config.brand.id];
     protocol._schemes = schemes;
-    schemes.forEach((scheme) => {
-      // Windows + Linux need argv passing for cold-start to work properly when
-      // launched from `app.exe scheme://...` style invocations during dev.
-      if (process.platform === 'win32' || process.platform === 'linux') {
-        app.setAsDefaultProtocolClient(scheme, process.execPath, [process.cwd()]);
-      } else {
-        app.setAsDefaultProtocolClient(scheme);
-      }
-    });
+    if (manager.isProduction()) {
+      schemes.forEach((scheme) => {
+        if (process.platform === 'win32' || process.platform === 'linux') {
+          app.setAsDefaultProtocolClient(scheme, process.execPath, [process.cwd()]);
+        } else {
+          app.setAsDefaultProtocolClient(scheme);
+        }
+      });
+    }
     logger.log(`registered schemes=${JSON.stringify(schemes)}`);
 
     protocol._initialized = true;

@@ -22,12 +22,28 @@ async function runBootTests({ tests, projectRoot, emDistRoot }) {
     return { passed: 0, failed: 0, skipped: 0 };
   }
 
+  // EM_TEST_BOOT_PROJECT — boot a different project root than the CWD. Auto-set to the
+  // bundled fixture when EM self-tests (see commands/test.js); set it explicitly to boot a
+  // real consumer (e.g. deployment-playground-desktop) without cd-ing into it. Mirrors
+  // BXM's BXM_TEST_BOOT_PROJECT / UJM's UJ_TEST_BOOT_PROJECT.
+  const effectiveRoot = process.env.EM_TEST_BOOT_PROJECT
+    ? path.resolve(process.env.EM_TEST_BOOT_PROJECT)
+    : projectRoot;
+
+  // The bundled fixture ships as SOURCE only (no node_modules). Symlink the two deps the
+  // build + boot path resolves by EXPLICIT path: electron-manager (the gulpfile path +
+  // webpack's `require('electron-manager/main')`) and electron (the runner's binary lookup
+  // + the spawned bundle's `require('electron')`). Everything else (gulp, electron-store,
+  // etc.) resolves through the upward node_modules walk because the fixture lives inside the
+  // EM repo. No-op for a real consumer that already has its own node_modules.
+  ensureFixtureDeps(effectiveRoot, path.resolve(emDistRoot, '..'));
+
   // Locate electron.
   let electronBin;
   try {
-    electronBin = require(path.join(projectRoot, 'node_modules', 'electron'));
+    electronBin = require(path.join(effectiveRoot, 'node_modules', 'electron'));
   } catch (e) {
-    const msg = `    ○ boot tests skipped (electron not installed in ${projectRoot})`;
+    const msg = `    ○ boot tests skipped (electron not installed in ${effectiveRoot})`;
     console.log(chalk.yellow(msg));
     return { passed: 0, failed: 0, skipped: tests.length };
   }
@@ -38,10 +54,10 @@ async function runBootTests({ tests, projectRoot, emDistRoot }) {
   // heuristic (mtime comparison) can be defeated by editor backdating, git restores, or
   // file copies — and a silently-stale test is worse than a slow one.
   // Set EM_TEST_SKIP_BUILD=1 to opt out (CI scenarios where build ran in a separate step).
-  const bundlePath = path.join(projectRoot, 'dist', 'main.bundle.js');
+  const bundlePath = path.join(effectiveRoot, 'dist', 'main.bundle.js');
   if (process.env.EM_TEST_SKIP_BUILD !== '1') {
     console.log(chalk.gray(`      Building bundle for boot tests...`));
-    const buildResult = runGulpBuild(projectRoot);
+    const buildResult = runGulpBuild(effectiveRoot);
     if (buildResult !== 0) {
       console.log(chalk.red(`    ✗ Boot tests aborted — gulp build failed (exit ${buildResult}).`));
       return { passed: 0, failed: tests.length, skipped: 0 };
@@ -55,7 +71,7 @@ async function runBootTests({ tests, projectRoot, emDistRoot }) {
   // and shipped to the harness for reconstitution. Same trick as runners/electron.js
   // uses for renderer suites.
   const spec = {
-    projectRoot,
+    projectRoot: effectiveRoot,
     emDistRoot,
     tests: tests.map((t) => ({
       description:    t.description,
@@ -90,15 +106,15 @@ async function runBootTests({ tests, projectRoot, emDistRoot }) {
   // env is clean — no extra delete here.
 
   // Args passed to electron:
-  //   projectRoot — load the consumer project (package.json#main = dist/main.bundle.js).
+  //   effectiveRoot — load the consumer project (package.json#main = dist/main.bundle.js).
   //
   // We don't use `--require <bootEntry>` because Electron rejects unknown CLI flags. Instead,
   // EM's main.js detects EM_TEST_BOOT and `require()`s the boot harness itself after init.
-  const args = [projectRoot];
+  const args = [effectiveRoot];
 
   return new Promise((resolve) => {
     const child = spawn(electronBin, args, {
-      cwd: projectRoot,
+      cwd: effectiveRoot,
       env: childEnv,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -190,6 +206,40 @@ function runGulpBuild(projectRoot) {
     stdio: 'inherit',
   });
   return result.status == null ? 1 : result.status;
+}
+
+// Symlink the deps the bundled fixture's build + boot path resolves by EXPLICIT path
+// (not the upward node_modules walk):
+//   - electron-manager → the EM repo root, so `<root>/node_modules/electron-manager/dist/gulp/main.js`
+//     (the gulpfile path) resolves AND webpack's `require('electron-manager/main')` resolves.
+//   - electron → EM's own electron, so the runner's `require('<root>/node_modules/electron')`
+//     binary lookup + the spawned bundle's `require('electron')` resolve.
+// Creates only what's MISSING — a no-op for a real consumer (EM_TEST_BOOT_PROJECT pointed at
+// an installed app already has both). Runtime-only + gitignored; never committed.
+function ensureFixtureDeps(effectiveRoot, emRoot) {
+  const nodeModules = path.join(effectiveRoot, 'node_modules');
+  const linkType = process.platform === 'win32' ? 'junction' : 'dir';
+  const links = [
+    ['electron-manager', emRoot],
+    ['electron',         path.join(emRoot, 'node_modules', 'electron')],
+  ];
+
+  for (const [name, target] of links) {
+    const linkPath = path.join(nodeModules, name);
+    if (fs.existsSync(linkPath)) continue;   // real consumer already has it, or a prior run linked it
+    if (!fs.existsSync(target))  continue;   // can't link what isn't there
+
+    try {
+      fs.mkdirSync(nodeModules, { recursive: true });
+      fs.symlinkSync(target, linkPath, linkType);
+    } catch (e) {
+      // Best-effort — if it mattered, the gulp build / electron lookup below surfaces a
+      // far clearer error than anything we'd throw here.
+      if (process.env.EM_TEST_DEBUG) {
+        console.log(chalk.gray(`      [boot] could not link ${name}: ${e.message}`));
+      }
+    }
+  }
 }
 
 module.exports = { runBootTests };

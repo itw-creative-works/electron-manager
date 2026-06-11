@@ -1,0 +1,31 @@
+{
+  // Minimal EM consumer config used ONLY by EM's own boot-layer self-test. The fixture
+  // is webpack-built (dist/main.bundle.js) and booted by src/test/runners/boot.js when
+  // EM_TEST_BOOT_PROJECT points here — auto-set when EM tests itself (src/commands/test.js).
+  // Not a real app; never published.
+  brand: {
+    id: 'em-fixture',
+    name: 'EM Fixture Consumer',
+    images: {
+      // Empty → build-config falls back to EM's bundled default icon (no icon file shipped).
+      icon: '',
+    },
+  },
+  startup: {
+    mode: 'normal',
+  },
+  // Skip release/repo discovery during the fixture's production build (no GitHub repo behind it).
+  releases: {
+    enabled: false,
+  },
+  sentry: {
+    dsn: '',
+  },
+  analytics: {
+    providers: {
+      google: { id: '' },
+    },
+  },
+  // Empty → web-manager-bridge skips Firebase init (no hang on a fake projectId).
+  firebaseConfig: {},
+}

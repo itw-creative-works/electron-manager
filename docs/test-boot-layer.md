@@ -1,4 +1,4 @@
-# Boot Test Layer
+# Test Framework — Boot Layer
 
 The `boot` test layer runs against the **consumer's actual built `dist/main.bundle.js`** — the real production main entry, exactly as `electron .` would load it. Replaces shell-level `npm start && sleep 12 && kill` smoke tests with deterministic, signal-driven pass/fail.
 
@@ -89,6 +89,39 @@ EM_TEST_SKIP_BUILD=1 npx mgr test --layer boot
 ```
 
 When `EM_TEST_SKIP_BUILD=1` is set and the bundle is missing, boot tests are skipped with a warning instead of running against nothing.
+
+## Self-test from the framework repo (the bundled fixture)
+
+Everything above describes a **consumer** running boot tests against their own `dist/main.bundle.js`. EM also boot-tests *itself* — the same way BXM verifies "does the extension load?" and UJM verifies "does the site boot?".
+
+When `npx mgr test` runs from the electron-manager repo (the cwd's `package.json` name is `electron-manager`), two complementary mechanisms engage:
+
+- **`isFrameworkSelfTest`** (in [src/test/runner.js](../src/test/runner.js)) — test discovery includes the framework's own `boot/**` suites. For a real consumer this flag is false and framework `boot/**` suites are **excluded** (they target EM's fixture, not the consumer's app), so they never run in a consumer's `npx mgr test`.
+- **`EM_TEST_BOOT_PROJECT`** — [src/commands/test.js](../src/commands/test.js) points the boot runner at the bundled fixture under `src/test/fixtures/consumer-app/` instead of the cwd.
+
+The gate decides *whether* the framework boot suite runs; the env var decides *which project* gets booted. (BEM's `BEM_TEST_BOOT_PROJECT`, BXM's `BXM_TEST_BOOT_PROJECT`, and UJM's `UJ_TEST_BOOT_PROJECT` are the exact analogs.)
+
+### The bundled fixture
+
+`src/test/fixtures/consumer-app/` — a minimal, committed EM consumer (source only):
+
+- `config/electron-manager.json` — fake brand (`em-fixture`), `releases.enabled: false` (no repo discovery during the build), empty `firebaseConfig` (no Firebase hang).
+- `src/main.js` / `src/preload.js` — the one-line bootstraps a real consumer ships; `main.js` creates the `main` window (`show: false`).
+- `src/views/main/index.html` + `src/assets/js/components/main/index.js` + `src/assets/scss/main.scss` — a real view/renderer/theme so webpack + sass run exactly as for a consumer.
+
+**Runtime-only, gitignored** (never committed): before the boot build, the runner symlinks `electron-manager` (→ the EM repo root) and `electron` (→ EM's own copy) into the fixture's `node_modules` — the only two deps resolved by *explicit path* (the gulpfile location, webpack's `require('electron-manager/main')`, and the runner's electron-binary lookup). Everything else (gulp, electron-store, …) resolves via the upward `node_modules` walk because the fixture lives inside the EM repo. See `ensureFixtureDeps()` in [src/test/runners/boot.js](../src/test/runners/boot.js).
+
+The fixture is then **webpack-built into a real `dist/main.bundle.js`** and booted — the same production path a consumer's boot test exercises (bundled, not the unbundled lib code the `main` layer covers). The boot smoke lives at [src/test/suites/boot/consumer-app-boots.test.js](../src/test/suites/boot/consumer-app-boots.test.js).
+
+### `EM_TEST_BOOT_PROJECT`
+
+| Env | Purpose |
+|---|---|
+| `EM_TEST_BOOT_PROJECT` | Root of a project to boot instead of the cwd. Auto-set to `src/test/fixtures/consumer-app` when EM tests itself; set it explicitly to boot a **real consumer** (e.g. `deployment-playground-desktop`) without `cd`-ing into it. |
+
+### Why this exists
+
+The `build`/`main`/`renderer` layers cover EM's lib code fast and in isolation. None of them prove the framework still assembles a consumer's `src/main.js` into a webpacked bundle that boots end-to-end. The fixture self-test fills that gap — EM's analog of "does the extension load?" (BXM) / "does the site boot?" (UJM).
 
 ## Limitations
 

@@ -8,7 +8,7 @@ Electron Manager (EM) is a comprehensive framework for building modern Electron 
 
 ## Recommended skills
 
-- **`EM:patterns`** — SSOT for Electron Manager architecture, lib modules, build/release pipeline, and test framework patterns. Auto-loads on EM-specific keywords (`manager.windows`, `manager.tray`, `electron-builder`, `npx mgr setup`, etc.) and when touching files in `src/lib/`, `src/integrations/`, `src/gulp/`, `src/commands/`, `config/electron-manager.json`, etc.
+- **`omega:em`** — router skill. Auto-loads on EM-specific keywords (`manager.windows`, `manager.tray`, `electron-builder`, `npx mgr setup`, etc.) and points back to this CLAUDE.md + `docs/` (the SSOT), carrying only Claude-workflow hard rules and process checklists.
 - **`js:patterns`** — JavaScript/Node.js conventions: file structure, JSDoc, defensive coding (`?.` usage), template literals, `package.json` conventions. Auto-loads when creating new `.js` files or touching JS module structure.
 
 ## 🚨 READ WEB-MANAGER TOO
@@ -31,16 +31,19 @@ Electron Manager (EM) is a comprehensive framework for building modern Electron 
 6. `npm run package` — full local production package (DMG/zip/universal-mac, NSIS-win, deb+AppImage-linux). ~3min on mac.
 7. `npm run release` — signed + published release (requires certs)
 8. `npx mgr test` — runs framework + project test suites
-   - `npx mgr test build/config` — run a specific test by path (relative to `test/`)
-   - `npx mgr test em:build/config` — run only framework tests matching a path
-   - `npx mgr test project:custom-test` — run only consumer project tests matching a path
-   - Prefix with `TEST_EXTENDED_MODE=true` for tests that hit real external APIs
+   - `npx mgr test build/config` — run a specific test by path (relative to `test/`, matches both sources)
+   - `npx mgr test project:` — run ONLY consumer project tests (no framework suites)
+   - `npx mgr test project:custom-test` — run only that project test file
+   - `npx mgr test mgr:` — run ONLY framework tests (universal cross-framework alias for "the manager's own tests")
+   - `npx mgr test em:build/config` — run only framework tests matching a path (`em:` aliases `framework:`, both equivalent to `mgr:`)
+   - `--filter=<substring>` matches test NAMES (orthogonal to the path target)
+   - `npx mgr test --extended` (or `TEST_EXTENDED_MODE=true`) opts into tests that hit real external services (Firebase, analytics, update feeds) — off by default. `TEST_EXTENDED_MODE` is the shared, unprefixed env var across BEM/BXM/UJM/EM; it propagates to every spawned test environment and prints a warning when on. See [docs/test-framework.md](docs/test-framework.md#extended-vs-normal-mode).
 
 ### For Framework Development (This Repository)
 
 1. `npm install`
 2. `npm start` — watch + compile `src/` → `dist/` via prepare-package
-3. Test in a consumer project: from inside the consumer, run `npx mgr install dev` to swap EM to this local repo — required whenever you edit the framework source and want the consumer to pick up the changes (the consumer otherwise keeps its installed `node_modules/electron-manager`). Reverse with `npx mgr install live`.
+3. Test in the **designated test consumer** — `../../Deployment-Playground/deployment-playground-desktop` is EM's consumer for validating framework changes end-to-end (exercise any consumer-level flow there freely: builds, tests, packaging, runtime). From inside it, run `npx mgr install dev` to swap EM to this local repo — required whenever you edit the framework source and want the consumer to pick up the changes (the consumer otherwise keeps its installed `node_modules/electron-manager`). Reverse with `npx mgr install live`.
 4. `npm test` — runs the framework's own suites
 
 ## Architecture
@@ -64,7 +67,7 @@ new (require('electron-manager/renderer'))().initialize();
 
 ### Lib modules
 
-`src/lib/*.js` — every Electron concern its own module. Each exports a singleton with `initialize(manager)`. Deep dive per module: see `docs/<lib-name>.md`.
+`src/lib/*.js` — every Electron concern its own module. Each exports a singleton with `initialize(manager)`. Deep dive per module: see `docs/<lib-name>.md`. Authoring guide (initialization contract, adding a new lib, flat-vs-split): [docs/lib-modules.md](docs/lib-modules.md).
 
 | Module | Description |
 |---|---|
@@ -123,9 +126,13 @@ Four Managers (main / renderer / preload / build-time) all mix in shared helpers
 
 `npx mgr test` discovers + runs framework suites (`<EM>/dist/test/suites/**`) plus consumer suites (`<cwd>/test/**`). Four layers: **build** (plain Node), **main** (spawned Electron), **renderer** (hidden BrowserWindow), **boot** (consumer's actual built bundle for end-to-end smoke tests). See [docs/test-framework.md](docs/test-framework.md), [docs/test-boot-layer.md](docs/test-boot-layer.md).
 
+### Test coverage
+
+Every feature ships with tests at EVERY layer it has a surface in — logic (`build`/`main`), UI (`renderer` — real events on the real DOM), and end-to-end (`boot`). Skip a layer ONLY when the feature genuinely has no surface there (a pure build utility has no UI; a CSS-only tweak has no logic). "The logic test already covers it" is NOT a reason to skip the UI test — logic tests prove the logic, UI tests prove the wiring, boot tests prove the built artifact. See [docs/test-framework.md](docs/test-framework.md).
+
 ### Dev logs
 
-Every gulp invocation tees stdout+stderr to `<projectRoot>/logs/dev.log` (path via `EM_LOG_FILE`; disable with `EM_LOG_FILE=false`). When debugging via Claude, prefer `cat logs/dev.log` over copy-pasting terminal scrollback. See [docs/logging.md](docs/logging.md).
+Every gulp invocation tees stdout+stderr to `<projectRoot>/logs/dev.log` on `npm start` or `logs/build.log` on a production build/package (`EM_BUILD_MODE=true`) — chosen by build mode, path via `EM_LOG_FILE`; disable with `EM_LOG_FILE=false`. `npx mgr test` likewise tees its output to `<projectRoot>/logs/test.log`, and `npm run release` streams the GH Actions run to `logs/ci.log`. When debugging via Claude, prefer `cat logs/dev.log` / `cat logs/test.log` over copy-pasting terminal scrollback. See [docs/logging.md](docs/logging.md).
 
 ### CDP debugging (Claude ↔ Electron)
 
@@ -162,7 +169,7 @@ See [docs/releasing.md](docs/releasing.md) for the end-to-end flow.
 
 ## Development Workflow
 
-- **🚫 NEVER run `npm start` / `npx mgr launch` / `npm test`** unless the user explicitly asks. Assume the user is already running the app or dev process. Running these commands kills the user's process and wastes time. Instead, **check output logs** after editing files to confirm changes compiled and took effect.
+- **🚫 NEVER run `npm start`** — it's the user's long-running dev process. Assume it's already running; if it isn't, **instruct the user to run it** rather than running it yourself (running it again kills theirs). To see output, **read the `logs/*.log` files** (`dev.log`, `runtime.log`, `test.log`) — never tail/attach to the process. Running `npx mgr test` is fine.
 - **After editing files**, verify the gulp watcher recompiled successfully. Check for webpack/sass errors in the console output. A change that breaks the build is not a completed change.
 - **Live-test UI changes via CDP.** After code changes compile, use the `chrome-devtools-electron` MCP tools (screenshots, click, evaluate JS, console logs) to verify the change works in the running app. This is the primary way to confirm UI/renderer changes — type-checking and test suites verify code correctness, not feature correctness. See [docs/cdp-debugging.md](docs/cdp-debugging.md) and `~/.claude/mcp-server/servers/chrome-devtools-electron/CLAUDE.md`.
 
@@ -196,6 +203,7 @@ Don't ship behavioral changes with stale docs. Validate first, then document —
 API references for each subsystem live in `docs/`. **Whenever you make a behavioral change, update both this overview AND the relevant `docs/*.md` deep reference.** Treat docs as a first-class deliverable, not an afterthought.
 
 - [docs/boot-sequence.md](docs/boot-sequence.md) — full `manager.initialize()` ordered list + rationale
+- [docs/lib-modules.md](docs/lib-modules.md) — lib initialization contract, adding a new lib, flat-vs-split convention
 - [docs/storage.md](docs/storage.md) — main + renderer storage, dot-notation, change broadcasts
 - [docs/ipc.md](docs/ipc.md) — typed channel bus
 - [docs/windows.md](docs/windows.md) — named windows, bounds persistence, hide-on-close, inset titlebar
@@ -218,6 +226,7 @@ API references for each subsystem live in `docs/`. **Whenever you make a behavio
 - [docs/templating.md](docs/templating.md) — `{{ }}` token replacement, page vars, HTML pipeline
 - [docs/logging.md](docs/logging.md) — runtime logger (main + preload + renderer → one `runtime.log`)
 - [docs/themes.md](docs/themes.md) — vendored classy + bootstrap themes, per-page CSS bundles
+- [docs/css.md](docs/css.md) — SCSS architecture: main entry, theme `@use` config, per-window bundles, Bootstrap-first
 - [docs/hooks.md](docs/hooks.md) — lifecycle hooks (build/pre, build/post, release/pre, release/post, notarize/post)
 - [docs/icons.md](docs/icons.md) — convention-only icon resolution (`global/` + per-platform), retina derivation, macOS Template magic
 - [docs/installer-options.md](docs/installer-options.md) — per-target installer config, defaults table
@@ -225,9 +234,10 @@ API references for each subsystem live in `docs/`. **Whenever you make a behavio
 - [docs/releasing.md](docs/releasing.md) — end-to-end release walkthrough
 - [docs/runner.md](docs/runner.md) — Windows EV-token signing runner
 - [docs/test-framework.md](docs/test-framework.md) — writing tests, running them, layers
-- [docs/test-boot-layer.md](docs/test-boot-layer.md) — boot test layer
+- [docs/test-boot-layer.md](docs/test-boot-layer.md) — the `boot` test layer: consumer end-to-end smoke + EM's framework self-test from the repo via the bundled fixture (`src/test/fixtures/consumer-app/`) + `EM_TEST_BOOT_PROJECT` (EM's analog of BEM/BXM/UJM `*_TEST_BOOT_PROJECT`)
 - [docs/build-system.md](docs/build-system.md) — gulp, webpack, electron-builder pipeline
 - [docs/environment-detection.md](docs/environment-detection.md) — `isDevelopment`/`isTesting`/`getApiUrl` etc., adding new helpers
+- [docs/common-mistakes.md](docs/common-mistakes.md) — the canonical "don't do this" list
 - [docs/cdp-debugging.md](docs/cdp-debugging.md) — Claude ↔ Electron via CDP, `EM_CDP_PORT`, MCP setup
 
 `PROGRESS.md` tracks pass-by-pass progress and decisions.

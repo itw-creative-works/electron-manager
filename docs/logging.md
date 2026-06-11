@@ -197,16 +197,20 @@ File path resolution in main:
 
 The transport is set up lazily on first `log()` call, so importing `LoggerLite` in build/CLI contexts that have no Electron is harmless.
 
-## Coexisting with `dev.log` and `build.log`
+## Coexisting with `dev.log`, `build.log`, `test.log`, and `ci.log`
 
-Three separate logs in `<projectRoot>/logs/`:
+Five separate logs in `<projectRoot>/logs/`:
 
 | File | Source | Lifetime |
 |---|---|---|
 | `runtime.log` | Packaged-app runtime in dev mode | Persistent (rotates at 10 MB) |
-| `dev.log` | Gulp pipeline + spawned Electron child stdout | Truncated each `npm start` |
-| `build.log` | GH Actions release run output (streamed locally during `npm run release`) | Truncated each release run |
+| `dev.log` | Gulp pipeline + spawned Electron child stdout (`npm start`) | Truncated each `npm start` |
+| `build.log` | Gulp pipeline output for production builds/packages (`npm run build` / `package` / `publish`, i.e. `EM_BUILD_MODE=true`) | Truncated each build |
+| `test.log` | `npx mgr test` runner output (suite names, pass/fail states, harness boot lines) | Truncated each test run |
+| `ci.log` | GH Actions release run output (streamed locally during `npm run release`) | Truncated each release run |
 
-They serve different purposes and don't overlap — `dev.log` shows you "is webpack still bundling?", `runtime.log` shows you "is my app's auto-updater finding the right release feed?". Both useful.
+`dev.log` and `build.log` are the same gulp tee — which one it writes is chosen by `EM_BUILD_MODE`, so they never both fill up in one run. (Disable the tee with `EM_LOG_FILE=false`; override its path with `EM_LOG_FILE=<path>`.)
+
+They serve different purposes and don't overlap — `dev.log`/`build.log` show you "is webpack still bundling?", `test.log` shows you "which test failed on the last run?", `ci.log` shows you "did the release workflow pass?", `runtime.log` shows you "is my app's auto-updater finding the right release feed?". All useful.
 
 In production: only `runtime.log` exists (no project, no gulp, no GH Actions stream).

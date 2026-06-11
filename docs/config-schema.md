@@ -30,12 +30,12 @@ required: false                   // OK to omit (but if present, match/enum/type
 required: (cfg) => bool           // conditional — predicate gets the full config
 ```
 
-The function form is for "this field is mandatory only when another part of config is set." Example: `analytics.providers.google.id` is only required when `analytics.enabled === true`:
+The function form is for "this field is mandatory only when another part of config is set." Illustrative shape (no current entry uses it — every present-day field is `true` or `false`):
 
 ```js
 {
   path:     'analytics.providers.google.id',
-  required: (cfg) => cfg?.analytics?.enabled === true,
+  required: (cfg) => Boolean(cfg?.analytics?.providers?.google?.secret),  // id mandatory only when a secret is configured
   match:    /^G-[A-Z0-9]+$/,
 }
 ```
@@ -45,6 +45,18 @@ This is identical strictness in dev and production. There's no separate `'publis
 ## How `match` / `enum` / `type` interact with absence
 
 They **only run when the value is present**. A missing field with `required: false` is silent. A missing field with `required: true` fires the "missing" error and nothing else — so consumers don't see a confusing flood of "missing AND wrong type AND doesn't match" for the same field.
+
+## Presence-driven feature flags (BEM convention)
+
+A non-empty credential value enables a feature — there is no separate `enabled: true/false` flag for credential-gated features:
+
+| Feature | Enable signal | Disable signal |
+|---|---|---|
+| Sentry | `sentry.dsn = 'https://...'` | `sentry.dsn = ''` |
+| GA4 analytics | `analytics.providers.google.id = 'G-XXXXX'` | `analytics.providers.google.id = ''` |
+| Firebase Auth (renderer) | `firebaseConfig.projectId = '...'` (etc.) | empty `firebaseConfig` |
+
+**Exceptions where an explicit `enabled` flag exists:** `remoteConfig.enabled`, `autoUpdate.enabled`, `releases.enabled`, `downloads.enabled`, `restartManager.enabled`, `startup.openAtLogin.enabled`, `targets.linux.snap.enabled`. These toggle BEHAVIOR, not credentials — you can have `releases.repo` set but still want releases off in a fork, for example.
 
 ## Adding a new field
 

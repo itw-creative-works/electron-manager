@@ -10,7 +10,7 @@ Cross-platform deep-link handling that's simple to use and hard to get wrong. EM
 }
 ```
 
-EM registers each scheme with the OS via `app.setAsDefaultProtocolClient` so the system routes matching URLs to your app.
+EM registers each scheme with the OS via `app.setAsDefaultProtocolClient` so the system routes matching URLs to your app. Registration is **production-only** — dev/test runs never claim OS-wide protocol handlers for unpackaged Electron binaries. In dev, exercise your handlers with `manager.deepLink.dispatch(url)` instead.
 
 ## How it works (so you don't have to think about it)
 
@@ -168,6 +168,7 @@ See `src/test/suites/main/deep-link.test.js` for the full coverage.
 ## Implementation notes
 
 - `lib/protocol.js` owns the single-instance lock + scheme registration; `lib/deep-link.js` owns the dispatch pipeline. They're separate modules but tightly coupled.
-- On Windows/Linux, scheme registration uses `app.setAsDefaultProtocolClient(scheme, process.execPath, [process.cwd()])` so dev-mode `app.exe scheme://...` invocations work.
+- OS scheme registration is gated on `manager.isProduction()` (in `lib/protocol.js`) — unpackaged dev/test binaries are never registered as system protocol handlers (unconditional registration also intermittently triggered macOS Launch Services `-600` dialogs during test runs).
+- On Windows/Linux, scheme registration uses `app.setAsDefaultProtocolClient(scheme, process.execPath, [process.cwd()])` so `app.exe scheme://...` style invocations route argv correctly.
 - macOS open-url events that arrive before `whenReady` are queued internally and drained on `deepLink.initialize()`.
 - Argv extraction walks backward from the end of argv (where the URL typically sits) and matches against registered schemes.

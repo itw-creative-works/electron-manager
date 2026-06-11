@@ -11,7 +11,7 @@ Built-in test framework for both EM itself and consumer projects. Jest-like asse
 
 **Pure functions are the ONLY exception.** A function with zero I/O (config-defaults merge, icon-path resolver, schema validator, CLI alias resolver, a string/number transform) can be `require()`d and called directly with plain inputs — that's not mocking, there's nothing to mock. The moment a function touches `app.*` / `BrowserWindow` / `ipcMain` / `Tray` / the real bundle / an external service, it MUST run against the real harness in the appropriate layer (`main` / `renderer` / `boot`), not a stub.
 
-**Real external APIs are gated behind `--integration`, NOT mocked** (see [Integration vs unit](#integration-vs-unit) below). Normal mode skips them *in the source*; integration mode runs them for real. The test never fakes them. **Anything an integration test creates in a real external system MUST be cleaned up** by the test (via the suite's `cleanup(ctx)` hook) — external systems are not reset between runs.
+**Real external APIs are gated behind extended mode (`TEST_EXTENDED_MODE`), NOT mocked** (see [Extended vs normal mode](#extended-vs-normal-mode) below). Normal mode skips them *in the source*; extended mode runs them for real. The test never fakes them. **Anything an extended test creates in a real external system MUST be cleaned up** by the test (via the suite's `cleanup(ctx)` hook) — external systems are not reset between runs.
 
 If you find yourself writing `const mockX = {...}` to satisfy code under test, STOP — pass the real `ctx.manager` (or its real sub-object), or, if the function is genuinely pure, call it directly with plain data.
 
@@ -24,13 +24,25 @@ Mock **nothing** by default. There are exactly two cases where the real dependen
 
 If you can run it for real, you must. These exceptions are not a license to unit-test in isolation when a real-harness layer (`main`/`renderer`/`boot`) would work.
 
+## Test coverage — every surface gets a test (HARD RULE)
+
+A feature is not done when it works — it's done when every surface it exposes is covered in the layer that owns that surface:
+
+| Coverage | Layer | Proves |
+|---|---|---|
+| **Logic** | `build` / `main` | The feature's functions do the right thing when called directly (real Manager, real storage, real IPC) |
+| **UI** | `renderer` | The feature's interface is WIRED — a real event on the real DOM triggers the behavior and the visible result appears |
+| **End-to-end** | `boot` | The feature survives in the consumer's actual built bundle (extend the boot suite's `inspect` assertions) |
+
+**Skipping a layer is the exception, not the default.** A layer may be skipped ONLY when the feature genuinely has no surface there — a pure build-time utility has no UI; a CSS-only tweak has no logic to call. Convenience is never a reason: "the logic test already covers it" does NOT excuse the UI test — logic tests prove the logic, UI tests prove the wiring (a button can come unhooked while every logic test stays green), boot tests prove the packaging. When in doubt, write the test.
+
 ## Running tests
 
 ```bash
 npx mgr test                          # consumer: runs framework + project suites
 npx mgr test --layer=main             # only main-process suites (also: build, renderer, all)
 npx mgr test --filter="storage"       # only suites/tests whose name contains "storage"
-npx mgr test --integration            # opt in to integration suites (Firebase, etc.)
+npx mgr test --extended               # opt into extended mode — real external APIs (also: TEST_EXTENDED_MODE=true)
 npx mgr test --reporter=json          # pretty output + machine-readable {"event":"summary",...} line
 EM_TEST_DEBUG=1 npx mgr test          # see Electron stderr (otherwise drained silently)
 ```
@@ -39,23 +51,42 @@ In EM itself, `npm test` does the same.
 
 ### Filtering tests
 
-Pass a path (relative to `test/`) as a positional argument to run specific tests:
+Pass a path (relative to `test/`) as a positional **target** to select which test FILES run:
 
 ```bash
-# Run a single test file
+# Run a single test file (matches both framework + project)
 npx mgr test build/config
 
-# Run only EM framework tests
-npx mgr test em:build/config
+# Run ONLY consumer project tests (no framework suites at all)
+npx mgr test project:
 
-# Run only consumer project tests
-npx mgr test project:custom-test
+# Run a single project test file
+npx mgr test project:main/tab-manager
+
+# Run ONLY framework tests (universal cross-framework alias)
+npx mgr test mgr:
+
+# Run ONLY EM framework tests (EM-specific aliases, equivalent to mgr:)
+npx mgr test em:
+npx mgr test framework:
+
+# Run framework tests matching a path
+npx mgr test mgr:build/config
+npx mgr test em:build/config
 
 # Combine with extended mode
 TEST_EXTENDED_MODE=true npx mgr test build/config
 ```
 
-The filter matches against the test file path. `em:` and `project:` prefixes scope the filter to framework-only or project-only tests respectively. Without a prefix, both are searched.
+The target matches against the test file path. The source prefix scopes selection to framework-only or project-only tests — a prefixed target excludes the other source entirely:
+
+- `mgr:` — the **universal cross-framework alias** for "the manager's own tests" (framework-only). Works identically in EM, BXM, UJM, and BEM.
+- `em:` / `framework:` — EM-specific aliases for framework-only tests, equivalent to `mgr:`.
+- `project:` — consumer project tests only.
+
+A bare prefix (`mgr:` / `em:` / `project:` with no path) runs every test in that source. A bare path (no prefix) searches both sources by path.
+
+> **Target vs `--filter`.** The positional target selects test FILES (by path + source). The `--filter=<substring>` flag is orthogonal: it matches test NAMES/descriptions within the selected files. Use them together, e.g. `npx mgr test project: --filter="reorder"`.
 
 ### Layers
 
@@ -64,18 +95,19 @@ The filter matches against the test file path. `em:` and `project:` prefixes sco
 - **renderer** — runs inside a hidden `BrowserWindow` spawned by the main harness. Test functions are serialized + reconstructed via `new Function('ctx', body)`, so they only have access to `ctx` and the page's globals (`window`, `document`, `window.em.*`). No closures over module scope.
 - **all** (default) — build, then main, then renderer in a single Electron boot.
 
-### Integration vs unit
+### Extended vs normal mode
 
-Suites that hit a live backend (Firebase Auth admin SDK, real GitHub API, etc.) are gated behind `--integration` (or `EM_TEST_INTEGRATION=1`; legacy `EM_TEST_SKIP_INTEGRATION=1` force-skips). These external calls are **skipped in-source, NOT mocked** — the suite short-circuits / `ctx.skip()`s when the flag is unset; with the flag set, it calls the real service. Default is to skip them so `npx mgr test` is fast + green offline. The CI workflow runs unit tests only by default; add a separate workflow to flip the flag for integration coverage.
+Suites that hit a live backend (Firebase Auth admin SDK, real GitHub API, etc.) are gated behind **extended mode** — `npx mgr test --extended` or `TEST_EXTENDED_MODE=true`. `TEST_EXTENDED_MODE` is the **shared, unprefixed env var across BEM/BXM/UJM/EM** (cross-framework parity) — once set on `process.env` it propagates to every spawned test environment (the Electron main/renderer/boot children, the gulp boot build) automatically via `{ ...process.env }`. These external calls are **skipped in-source, NOT mocked** — the suite short-circuits / `ctx.skip()`s when `TEST_EXTENDED_MODE` is unset; with it set, it calls the real service. Default is to skip them so `npx mgr test` is fast + green offline, and a warning prints when extended mode is on. The CI workflow runs normal mode by default; add a separate workflow that sets `TEST_EXTENDED_MODE: 'true'` for extended coverage.
 
-Anything an integration suite creates externally must be torn down in its `cleanup(ctx)` — the harness only resets local Electron state between runs, never external systems.
+Anything an extended suite creates externally must be torn down in its `cleanup(ctx)` — the harness only resets local Electron state between runs, never external systems.
 
 ### `EM_TEST_MODE=true` — the canonical "we're in tests" signal
 
 Both EM test runners (`runners/electron.js`, `runners/boot.js`) set `EM_TEST_MODE=true` in the spawned child env. That powers `manager.isTesting()` (and `Manager.isTesting()` static) — the cross-context helper everything in EM checks when it needs to behave differently in tests:
 
 - `auto-updater` flips its idle threshold from 15min → 3s and its periodic tick from 60s → 500ms, AND short-circuits the native install-prompt dialog (so tests don't pop modal windows).
-- Other lib code can branch on `manager.isTesting()` to suppress dock bounce, login-item changes, etc.
+- `main.js#initialize` isolates userData per environment: testing runs get `<userData> (Testing)` — **wiped at boot**, so every test run starts from a clean slate (post-run state stays on disk for inspection until the next run; set `EM_TEST_KEEP_USERDATA=1` to skip the wipe). Dev runs get ` (Development)`; production is untouched. See [boot-sequence.md](boot-sequence.md).
+- Other lib code can branch on `manager.isTesting()` to suppress dock bounce, login-item changes, OS protocol-handler registration, etc.
 
 Consumers writing their own tests should set `EM_TEST_MODE=true` in their test runner so the same signal applies — for example, in `package.json`:
 ```json
@@ -241,6 +273,8 @@ Jest-compatible subset:
 
     Total: 149 tests in 1850ms
 ```
+
+All test output is also teed (ANSI-stripped) to `<projectRoot>/logs/test.log`, truncated fresh on each run — same pattern as `dev.log` (and BEM's `test.log`). Grep it after a run instead of scrolling terminal output.
 
 ## Test harness internals (main layer)
 
