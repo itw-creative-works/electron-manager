@@ -26,7 +26,7 @@ Compiles to `dist/assets/css/main.bundle.css` (Bootstrap + classy theme + your g
 
 ## Theme integration
 
-The `@use 'electron-manager'` entry pulls in Bootstrap 5 + EM's classy theme. Appearance (`light`/`dark`/`auto`) comes from `config.theme.appearance` → rendered as `data-bs-theme` on `<html>` by the page template. Theme variables (`$primary`, `$dark`, `$classy-bg-*`, typography, borders) are overridable via the `with (...)` block. See [themes.md](themes.md) for the full variable reference.
+The `@use 'electron-manager'` entry pulls in Bootstrap 5 + EM's classy theme. Appearance (`system`/`light`/`dark`) defaults from `config.theme.appearance` and is applied + kept live on `<html data-bs-theme>` by `manager.theme` (OS-following, runtime-switchable, persisted override — see [themes.md](themes.md)). Theme variables (`$primary`, `$dark`, `$classy-bg-*`, typography, borders) are overridable via the `with (...)` block. See [themes.md](themes.md) for the full variable reference.
 
 ## Bootstrap-first convention
 

@@ -68,11 +68,54 @@ Set `config.theme.id` in `config/electron-manager.json`:
 ```jsonc
 theme: {
   id:         'bootstrap',     // 'classy' (default) | 'bootstrap'
-  appearance: 'auto',          // 'light' | 'dark' | 'auto'
+  appearance: 'system',        // 'system' (default) | 'light' | 'dark'
 }
 ```
 
-`appearance` flows into the page template as `data-bs-theme="{{ theme.appearance }}"`, so Bootstrap's color-mode system picks it up automatically.
+## Appearance (light / dark / system) — `manager.theme`
+
+EM owns appearance at runtime. `config.theme.appearance` is only the **app default**; the resolved appearance is applied and kept live by the theme lib:
+
+- **`'system'` (default)** follows the OS preference **live** — when the OS flips, every page updates without a reload or restart.
+- **`'light'` / `'dark'`** are explicit overrides.
+- A user's runtime choice (`manager.theme.set(...)`) is **persisted in `manager.storage`** (`theme.appearance`) and wins over the config default on every boot.
+
+### How it propagates
+
+Everything rides on Electron's `nativeTheme.themeSource` (same three values). Setting it flips `prefers-color-scheme` in **every renderer of the app — BrowserWindows AND embedded WebContentsViews** — and EM's preload applier listens via `matchMedia` and rewrites `<html data-bs-theme>` to the **resolved** value (`'light'`/`'dark'`) live. No IPC fan-out, no per-window wiring; native UI (menus, dialogs) follows too.
+
+The applier is **opt-in by presence**: it only manages pages whose `<html>` already carries `data-bs-theme` (stamped by the page template at build). External sites loaded in a consumer's embedded web views get the same preload but are never touched.
+
+### API
+
+```js
+// Main
+manager.theme.get();          // 'system' | 'light' | 'dark'  (the chosen source)
+manager.theme.resolved();     // 'light' | 'dark'             (what's showing)
+manager.theme.set('dark');    // apply + persist (throws on invalid values)
+const unsub = manager.theme.onChange(({ source, resolved }) => { ... });
+
+// Renderer (any page with the EM preload)
+await window.em.theme.get();        // { source, resolved }
+await window.em.theme.set('dark');  // → { source, resolved }
+const unsub = window.em.theme.onChange(({ resolved }) => { ... }); // matchMedia-powered
+```
+
+Main also broadcasts `em:theme:changed { source, resolved }` to BrowserWindows as a courtesy — but renderers should rely on `onChange`/matchMedia, which works in every context.
+
+### Declarative controls
+
+Any element with `data-em-theme-set` becomes a theme switch (wired by the renderer Manager's initialize — event-delegated, so late-rendered controls work):
+
+```html
+<button data-em-theme-set="light">Day</button>
+<button data-em-theme-set="dark">Dusk</button>
+<button data-em-theme-set="system">Auto</button>
+```
+
+### Build-time stamp
+
+`data-bs-theme="{{ theme.appearance }}"` is still stamped into every page at build. For `'light'`/`'dark'` the stamp is already correct; `'system'` stamps an inert value that the preload applier replaces with the resolved appearance at `DOMContentLoaded` (Bootstrap treats unknown values as light for the instant before that).
 
 ## Where the themes live
 

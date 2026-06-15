@@ -59,7 +59,7 @@ module.exports = {
         ctx.expect(vars.page.name).toBe('settings');
         ctx.expect(vars.page.title).toBe('MyApp');
         ctx.expect(vars.brand.id).toBe('myapp');
-        ctx.expect(vars.theme.appearance).toBe('auto');
+        ctx.expect(vars.theme.appearance).toBe('system');
         ctx.expect(vars.cacheBust).toBe('12345');
         ctx.expect(vars.content).toBe('');
       },

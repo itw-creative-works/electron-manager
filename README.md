@@ -13,7 +13,8 @@
 ## What it does
 
 - **One-line bootstrap** per Electron process: `require('electron-manager/main')`, `/preload`, `/renderer`.
-- **Modular feature library** — storage, IPC, tray, menu, context menu, window manager, startup, app-state, deep-link, auto-updater, web-manager auth, Sentry, **analytics, context, usage, remote-config, restart-manager**. Each feature is its own module with documented API.
+- **Modular feature library** — storage, IPC, theme, tray, menu, context menu, window manager, startup, app-state, deep-link, auto-updater, web-manager auth, Sentry, **analytics, context, usage, remote-config, restart-manager**. Each feature is its own module with documented API.
+- **System-aware dynamic theme.** `manager.theme` follows the OS light/dark preference **live** by default (`'system'`), with `'light'`/`'dark'` overrides persisted across boots. Every renderer — windows AND embedded views — keeps `<html data-bs-theme>` in sync automatically; consumers drop plain `<button data-em-theme-set="dark">` controls and EM wires them.
 - **Cross-platform analytics identity.** GA4 Measurement Protocol with `client_id = uuidv5(deviceId, projectIdNamespace)` and `user_id = uuidv5(firebaseUid, projectIdNamespace)`. Same Firebase project ID in BEM/UJM/web-manager/EM produces identical `user_id` outputs everywhere → unified events for one human across desktop + web + backend, no manual stitching.
 - **"Hot config"** fetched from your brand site (`<brand.url>/data/resources/main.json`) and polled hourly — flip a force-update version, default user-agent, ad rotation, etc. without re-releasing. `manager.remoteConfig.get('versionRequired')`. Cached to storage so offline boots still have last-known values.
 - **File-based feature definitions** — trays, menus, and context-menus are JS files (full power, no DSL): `src/integrations/{tray,menu,context-menu}/index.js`. All three ship sensible **id-tagged defaults** (legacy-EM-style: about, preferences, check-for-updates, dev menu w/ inspector + log folders, etc.) and share the same **id-path mutation API**: `find`, `update`, `remove`, `enable`, `show`, `hide`, `insertBefore`, `insertAfter`, `appendTo`. Any default item is one line away from removal, customization, or repositioning.
@@ -35,6 +36,7 @@ npx mgr setup            # scaffolds project; auto-resolves & writes correct .nv
 nvm use                  # switch to the Node version Electron uses (one-time per shell)
 npm start                # dev: gulp → webpack → electron .
 EM_CDP_PORT=9222 npm start  # dev + expose Chrome DevTools Protocol for Claude/MCP debugging
+npx mgr cdp status       # drive the running dev app over CDP: status|eval|shot|capture|theme|relaunch|quit (docs/cdp-debugging.md)
 npm run build            # local production build (bundles only, no installer)
 npm run package:quick    # fast packaged build for host platform/arch (.app/.exe-folder/linux-unpacked, ~20-30s) — for smoke-testing packaged behavior
 npm run package          # full local production package (DMG/zip/universal-mac, NSIS-win, deb+AppImage-linux)
@@ -132,7 +134,7 @@ Each subsystem has its own API reference under [`docs/`](docs/):
 - [restart-manager](docs/restart-manager.md) — auxiliary helper app for relaunches; auto-installs via signed mac.zip / NSIS exe / browser-opened .deb
 - [config-schema](docs/config-schema.md) — canonical schema + validator for `config/electron-manager.json`. Hard-fails boot AND `gulp audit` on missing required fields, regex mismatches, enum violations, type mismatches. Single source of truth in `src/config/schema.js`
 - [templating](docs/templating.md) — `{{ var }}` token replacement, page template, body-only views
-- [themes](docs/themes.md) — classy + bootstrap themes, `@use 'electron-manager' as * with (...)` overrides, per-page CSS bundles
+- [themes](docs/themes.md) — classy + bootstrap themes, `@use 'electron-manager' as * with (...)` overrides, per-page CSS bundles, system-aware appearance (`manager.theme`)
 - [sentry](docs/sentry.md) — error/crash reporting, dev-mode gating, auto auth attribution, release tagging
 - [hooks](docs/hooks.md) — lifecycle hooks (build/pre, build/post, release/pre, release/post, notarize)
 - [installer-options](docs/installer-options.md) — installer/distribution config: NSIS one-click defaults, ia32 inclusion, app.category mapping, `{YEAR}` copyright token, snap publishing (default-on with cred-gated auto-skip), MAS roadmap

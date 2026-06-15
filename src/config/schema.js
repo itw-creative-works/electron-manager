@@ -87,6 +87,23 @@ module.exports = [
     description: 'normal = main window appears at launch; hidden = bakes LSUIElement=true on macOS (no dock, no Cmd+Tab).',
   },
 
+  // ── theme ────────────────────────────────────────────────────────────────
+  {
+    path:        'theme.appearance',
+    type:        'string',
+    required:    false,
+    enum:        ['system', 'light', 'dark'],
+    description: "App default appearance. 'system' (default) follows the OS live; 'light'/'dark' are explicit overrides. A user's runtime choice (manager.theme.set) persists in storage and wins over this.",
+  },
+
+  // ── cdp ──────────────────────────────────────────────────────────────────
+  {
+    path:        'cdp.readySignal',
+    type:        'string',
+    required:    false,
+    description: "Boot-complete signal for `npx mgr cdp relaunch` — a URL substring matched against CDP page targets. Default '/views/main/' (the main window's document). Set when boot finishes later than first paint (e.g. an overlay view created last in the boot sequence).",
+  },
+
   // ── releases ─────────────────────────────────────────────────────────────
   {
     path:        'releases.repo',

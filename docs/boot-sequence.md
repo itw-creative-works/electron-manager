@@ -10,6 +10,7 @@
 2. **`app.on('before-quit')`** wired — sets `manager._isQuitting = true` so any quit path (Cmd+Q, role:'quit' menu, programmatic `app.quit()`, OS shutdown) bypasses the window-manager's hide-on-close trap.
 3. **`ipc`** — typed channel bus online before any feature can register handlers.
 4. **`storage`** — async (electron-store v11 ESM via `webpackIgnore`'d dynamic import). Other libs depend on this.
+4b. **`theme`** — sets `nativeTheme.themeSource` from the persisted override (storage `theme.appearance`) → config `theme.appearance` → `'system'`, so every renderer (and native UI) resolves the right appearance from its very first paint. Needs storage + ipc only; must run before any window exists. See [themes.md](themes.md).
 5. **`sentry`** — earliest catchable global handler.
 6. **`protocol`** — single-instance lock + custom scheme register.
 7. **`deepLink`** — argv parse for cold-start, second-instance handler.
@@ -31,6 +32,7 @@
 - before-quit before window-manager: so window-manager's close-trap can read `_isQuitting`.
 - IPC before any other lib: every lib registers its own IPC handlers.
 - Storage before sentry: sentry persists scope data.
+- Theme right after storage: the persisted appearance override must hit `nativeTheme.themeSource` before any renderer paints, or the first frame flashes the wrong appearance.
 - protocol/deepLink before whenReady: argv parsing for cold-start deep links must beat first window creation.
 - whenReady gate is where Electron's app APIs become safe.
 - autoUpdater after whenReady but never blocks boot.

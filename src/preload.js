@@ -50,6 +50,21 @@ Manager.prototype.initialize = async function () {
         return () => ipcRenderer.removeListener('em:storage:change', wrapped);
       },
     },
+    // Theme — system-aware appearance. get/set proxy to main (lib/theme.js owns
+    // nativeTheme.themeSource + persistence). onChange is MATCHMEDIA-powered, not an
+    // IPC broadcast: setting themeSource flips `prefers-color-scheme` in every
+    // renderer of the app (including embedded WebContentsViews, which ipc.broadcast
+    // can never reach), so each renderer self-resolves. Returns an unsubscribe fn.
+    theme: {
+      get: ()       => ipcRenderer.invoke('em:theme:get'),
+      set: (source) => ipcRenderer.invoke('em:theme:set', { source }),
+      onChange: (handler) => {
+        const media = window.matchMedia('(prefers-color-scheme: dark)');
+        const wrapped = (e) => handler({ resolved: e.matches ? 'dark' : 'light' });
+        media.addEventListener('change', wrapped);
+        return () => media.removeEventListener('change', wrapped);
+      },
+    },
     // Renderer logger — writes to console (visible in DevTools) AND forwards each
     // call to main where it's written through electron-log's file transport. Same
     // file (logs/runtime.log in dev, OS logs/<AppName>/runtime.log in prod) where
@@ -121,6 +136,34 @@ Manager.prototype.initialize = async function () {
       // see the event before any renderer-side handler can stopPropagation it.
       window.addEventListener(ev, ping, { passive: true, capture: true });
     }
+  } catch (e) { /* DOM not available (test mode) — skip */ }
+
+  // Theme applier — keeps `<html data-bs-theme>` matched to the RESOLVED appearance
+  // ('light'/'dark'), live, on every EM-templated page. Opt-in by presence: only pages
+  // that already carry the attribute (stamped by the page template at build) are
+  // managed — pages without it (e.g. external sites loaded in a consumer's embedded
+  // web views, which get this same preload) are never touched.
+  //
+  // This is the live-update path for ALL renderers: main flips nativeTheme.themeSource
+  // → `prefers-color-scheme` flips here → matchMedia 'change' fires → re-apply. No IPC.
+  try {
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const apply = () => {
+      const root = document.documentElement;
+      if (!root || !root.hasAttribute('data-bs-theme')) {
+        return;
+      }
+      root.setAttribute('data-bs-theme', media.matches ? 'dark' : 'light');
+    };
+
+    // The stamped attribute only exists once the HTML has parsed — apply at
+    // DOMContentLoaded (or immediately when the document is already past it).
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', apply, { once: true });
+    } else {
+      apply();
+    }
+    media.addEventListener('change', apply);
   } catch (e) { /* DOM not available (test mode) — skip */ }
 
   self.logger.log('electron-manager (preload) initialized.');

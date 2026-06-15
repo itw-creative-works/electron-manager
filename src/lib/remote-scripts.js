@@ -15,8 +15,9 @@
 //   manager.remoteScripts.getLastRun()    → { hash, timestamp } or null
 //   manager.remoteScripts.clearExecuted() → wipe stored hash (forces re-run next poll)
 
-const LoggerLite = require('./logger-lite.js');
-const fetch      = require('wonderful-fetch');
+const LoggerLite       = require('./logger-lite.js');
+const fetch            = require('wonderful-fetch');
+const formatFetchError = require('../utils/format-fetch-error.js');
 
 const logger = new LoggerLite('remote-scripts');
 
@@ -56,14 +57,14 @@ const remoteScripts = {
     }
 
     remoteScripts.refreshNow()
-      .catch((e) => logger.warn(`initial fetch failed: ${e.message}`));
+      .catch((e) => logger.warn(`initial fetch failed: ${formatFetchError(e)}`));
 
     const interval = manager.isTesting()
       ? 500
       : manager.autoUpdater._options.feedCheckIntervalMs;
     remoteScripts._intervalId = setInterval(() => {
       remoteScripts.refreshNow()
-        .catch((e) => logger.warn(`periodic fetch failed: ${e.message}`));
+        .catch((e) => logger.warn(`periodic fetch failed: ${formatFetchError(e)}`));
     }, interval);
 
     logger.log(`remote-scripts initialized — url=${remoteScripts._url} interval=${interval}ms`);

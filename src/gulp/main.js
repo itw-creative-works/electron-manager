@@ -18,6 +18,14 @@ const projectRoot = Manager.getRootPath('project');
 // Load .env file from project root
 require('dotenv').config({ path: path.join(projectRoot, '.env') });
 
+// Empty-string signing placeholders (CSC_LINK="" etc. from the .env template)
+// must read as UNSET — app-builder-lib only null-checks and would resolve ''
+// to the project root ("<projectRoot> not a file"). See utils/sanitize-signing-env.js.
+const sanitizedSigningKeys = require('../utils/sanitize-signing-env.js')(process.env);
+if (sanitizedSigningKeys.length) {
+  logger.log(`Ignoring empty signing env placeholders: ${sanitizedSigningKeys.join(', ')}`);
+}
+
 // Tee all stdout/stderr to <projectRoot>/logs/<dev|build>.log for easy `tail -f` / grep / Claude
 // inspection. build.log for production builds/packages (EM_BUILD_MODE=true), dev.log for `npm start`.
 // Disable via EM_LOG_FILE=false. Override path via EM_LOG_FILE=<path>.

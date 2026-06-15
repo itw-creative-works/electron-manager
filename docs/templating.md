@@ -32,7 +32,7 @@ This naming lines up with the webpack renderer entry naming so the JS bundle pat
 | `{{ app.productName }}`, `{{ app.appId }}`, `{{ app.copyright }}` | `config.app.*` | `MyApp` / `com.itwcw.myapp` |
 | `{{ page.name }}` | derived from view path | `main` / `settings` |
 | `{{ page.title }}` | `extras.title` (in gulp/html) or `app.productName` | `MyApp` |
-| `{{ theme.appearance }}` | `config.theme.appearance` (default `'auto'`) | `light` / `dark` / `auto` |
+| `{{ theme.appearance }}` | `config.theme.appearance` (default `'system'`) | `light` / `dark` / `system` — runtime applier replaces with the resolved value ([themes.md](themes.md)) |
 | `{{ cacheBust }}` | build timestamp | `1777515223640` |
 | `{{ content }}` | rendered body (set by gulp/html) | `<main>...</main>` |
 

@@ -68,6 +68,8 @@ APPLE_API_ISSUER=00000000-0000-...      # UUID from App Store Connect
 APPLE_TEAM_ID=XXXXXXXXXX
 ```
 
+> **Empty values are safe.** The `.env` template ships these as `CSC_LINK=""` placeholders; EM deletes empty/whitespace signing vars after loading `.env` (`src/utils/sanitize-signing-env.js`) so they read as *unset*. Without the guard, app-builder-lib only null-checks — `importCertificate('')` resolves `''` to the project root and the build dies with `"<projectRoot> not a file"`. With no `CSC_LINK` at all, electron-builder falls back to Keychain identity auto-discovery (so local `package:quick` builds still sign when an identity is installed).
+
 ### 4. Verify
 
 ```bash

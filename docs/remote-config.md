@@ -69,6 +69,8 @@ manager.remoteConfig.on('update', checkForceUpdate);
 
 A failed `refreshNow()` *throws* (so callers can react). The internal periodic poll catches and logs warning. The cached `_data` is never reset on failure — the app keeps working with last-known-good values (or DEFAULTS if no fetch has ever succeeded).
 
+Failure warnings are formatted through `src/utils/format-fetch-error.js` — one line, HTTP status prefix, HTML error-page bodies replaced with a short description, 200-char cap. A missing `/data/resources/main.json` (typically the brand site's HTML 404 page) logs as `HTTP 404: response was an HTML page, not the expected resource` instead of the entire page markup.
+
 ## API
 
 ```js

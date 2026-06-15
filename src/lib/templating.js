@@ -55,7 +55,9 @@ const templating = {
     const vars = {
       brand: cfg.brand   || {},
       app:   appBlock,
-      theme: { appearance: cfg.theme?.appearance || 'auto' },
+      // 'system' is inert as a data-bs-theme value (Bootstrap knows light/dark only) —
+      // the preload's theme applier replaces it with the RESOLVED appearance at runtime.
+      theme: { appearance: cfg.theme?.appearance || 'system' },
       page: {
         name:  pageName,
         title: (extras && extras.title) || cfg.app?.productName || cfg.brand?.name || 'App',

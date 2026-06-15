@@ -53,6 +53,21 @@ module.exports = {
     },
 
     {
+      description: 'test stealth: app activation suppressed — dock hidden (macOS)',
+      inspect: async ({ manager, expect }) => {
+        if (process.platform !== 'darwin') {
+          return; // accessory activation policy / dock is macOS-only
+        }
+        // Manager.initialize step 1a hides the dock under the stealth predicate,
+        // so the spawned consumer app never activates and never steals keyboard
+        // focus from the developer's editor.
+        const { app } = require('electron');
+        expect(app.dock.isVisible()).toBe(false);
+        expect(manager.isTesting()).toBe(true);
+      },
+    },
+
+    {
       description: 'webpack produced the real production bundle + view on disk',
       inspect: async ({ expect, projectRoot }) => {
         const fs = require('fs');

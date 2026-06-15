@@ -98,8 +98,10 @@ const windowManager = {
     const existing = windowManager._windows[name];
     if (existing && !existing.isDestroyed()) {
       logger.log(`createNamed: focusing existing window "${name}"`);
-      existing.show();
-      existing.focus();
+      windowManager._surface(existing, name);
+      if (!windowManager._isStealth()) {
+        existing.focus();
+      }
       return existing;
     }
 
@@ -164,6 +166,11 @@ const windowManager = {
     if (titleBarMode === 'inset') {
       if (isMac) {
         titleBarOpts.titleBarStyle = 'hiddenInset';
+        // Custom traffic-light position (e.g. centered inside a floating chrome
+        // panel) — config.windows.<name>.trafficLightPosition = { x, y }.
+        if (config.trafficLightPosition) {
+          titleBarOpts.trafficLightPosition = config.trafficLightPosition;
+        }
       } else if (isWin) {
         titleBarOpts.titleBarStyle    = 'hidden';
         titleBarOpts.titleBarOverlay  = config.titleBarOverlay || {
@@ -223,8 +230,7 @@ const windowManager = {
     win.once('ready-to-show', () => {
       if (config.show !== false) {
         logger.log(`window "${name}": ready-to-show — surfacing`);
-        windowManager._ensureDockVisible();
-        win.show();
+        windowManager._surface(win, name);
       } else {
         logger.log(`window "${name}": ready-to-show — staying invisible (show:false at create)`);
       }
@@ -395,9 +401,45 @@ const windowManager = {
       return;
     }
     logger.log(`show("${name}") — visible=${win.isVisible()} → showing`);
+    windowManager._surface(win, name);
+    if (!windowManager._isStealth()) {
+      win.focus();
+    }
+  },
+
+  // ── Test stealth ──────────────────────────────────────────────────────────
+  // In Testing mode windows surface INVISIBLY so test runs don't interrupt the
+  // developer: shown INACTIVE (keyboard focus never leaves their editor),
+  // opacity 0, and click-through (real OS clicks pass through to whatever is
+  // underneath; synthetic test input — executeJavaScript, sendInputEvent — is
+  // unaffected). Set EM_TEST_SHOW=1 to surface windows normally and watch a
+  // run live.
+  //
+  // Deliberately NOT hide()/minimize(): occluded windows get throttled by
+  // Chromium — requestAnimationFrame pauses and document.visibilityState flips
+  // to 'hidden' — so tests would exercise a DIFFERENT runtime. An opacity-0,
+  // shown-inactive window keeps rendering, focus semantics, and timers
+  // identical to a visible one.
+  //
+  // App-level activation (macOS launching a test process and yanking keyboard
+  // focus app-wide) is suppressed separately — main.js flips the app to the
+  // accessory activation policy under the same predicate.
+  _isStealth() {
+    return require('../utils/test-stealth.js')(windowManager._manager);
+  },
+
+  // Surface a window: normal show (+ dock) — or stealth-show in Testing mode.
+  // The stealth recipe itself lives in utils/stealth-window.js (shared with
+  // main.js's browser-window-created hook, which covers RAW windows).
+  _surface(win, name) {
+    if (windowManager._isStealth()) {
+      logger.log(`window "${name}": surfacing STEALTH (testing) — inactive, opacity 0, click-through (EM_TEST_SHOW=1 to watch)`);
+      require('../utils/stealth-window.js').applyStealth(win);
+      win.showInactive();
+      return;
+    }
     windowManager._ensureDockVisible();
     win.show();
-    win.focus();
   },
 
   // Internal: make the macOS dock icon appear if it's currently hidden (LSUIElement

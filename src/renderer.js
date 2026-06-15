@@ -53,9 +53,41 @@ Manager.prototype.initialize = async function (overrides) {
   // Wire the auth bridge: sync with main, listen for broadcasts.
   await self._wireAuthBridge();
 
+  // Wire declarative theme controls ([data-em-theme-set]).
+  self._wireThemeControls();
+
   self.logger.log('electron-manager (renderer) initialized.');
 
   return self;
+};
+
+// Declarative theme switching — any element with `data-em-theme-set="system|light|dark"`
+// becomes a theme control: clicking it calls main's theme setter (persisted, applied to
+// every renderer live). The `<html data-bs-theme>` attribute itself is maintained by the
+// preload's theme applier (src/preload.js) — consumers just drop plain buttons:
+//
+//   <button data-em-theme-set="light">Day</button>
+//   <button data-em-theme-set="dark">Dusk</button>
+//   <button data-em-theme-set="system">Auto</button>
+//
+// Delegated on document so controls rendered after initialize still work.
+Manager.prototype._wireThemeControls = function () {
+  const self = this;
+
+  if (typeof document === 'undefined' || !window.em?.theme) {
+    return;
+  }
+
+  document.addEventListener('click', (event) => {
+    const control = event.target.closest('[data-em-theme-set]');
+    if (!control) {
+      return;
+    }
+    const source = control.getAttribute('data-em-theme-set');
+    window.em.theme.set(source).catch((e) => {
+      self.logger.warn(`theme set '${source}' failed:`, e?.message);
+    });
+  });
 };
 
 // Bridge between renderer's web-manager and main's web-manager-bridge.

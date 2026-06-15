@@ -145,6 +145,13 @@
       mode:    'hidden',
     },
   },
+  // Appearance — the app's DEFAULT theme. 'system' follows the OS preference live;
+  // 'light'/'dark' are explicit overrides. A user's runtime choice (manager.theme.set
+  // or the [data-em-theme-set] controls) persists in storage and wins over this on
+  // every boot. See docs/themes.md.
+  theme: {
+    appearance: 'system',
+  },
   // No `windows` block needed — EM no longer auto-creates windows. Your main.js
   // calls `manager.windows.create('main', { width: 1280, height: 800, ... })` when
   // you want UI to surface. Defaults baked in:

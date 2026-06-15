@@ -123,6 +123,18 @@ contextBridge.exposeInMainWorld('em', {
       return () => ipcRenderer.removeListener('em:storage:change', wrapped);
     },
   },
+  // Mirror production preload's theme surface (get/set via IPC; onChange via
+  // matchMedia — the real mechanism, since themeSource flips prefers-color-scheme).
+  theme: {
+    get: ()       => ipcRenderer.invoke('em:theme:get'),
+    set: (source) => ipcRenderer.invoke('em:theme:set', { source }),
+    onChange: (handler) => {
+      const media = window.matchMedia('(prefers-color-scheme: dark)');
+      const wrapped = (e) => handler({ resolved: e.matches ? 'dark' : 'light' });
+      media.addEventListener('change', wrapped);
+      return () => media.removeEventListener('change', wrapped);
+    },
+  },
   logger: makeForwardingLogger(),
   autoUpdater: {
     getStatus:  ()  => ipcRenderer.invoke('em:auto-updater:status'),

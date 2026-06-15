@@ -5,6 +5,7 @@
 const LoggerLite = require('./lib/logger-lite.js');
 
 const storage      = require('./lib/storage.js');
+const theme        = require('./lib/theme.js');
 const sentry       = require('./lib/sentry/index.js');
 const protocol     = require('./lib/protocol.js');
 const deepLink     = require('./lib/deep-link.js');
@@ -40,6 +41,7 @@ function Manager() {
 
   // Public lib references (consumer code can call them by name)
   self.storage     = storage;
+  self.theme       = theme;
   self.sentry      = sentry;
   self.protocol    = protocol;
   self.deepLink    = deepLink;
@@ -188,6 +190,35 @@ Manager.prototype.initialize = async function (consumerConfig, options) {
   self.startup._electron = electron || null;
   self.startup.applyEarly();
 
+  // 1a. Test stealth: suppress app-level activation on macOS. Launching a regular-
+  //     policy app activates it — menu bar + keyboard focus switch away from whatever
+  //     the developer is typing in — even though stealth windows surface via
+  //     showInactive() (see lib/window-manager.js). The accessory policy (the same
+  //     switch app.dock.hide() flips, and what LSUIElement bakes for packaged
+  //     hidden-mode apps) keeps the test process from ever activating; windows still
+  //     render normally. Must run before app ready — activation happens when the app
+  //     finishes launching. EM_TEST_SHOW=1 restores normal activation along with
+  //     visible windows.
+  if (process.platform === 'darwin' && require('./utils/test-stealth.js')(self)) {
+    app.dock.hide();
+    self.logger.log('test stealth: app activation suppressed (dock hidden / accessory policy) — launch will not steal focus');
+  }
+
+  // 1a-ii. Test stealth for EVERY BrowserWindow — including RAW ones created with
+  //        `new BrowserWindow()` that never pass through lib/window-manager (e.g.
+  //        a consumer's automation popup). Window-manager stealths only its own
+  //        named windows via _surface(); this hook closes the gap so no window
+  //        can flash or steal focus during a test run. The predicate is evaluated
+  //        PER WINDOW so EM_TEST_SHOW=1 keeps working even when flipped mid-run
+  //        (the window-manager suite does exactly that).
+  if (self.isTesting()) {
+    app.on('browser-window-created', (_event, win) => {
+      if (!require('./utils/test-stealth.js')(self)) return;
+      require('./utils/stealth-window.js').applyStealth(win);
+    });
+    self.logger.log('test stealth: every BrowserWindow (raw ones included) surfaces invisible + unfocusable (EM_TEST_SHOW=1 to watch)');
+  }
+
   // 1b. Isolate the userData path per environment. MUST run before
   //     storage.initialize() because electron-store reads `app.getPath('userData')`
   //     at construction time.
@@ -252,6 +283,11 @@ Manager.prototype.initialize = async function (consumerConfig, options) {
 
   // 3. Storage (precedes sentry + auth so opt-out + persisted session are honored)
   await self.storage.initialize(self);
+
+  // 3b. Theme — sets nativeTheme.themeSource from the persisted override / config
+  //     default, so every renderer (and native UI) resolves the right appearance
+  //     from its very first paint. Needs storage (override) + ipc (handlers) only.
+  self.theme.initialize(self);
 
   // 4. Sentry (earliest catchable global handler)
   self.sentry.initialize(self);

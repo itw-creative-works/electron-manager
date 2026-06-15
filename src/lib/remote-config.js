@@ -41,8 +41,9 @@ const DEFAULTS = Object.freeze({
 //   manager.remoteConfig.on('update', fn)        → subscribe; returns unsub fn
 //   manager.remoteConfig.refreshNow()            → force a fetch right now (Promise<data | null>)
 
-const LoggerLite = require('./logger-lite.js');
-const fetch      = require('wonderful-fetch');
+const LoggerLite       = require('./logger-lite.js');
+const fetch            = require('wonderful-fetch');
+const formatFetchError = require('../utils/format-fetch-error.js');
 
 const logger = new LoggerLite('remote-config');
 
@@ -99,7 +100,7 @@ const remoteConfig = {
 
     // Kick off the initial fetch — fire-and-forget, never blocks. A failure here
     // is non-fatal; we already have defaults (and possibly cache) seeded above.
-    remoteConfig.refreshNow().catch((e) => logger.warn(`initial fetch failed (using defaults/cache): ${e.message}`));
+    remoteConfig.refreshNow().catch((e) => logger.warn(`initial fetch failed (using defaults/cache): ${formatFetchError(e)}`));
 
     // Cadence: match auto-updater's feed-check (same "occasionally network-hits-the-internet"
     // job category). Auto-updater is wired BEFORE remote-config in boot sequence
@@ -108,7 +109,7 @@ const remoteConfig = {
       ? 500
       : manager.autoUpdater._options.feedCheckIntervalMs;
     remoteConfig._intervalId = setInterval(() => {
-      remoteConfig.refreshNow().catch((e) => logger.warn(`periodic fetch failed: ${e.message}`));
+      remoteConfig.refreshNow().catch((e) => logger.warn(`periodic fetch failed: ${formatFetchError(e)}`));
     }, interval);
 
     // IPC: renderer reads via invoke. Subscribe-to-update is an IPC broadcast,

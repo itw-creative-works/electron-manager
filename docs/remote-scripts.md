@@ -83,7 +83,7 @@ To stop the script from running on new installs (without affecting installs that
 // no-op
 ```
 
-Or return a 404 — fetch failures are caught and logged, never crash.
+Or return a 404 — fetch failures are caught and logged, never crash. Failure log lines are one-line + truncated via `src/utils/format-fetch-error.js` — an HTML 404 page logs as `HTTP 404: response was an HTML page, not the expected resource`, not the full markup.
 
 ## Execution context
 

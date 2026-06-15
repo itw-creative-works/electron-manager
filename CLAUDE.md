@@ -63,7 +63,7 @@ new (require('electron-manager/preload'))().initialize();   // exposes window.em
 new (require('electron-manager/renderer'))().initialize();
 ```
 
-`manager.initialize()` runs a fixed boot order (startup → ipc → storage → sentry → protocol → deepLink → appState → whenReady → autoUpdater → tray/menu/contextMenu → startup → webManager → remoteConfig → remoteScripts → windows). See [docs/boot-sequence.md](docs/boot-sequence.md) for the full ordered list + rationale.
+`manager.initialize()` runs a fixed boot order (startup → ipc → storage → theme → sentry → protocol → deepLink → appState → whenReady → autoUpdater → tray/menu/contextMenu → startup → webManager → remoteConfig → remoteScripts → windows). See [docs/boot-sequence.md](docs/boot-sequence.md) for the full ordered list + rationale.
 
 ### Lib modules
 
@@ -73,6 +73,7 @@ new (require('electron-manager/renderer'))().initialize();
 |---|---|
 | `ipc` | typed channel bus, single registration point |
 | `storage` | electron-store wrapper, sync main / async renderer via IPC |
+| `theme` | system-aware appearance — `nativeTheme.themeSource` ('system'/'light'/'dark'), persisted override, live `<html data-bs-theme>` in every renderer via matchMedia |
 | `window-manager` | lazy-creation registry, bounds persistence, Discord-style hide-on-close, inset titlebar, dock-show on first window, re-surface on user re-launch |
 | `tray` / `menu` / `context-menu` | file-based definitions; unified id-path API; default templates with id-tagged items |
 | `startup` | `mode: 'normal' \| 'hidden'`; `'hidden'` bakes `LSUIElement: true` for zero dock bounce |
@@ -136,7 +137,7 @@ Every gulp invocation tees stdout+stderr to `<projectRoot>/logs/dev.log` on `npm
 
 ### CDP debugging (Claude ↔ Electron)
 
-`serve` forwards all `--` CLI flags to the Electron child process. Set `EM_CDP_PORT=9222` (or pass `--remote-debugging-port=9222` via `--`) to expose Chrome DevTools Protocol on that port, enabling Claude to screenshot, click, type, evaluate JS, and read console logs in the running app via the `chrome-devtools-electron` MCP upstream. See [docs/cdp-debugging.md](docs/cdp-debugging.md).
+`serve` forwards all `--` CLI flags to the Electron child process. Set `EM_CDP_PORT=9222` (or pass `--remote-debugging-port=9222` via `--`) to expose Chrome DevTools Protocol on that port. Drive the running app with the built-in toolkit — `npx mgr cdp status|eval|shot|capture|theme|relaunch|quit` (multi-target by URL substring; `relaunch` IS the dev iterate loop since serve has no watch) — or via the `chrome-devtools-electron` MCP upstream for richer single-page interaction (click, fill, network, traces). See [docs/cdp-debugging.md](docs/cdp-debugging.md).
 
 ## CLI
 
@@ -225,7 +226,7 @@ API references for each subsystem live in `docs/`. **Whenever you make a behavio
 - [docs/sentry.md](docs/sentry.md) — per-context split, auto auth attribution
 - [docs/templating.md](docs/templating.md) — `{{ }}` token replacement, page vars, HTML pipeline
 - [docs/logging.md](docs/logging.md) — runtime logger (main + preload + renderer → one `runtime.log`)
-- [docs/themes.md](docs/themes.md) — vendored classy + bootstrap themes, per-page CSS bundles
+- [docs/themes.md](docs/themes.md) — vendored classy + bootstrap themes, per-page CSS bundles, system-aware appearance (`manager.theme`)
 - [docs/css.md](docs/css.md) — SCSS architecture: main entry, theme `@use` config, per-window bundles, Bootstrap-first
 - [docs/hooks.md](docs/hooks.md) — lifecycle hooks (build/pre, build/post, release/pre, release/post, notarize/post)
 - [docs/icons.md](docs/icons.md) — convention-only icon resolution (`global/` + per-platform), retina derivation, macOS Template magic
@@ -239,6 +240,6 @@ API references for each subsystem live in `docs/`. **Whenever you make a behavio
 - [docs/environment-detection.md](docs/environment-detection.md) — `isDevelopment`/`isTesting`/`getApiUrl` etc., adding new helpers
 - [docs/common-mistakes.md](docs/common-mistakes.md) — the canonical "don't do this" list
 - [docs/audit.md](docs/audit.md) — full-audit check catalog (U-xx universal / EM-xx / F-xx IDs with severity + scope), protocol + fix loop
-- [docs/cdp-debugging.md](docs/cdp-debugging.md) — Claude ↔ Electron via CDP, `EM_CDP_PORT`, MCP setup
+- [docs/cdp-debugging.md](docs/cdp-debugging.md) — Claude ↔ Electron via CDP: the `mgr cdp` toolkit (status/eval/shot/capture/theme/relaunch/quit), `EM_CDP_PORT`, MCP setup
 
 `PROGRESS.md` tracks pass-by-pass progress and decisions.

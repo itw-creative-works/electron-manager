@@ -68,6 +68,7 @@ Per-window keys:
 | `skipTaskbar` | `false` | `false` | Suppress taskbar/dock entry for THIS window. |
 | `titleBar` | `'inset'` | `'inset'` | `'inset'` (mac/win native overlay) or `'native'` (full system frame). |
 | `titleBarOverlay` | platform default | platform default | Override Windows overlay color/symbolColor/height. |
+| `trafficLightPosition` | OS inset default | OS inset default | macOS only: `{ x, y }` custom position for the traffic lights (e.g. to center them inside a floating chrome panel). Only applies in `'inset'` mode. |
 
 ## Inset titlebar (default)
 
@@ -75,7 +76,7 @@ EM ships an inset titlebar by default — the OS draws all the window controls a
 
 | Platform | Behavior |
 |---|---|
-| **macOS** | `titleBarStyle: 'hiddenInset'` — traffic lights inset into the chrome region |
+| **macOS** | `titleBarStyle: 'hiddenInset'` — traffic lights inset into the chrome region. Reposition them via `config.windows.<name>.trafficLightPosition = { x, y }` (e.g. when the app draws a floating chrome panel and the lights should sit inside it). |
 | **Windows** | `titleBarStyle: 'hidden'` + `titleBarOverlay: { color, symbolColor, height: 36 }` — native min/max/close buttons drawn by the OS |
 | **Linux** | Native frame (full system title bar) |
 
@@ -135,6 +136,14 @@ manager.initialize().then(() => {
 ## Auto-attach context-menu
 
 Every window created via `manager.windows.create()` is automatically wired up with the consumer's `src/integrations/context-menu/index.js` (see [context-menu.md](context-menu.md)). Idempotent per webContents (uses a WeakSet). For windows you create directly with `new BrowserWindow()`, call `manager.contextMenu.attach(win.webContents)` manually.
+
+## Testing mode: stealth surfacing
+
+When `manager.isTesting()` (i.e. under `npx mgr test`), every surfacing path — `ready-to-show`, `windows.show()`, the create-dedup focus — goes **stealth** instead of `win.show()`: `showInactive()` (keyboard focus never leaves your editor) + `setOpacity(0)` + `setIgnoreMouseEvents(true)` (real OS clicks pass through; synthetic test input is unaffected), and no `win.focus()`/dock surfacing. The window is fully functional — rendering, timers, focus semantics, and `WebContentsView` visibility are identical to a visible window, which is why this is NOT `hide()`/`minimize()` (occlusion throttling would pause rAF and flip `document.visibilityState`, changing the runtime under test). Set **`EM_TEST_SHOW=1`** to watch a test run with real windows. Details: [test-framework.md](test-framework.md).
+
+**The recipe is a shared util, and it covers RAW windows too.** `src/utils/stealth-window.js` (`applyStealth(win)`) is the single stealth-surfacing implementation — `_surface()` uses it for named windows, and `main.js` registers a global `browser-window-created` hook (step 1a-ii, Testing mode only) that applies it to **every** BrowserWindow, including ones created with `new BrowserWindow()` outside window-manager (a consumer's automation popup, a dialog, anything). For raw windows the util additionally reroutes `show()` → `showInactive()` and no-ops `focus()`, since nothing else mediates their surfacing. The stealth predicate (`src/utils/test-stealth.js`) is evaluated per window at creation, so `EM_TEST_SHOW=1` opts a run back into visible windows even when flipped mid-process. Covered by `suites/main/stealth-window.test.js`.
+
+**App-level activation is suppressed separately (macOS).** Window flags can't stop macOS from activating a freshly *launched* app — the menu bar and keyboard focus switch to the test process at launch even when every window surfaces inactive. Under the same stealth predicate (`src/utils/test-stealth.js`, also used by `_isStealth()`), `main.js` flips the app to the accessory activation policy (`app.dock.hide()`) before app ready, so a test launch never activates and never steals focus. `EM_TEST_SHOW=1` opts out of both. Details: [test-framework.md](test-framework.md).
 
 ## Platform behavior
 

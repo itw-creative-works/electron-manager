@@ -15,6 +15,29 @@
 const path = require('path');
 const { app, BrowserWindow, ipcMain } = require('electron');
 
+// macOS: suppress app activation BEFORE ready — launching a regular-policy app
+// steals keyboard focus app-wide even when no window is ever focused. This file
+// only initializes its Manager after whenReady (too late: activation fires when
+// the app finishes launching), so flip the accessory policy here at require time.
+// This process is always a test run (runners/electron.js sets EM_TEST_MODE), so
+// the shared predicate needs no Manager. EM_TEST_SHOW=1 opts back into normal
+// activation along with visible windows.
+if (process.platform === 'darwin' && require('../../utils/test-stealth.js')()) {
+  app.dock.hide();
+}
+
+// CDP endpoint for consumer suites that drive real browser automation against
+// the harness Electron (e.g. playwright-core connectOverCDP). Port 0 = an
+// OS-assigned loopback-only port; Chromium writes the resolved port to
+// DevToolsActivePort inside the userData dir that's CURRENT when the DevTools
+// server starts — captured here at require time, because Manager.initialize()
+// re-paths userData later (post-ready in this harness). runSuites() resolves
+// the port from that file and publishes it as process.env.EM_CDP_PORT.
+if (!app.commandLine.hasSwitch('remote-debugging-port')) {
+  app.commandLine.appendSwitch('remote-debugging-port', '0');
+}
+const devtoolsPortDir = app.getPath('userData');
+
 // Suites to run come in via process.argv after `--`
 const argv = process.argv.slice(2);
 const sepIdx = argv.indexOf('--');
@@ -57,6 +80,23 @@ class SkipError extends Error {
 }
 
 async function runSuites() {
+  // Publish the harness's resolved DevTools port (see the appendSwitch block at
+  // the top of this file) for suites to consume. OVERWRITES any inherited
+  // EM_CDP_PORT — a value from the developer's shell points at their dev app,
+  // not at this harness. Best-effort short poll: the file is written when
+  // Chromium starts the DevTools server during app startup, normally well
+  // before whenReady resolves.
+  for (let i = 0; i < 20; i += 1) {
+    try {
+      const port = Number(require('fs').readFileSync(path.join(devtoolsPortDir, 'DevToolsActivePort'), 'utf8').split('\n')[0]);
+      if (port > 0) {
+        process.env.EM_CDP_PORT = String(port);
+        break;
+      }
+    } catch (_e) { /* not written yet */ }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
   const Manager = require('../../main.js');
   const manager = new Manager();
 

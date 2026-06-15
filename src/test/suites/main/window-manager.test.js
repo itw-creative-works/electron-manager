@@ -59,6 +59,97 @@ module.exports = {
         // No assertion beyond "didn't throw" — visibility is OS-side state we can't reliably read.
       },
     },
+
+    // ── Test stealth (this harness IS Testing mode, so stealth is active) ────
+    {
+      name: 'stealth: app activation suppressed — dock hidden (accessory policy, macOS)',
+      run: (ctx) => {
+        if (process.platform !== 'darwin') {
+          return ctx.skip('macOS-only — accessory activation policy / dock');
+        }
+        // Both the harness entry (at require time) and Manager.initialize (step 1a)
+        // hide the dock under the stealth predicate, so the launched test app never
+        // activates and never steals keyboard focus.
+        const { app } = require('electron');
+        ctx.expect(app.dock.isVisible()).toBe(false);
+      },
+    },
+    {
+      name: 'stealth surfacing: shown but invisible (opacity 0) and never focused',
+      run: (ctx) => {
+        const { BrowserWindow } = require('electron');
+
+        ctx.expect(ctx.manager.windows._isStealth()).toBe(true);
+
+        const win = new BrowserWindow({ show: false, width: 120, height: 80 });
+        ctx.manager.windows._surface(win, 'stealth-probe');
+
+        // Shown (rendering/timers run like a visible window — NOT hide/minimize,
+        // which would occlusion-throttle) but fully transparent and inactive.
+        ctx.expect(win.isVisible()).toBe(true);
+        ctx.expect(win.getOpacity()).toBe(0);
+        ctx.expect(win.isFocused()).toBe(false);
+
+        win.destroy();
+      },
+    },
+    {
+      name: 'EM_TEST_SHOW=1 opts out: windows surface normally (opacity 1)',
+      run: (ctx) => {
+        const { BrowserWindow } = require('electron');
+
+        process.env.EM_TEST_SHOW = '1';
+        try {
+          ctx.expect(ctx.manager.windows._isStealth()).toBe(false);
+
+          // This probe exercises the real non-stealth _surface branch WITHOUT
+          // stealing the developer's keyboard focus mid-run. Two activation
+          // paths have to be neutralized (measured on macOS):
+          //   1. _ensureDockVisible → dock.show() activates the app
+          //      (TransformProcessType). Pre-flipping the activation policy to
+          //      'regular' makes the dock visible WITHOUT activating, so
+          //      _ensureDockVisible no-ops.
+          //   2. win.show() hands the window keyboard focus — focusable:false
+          //      declines it while still ordering the window front (visible,
+          //      opacity 1), which is what this test asserts.
+          if (process.platform === 'darwin') {
+            require('electron').app.setActivationPolicy('regular');
+          }
+          const win = new BrowserWindow({ show: false, width: 120, height: 80, x: 0, y: 0, focusable: false });
+          ctx.manager.windows._surface(win, 'visible-probe');
+
+          ctx.expect(win.isVisible()).toBe(true);
+          ctx.expect(win.getOpacity()).toBe(1);
+
+          win.destroy();
+        } finally {
+          delete process.env.EM_TEST_SHOW;
+          // Restore the launch-time activation suppression for the rest of the run.
+          if (process.platform === 'darwin') {
+            require('electron').app.dock.hide();
+          }
+        }
+
+        // Flag removed → stealth is back on for the rest of the run.
+        ctx.expect(ctx.manager.windows._isStealth()).toBe(true);
+      },
+    },
+    {
+      name: 'trafficLightPosition passes through to the BrowserWindow (mac)',
+      run: async (ctx) => {
+        if (process.platform !== 'darwin') {
+          return; // trafficLightPosition is a macOS-only BrowserWindow option
+        }
+
+        const win = await ctx.manager.windows.create('tlp-probe', { trafficLightPosition: { x: 26, y: 24 } });
+        ctx.expect(win).toBeTruthy();
+
+        const pos = win.getWindowButtonPosition();
+        ctx.expect(pos).toEqual({ x: 26, y: 24 });
+
+        win.destroy();
+      },
+    },
     {
       name: 'close removes the window from the registry',
       run: async (ctx) => {
