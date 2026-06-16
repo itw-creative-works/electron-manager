@@ -1,6 +1,6 @@
 {
   "name": "electron-manager",
-  "version": "1.8.0",
+  "version": "1.8.1",
   "description": "Electron Manager — all-in-one development framework for Electron apps",
   "main": "dist/index.js",
   "exports": {
@@ -94,7 +94,6 @@
   "peerDependencies": {
     "electron": ">=42",
     "electron-builder": ">=26",
-    "electron-store": "^11.0.2",
     "gulp": "^5.0.1"
   },
   "devDependencies": {

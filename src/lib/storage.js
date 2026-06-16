@@ -22,6 +22,7 @@
 
 const LoggerLite = require('./logger-lite.js');
 const ipc = require('./ipc.js');
+const importESM = require('../utils/import-esm.js');
 
 const logger = new LoggerLite('storage');
 
@@ -39,17 +40,9 @@ const storage = {
 
     storage._manager = manager;
 
-    // Lazy-load electron-store via dynamic import. It's ESM-only so we can't `require()` it.
-    // The /* webpackIgnore: true */ magic comment tells webpack to leave this import() alone —
-    // the consumer's bundled main.js will then ask Node directly to resolve 'electron-store',
-    // which finds it in EM's own node_modules at runtime.
-    // electron-store is ESM-only as of v11; dynamic import is the only way to load
-    // it from CommonJS. The dynamic import is the actual fallible op (peer dep
-    // resolution); `require('electron')` doesn't throw.
     let ElectronStore;
     try {
-      const mod = await import(/* webpackIgnore: true */ 'electron-store');
-      ElectronStore = mod.default || mod;
+      ElectronStore = await importESM('electron-store');
     } catch (e) {
       logger.warn(`electron-store not available — storage running as no-op. (${e.message})`);
       storage._initialized = true;

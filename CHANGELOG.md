@@ -15,6 +15,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `Security` in case of vulnerabilities.
 
 ---
+## 1.8.1 — `electron-store` no longer a peer dep
+
+### Added
+- **`src/utils/import-esm.js` — reusable ESM-only dep loader.** Tries the consumer's `node_modules/` first, then falls back to EM's own `node_modules/`. Use `importESM(specifier)` in any EM lib that needs an ESM-only transitive dep — consumers no longer need to install it. Documented in `docs/common-mistakes.md` (item 16) and `CLAUDE.md` (File Conventions).
+
+### Changed
+- **`electron-store` is no longer a peer dependency.** It stays in EM's `dependencies` and is resolved at runtime via the new `importESM()` fallback — consumers no longer need to `npm install electron-store`. The webpack external for `electron-store` was also removed (unnecessary since the only import is a `webpackIgnore`'d dynamic `import()`).
+
+---
 ## 1.8.0 — `npx mgr cdp` toolkit, system-aware `manager.theme`, test-mode stealth windows
 
 ### Fixed

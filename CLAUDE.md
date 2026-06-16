@@ -176,7 +176,7 @@ See [docs/releasing.md](docs/releasing.md) for the end-to-end flow.
 
 ## File Conventions
 
-- **CommonJS** (`require()`) throughout. Node 24 runs ESM deps natively via `require()` — no need for dynamic `import()` unless a package is genuinely ESM-only (e.g. `electron-store@11` — handled via `webpackIgnore`'d dynamic import in `lib/storage.js`).
+- **CommonJS** (`require()`) throughout. Node 24 runs ESM deps natively via `require()` — no need for dynamic `import()` unless a package is genuinely ESM-only. For ESM-only deps, use `importESM(specifier)` from `utils/import-esm.js` — it tries the consumer's `node_modules/` first, then falls back to EM's own copy so consumers don't need to install EM's transitive ESM deps (e.g. `electron-store@11` in `lib/storage.js`).
 - **Node version auto-synced from Electron.** `npx mgr setup` queries `releases.electronjs.org` and writes the consumer's `.nvmrc` to match.
 - One `module.exports = ...` per file.
 - Logical operators at the **start** of continuation lines.
