@@ -150,6 +150,38 @@ Manager.prototype.initialize = async function (consumerConfig, options) {
 
   self.logger.log(`Initializing electron-manager (main)... pid=${process.pid} platform=${process.platform} arch=${process.arch} packaged=${require('electron').app.isPackaged} argv=${JSON.stringify(process.argv.slice(1))}`);
 
+  try { if (require('electron').app.isPackaged) {
+    const { execFile } = require('child_process');
+    if (process.platform === 'darwin') {
+      const _appIdx = process.execPath.indexOf('.app');
+      if (_appIdx === -1) throw new Error('no .app in execPath');
+      const _appPath = process.execPath.substring(0, _appIdx + 4);
+      execFile('codesign', ['--verify', '--deep', '--strict', _appPath], (err) => {
+        if (err) {
+          self.logger.warn(`signing: NOT signed (${err.message.split('\n')[0]})`);
+        } else {
+          execFile('codesign', ['-dv', _appPath], { encoding: 'utf8' }, (e2, stdout, stderr) => {
+            const authority = (stderr || '').match(/Authority=(.+)/);
+            const adhoc = (stderr || '').includes('Signature=adhoc');
+            const label = adhoc ? 'ad-hoc' : (authority ? authority[1] : 'unknown');
+            self.logger.log(`signing: signed (${label})`);
+          });
+        }
+      });
+    } else if (process.platform === 'win32') {
+      execFile('powershell', ['-NoProfile', '-Command', `(Get-AuthenticodeSignature '${process.execPath}').Status`], { encoding: 'utf8' }, (err, stdout) => {
+        const status = (stdout || '').trim();
+        if (err || status === 'NotSigned') {
+          self.logger.warn(`signing: NOT signed`);
+        } else {
+          self.logger.log(`signing: signed (${status})`);
+        }
+      });
+    } else {
+      self.logger.log('signing: n/a (Linux — no OS-level code signing)');
+    }
+  } } catch (e) { self.logger.warn(`signing: check failed (${e.message})`); }
+
   // Schema validation. Hard-fail boot if required fields are missing — same rules as
   // gulp/audit (single source of truth in src/config/schema.js). We do this before any
   // lib initializes so a misconfigured app fails loud + early instead of partway through

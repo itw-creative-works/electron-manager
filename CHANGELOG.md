@@ -15,6 +15,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `Security` in case of vulnerabilities.
 
 ---
+## 1.8.5 — Signing status in boot log
+
+### Added
+- **Signing status logged at boot** (packaged apps only). macOS: `codesign --verify` → `signed (Developer ID Application: ...)` / `signed (ad-hoc)` / `NOT signed`. Windows: `Get-AuthenticodeSignature` → `signed (Valid)` / `NOT signed`. Linux: `n/a`. Async, non-blocking, fully guarded against errors.
+
+---
 ## 1.8.4 — Branded production paths
 
 ### Changed
