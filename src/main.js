@@ -137,6 +137,11 @@ Manager.prototype.initialize = async function (consumerConfig, options) {
     const fs = require('fs');
     const _path = require('path');
     const _app = require('electron').app;
+
+    const _productName = self.config.app?.productName || self.config.brand?.name;
+    if (_productName) {
+      _app.setName(_productName);
+    }
     const _logPath = _app.isPackaged
       ? _path.join(_app.getPath('logs'), 'runtime.log')
       : _path.join(process.cwd(), 'logs', 'runtime.log');

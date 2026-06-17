@@ -15,6 +15,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `Security` in case of vulnerabilities.
 
 ---
+## 1.8.4 — Branded production paths
+
+### Changed
+- **Production paths now use `brand.name` instead of `package.json#name`.** `app.setName(productName)` is called at the top of `Manager.initialize()`, before any `getPath()` call. Production logs go to `~/Library/Logs/Notifly/` instead of `~/Library/Logs/notifly-electron/`, and userData to `~/Library/Application Support/Notifly/` instead of `~/Library/Application Support/notifly-electron/`. Falls back to `brand.name` when `app.productName` is not set.
+
+---
 ## 1.8.3 — runtime.log truncates on boot
 
 ### Changed

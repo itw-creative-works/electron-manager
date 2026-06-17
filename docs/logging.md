@@ -14,9 +14,9 @@ EM ships a runtime logger that writes to **both the console and a file on disk**
 | Mode | Location |
 |---|---|
 | Dev (`npm start`, `app.isPackaged === false`) | `<projectRoot>/logs/runtime.log` |
-| Prod (installed `.dmg` / `.exe` / `.deb`, `app.isPackaged === true`) | OS log dir: `~/Library/Logs/<AppName>/runtime.log` (macOS), `%APPDATA%\<AppName>\logs\runtime.log` (Windows), `~/.config/<AppName>/logs/runtime.log` (Linux) |
+| Prod (installed `.dmg` / `.exe` / `.deb`, `app.isPackaged === true`) | OS log dir: `~/Library/Logs/<ProductName>/runtime.log` (macOS), `%APPDATA%\<ProductName>\logs\runtime.log` (Windows), `~/.config/<ProductName>/logs/runtime.log` (Linux) |
 
-This is `app.getPath('logs')` in production — Electron's standard logs location, the same place users (and crash reports) look for app logs.
+`<ProductName>` = `config.app.productName` (falls back to `config.brand.name`). EM calls `app.setName(productName)` at boot so `app.getPath('logs')` uses the human-readable brand name, not `package.json#name`.
 
 ## How to write logs
 
