@@ -172,6 +172,13 @@ Manager.prototype.initialize = async function (consumerConfig, options) {
   // so we never crash silently — combined with electron-log file transport, this means
   // ANY unhandled throw lands in runtime.log rather than disappearing into stderr.
   process.on('uncaughtException', (e) => {
+    // EPIPE = stdout/stderr pipe closed (CLI consumer hung up). Logging it would
+    // write to console, which triggers another EPIPE, cascading into thousands of
+    // identical log entries. Exit cleanly — standard Unix behavior.
+    if (e?.code === 'EPIPE') {
+      process.exit(0);
+      return;
+    }
     self.logger.error(`uncaughtException: ${e?.stack || e?.message || String(e)}`);
   });
   process.on('unhandledRejection', (reason) => {

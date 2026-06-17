@@ -1426,10 +1426,8 @@ function saveConfig(data) {
 //
 // `npx mgr runner monitor` — pretty-prints the JSONL signing event log in real time.
 //
-// Reads the same path `sign-windows` writes to:
-//   1. EM_SIGN_LOG env var (override) — wins if set
-//   2. <RUNNER_TOOLSDIRECTORY>/em-signing.log — when on the GH Actions runner box
-//   3. <process.cwd()>/em-signing.log — fallback
+// Reads the same path `sign-windows` writes to (see sign-events.js for the full
+// resolution chain). Uses signEvents.getLogPath() so it always stays in sync.
 //
 // Designed to run from a regular PowerShell / cmd / Windows Terminal session on the
 // signing box. Reads the file, prints existing events first (so you see context if

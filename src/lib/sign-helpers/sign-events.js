@@ -14,7 +14,7 @@
 //      the same file, and `npx mgr runner monitor` with no args picks it up.
 //   4. `<RUNNER_TOOLSDIRECTORY>/em-signing.log` — legacy fallback if someone runs
 //      sign-windows outside the runner-installed path
-//   5. `<process.cwd()>/em-signing.log` — last resort
+//   5. `<process.cwd()>/logs/signing.log` — local dev fallback (matches dev.log, build.log, etc.)
 
 const fs   = require('fs');
 const os   = require('os');
@@ -28,11 +28,13 @@ function resolveLogPath() {
   if (process.platform === 'win32') {
     return 'C:\\actions-runners\\em-signing.log';
   }
-  const root = process.env.RUNNER_TOOLSDIRECTORY
+  const ciRoot = process.env.RUNNER_TOOLSDIRECTORY
     || process.env.RUNNER_WORKSPACE
-    || process.env.RUNNER_ROOT
-    || process.cwd();
-  return path.join(root, 'em-signing.log');
+    || process.env.RUNNER_ROOT;
+  if (ciRoot) {
+    return path.join(ciRoot, 'em-signing.log');
+  }
+  return path.join(process.cwd(), 'logs', 'signing.log');
 }
 
 const logPath = resolveLogPath();

@@ -15,6 +15,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `Security` in case of vulnerabilities.
 
 ---
+## 1.8.2 — Fix EPIPE cascade and signing log path
+
+### Fixed
+- **EPIPE cascade in `uncaughtException` handler.** When stdout's pipe was broken (CLI consumer hung up), the handler re-logged the error via the console transport, triggering another EPIPE in an infinite loop — filling `runtime.log` to its 10MB rotation limit with thousands of identical stack traces in under a second. Now detects EPIPE and exits cleanly with code 0 (standard Unix behavior).
+- **Signing log landing in project root.** The local dev fallback for `sign-events.js` wrote `em-signing.log` to `process.cwd()` instead of `logs/`. Now writes to `logs/signing.log`, matching `dev.log`, `build.log`, `test.log`, and `ci.log`. CI paths (`EM_RUNNER_HOME`, `RUNNER_TOOLSDIRECTORY`, etc.) unchanged.
+
+### Added
+- Main-layer test for the EPIPE handler (`src/test/suites/main/epipe-handler.test.js`).
+
+---
 ## 1.8.1 — `electron-store` no longer a peer dep
 
 ### Added

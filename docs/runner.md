@@ -141,7 +141,7 @@ Events captured per job:
 - `✓ signed <file>` / `✗ FAILED <file>` — signtool outcome + duration; failures show the underlying error
 - `JOB END OK` / `FAILED` — overall result + total duration
 
-The event log is a JSONL file at `<runner-workspace>/em-signing.log` (resolved from `RUNNER_WORKSPACE` / `RUNNER_TOOLSDIRECTORY`, falling back to cwd). Override path with `EM_SIGN_LOG=<path>`. Monitor flags:
+The event log is a JSONL file at `<runner-home>/em-signing.log` on CI (resolved from `EM_RUNNER_HOME` / `RUNNER_TOOLSDIRECTORY` / `RUNNER_WORKSPACE`), or `logs/signing.log` in local dev. Override with `EM_SIGN_LOG=<path>`. Monitor flags:
 
 ```powershell
 npx mgr runner monitor --follow-only      # only show NEW events (skip replay of pre-existing log)
