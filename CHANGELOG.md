@@ -15,6 +15,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `Security` in case of vulnerabilities.
 
 ---
+## 1.8.3 — runtime.log truncates on boot
+
+### Changed
+- **`runtime.log` now truncates on every boot**, matching `dev.log`, `build.log`, `test.log`, and `ci.log`. Every `Manager.initialize()` call clears the file before the first log write so each session starts fresh.
+
+---
 ## 1.8.2 — Fix EPIPE cascade and signing log path
 
 ### Fixed

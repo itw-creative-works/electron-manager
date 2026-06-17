@@ -1,6 +1,6 @@
 {
   "name": "electron-manager",
-  "version": "1.8.2",
+  "version": "1.8.3",
   "description": "Electron Manager — all-in-one development framework for Electron apps",
   "main": "dist/index.js",
   "exports": {
@@ -100,6 +100,7 @@
     "@electron/notarize": "^3.1.1",
     "electron": "^42.0.1",
     "electron-builder": "^26.8.1",
+    "electron-manager": "^1.8.2",
     "firebase-admin": "^13.9.0",
     "prepare-package": "^2.1.0"
   },

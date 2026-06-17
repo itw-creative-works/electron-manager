@@ -6,7 +6,7 @@ EM ships a runtime logger that writes to **both the console and a file on disk**
 
 - **One log file**, `runtime.log`, populated by all three Electron processes (main / preload / renderer)
 - **Live console output** during development (DevTools console for renderer, terminal stdout for main)
-- **Automatic rotation** at 10 MB → `runtime.old.log`
+- **Fresh each boot** — truncated on every `Manager.initialize()`, just like `dev.log`/`build.log`/`test.log`
 - **Cross-process timestamps** so log lines from main + preload + renderer interleave in arrival order
 
 ## Where the file lives
@@ -203,7 +203,7 @@ Five separate logs in `<projectRoot>/logs/`:
 
 | File | Source | Lifetime |
 |---|---|---|
-| `runtime.log` | Packaged-app runtime in dev mode | Persistent (rotates at 10 MB) |
+| `runtime.log` | Packaged-app runtime in dev mode | Truncated each boot |
 | `dev.log` | Gulp pipeline + spawned Electron child stdout (`npm start`) | Truncated each `npm start` |
 | `build.log` | Gulp pipeline output for production builds/packages (`npm run build` / `package` / `publish`, i.e. `EM_BUILD_MODE=true`) | Truncated each build |
 | `test.log` | `npx mgr test` runner output (suite names, pass/fail states, harness boot lines) | Truncated each test run |

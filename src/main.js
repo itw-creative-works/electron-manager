@@ -133,6 +133,16 @@ Manager.prototype.initialize = async function (consumerConfig, options) {
   self.config = consumerConfig || {};
   self._options = options || {};
 
+  {
+    const fs = require('fs');
+    const _path = require('path');
+    const _app = require('electron').app;
+    const _logPath = _app.isPackaged
+      ? _path.join(_app.getPath('logs'), 'runtime.log')
+      : _path.join(process.cwd(), 'logs', 'runtime.log');
+    try { fs.writeFileSync(_logPath, ''); } catch (e) {}
+  }
+
   self.logger.log(`Initializing electron-manager (main)... pid=${process.pid} platform=${process.platform} arch=${process.arch} packaged=${require('electron').app.isPackaged} argv=${JSON.stringify(process.argv.slice(1))}`);
 
   // Schema validation. Hard-fail boot if required fields are missing — same rules as
