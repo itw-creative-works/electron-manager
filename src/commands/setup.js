@@ -5,6 +5,7 @@ const path = require('path');
 const jetpack = require('fs-jetpack');
 const version = require('wonderful-version');
 const { execute, force } = require('node-powertools');
+const { safeInstall } = require('../utils/safe-install');
 const NPM = require('npm-api');
 
 // Load packages
@@ -379,7 +380,7 @@ function install(pkg, ver, location) {
   const command = `npm install ${pkg}@${ver} ${location || '--save'}`;
   logger.log('Installing:', command);
 
-  return execute(command, { log: true })
+  return safeInstall(command)
     .then(() => {
       const projectUpdated = jetpack.read(path.join(process.cwd(), 'package.json'), 'json');
       project.dependencies = projectUpdated.dependencies || {};

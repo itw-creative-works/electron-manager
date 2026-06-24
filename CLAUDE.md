@@ -2,6 +2,8 @@
 
 > **Note for contributors and Claude:** This file is the architectural overview — identity, top-level conventions, and a map to the deep references. The **meat** (per-subsystem APIs, edge cases, behavior tables, defaults lists) lives in `docs/<topic>.md`. When extending or adding content, write it in the matching `docs/*.md` file and cross-link from here — do NOT inline it. If a topic doesn't have a doc yet, create one. Goal: keep this file under 250 lines.
 
+> **Mirrored structure:** BEM, UJM, BXM, and EM CLAUDE.md files mirror each other — shared sections (Supply-Chain Security, Development Workflow, File Conventions, etc.) appear in the **same order at the same position** across all four. When adding a section that applies to multiple frameworks, insert it in the same spot in all of them.
+
 ## Identity
 
 Electron Manager (EM) is a comprehensive framework for building modern Electron desktop apps. Sister project to Browser Extension Manager (BXM) and Ultimate Jekyll Manager (UJM). Provides one-line-import bootstrap per Electron process, modular feature library with file-based extensibility, a multi-platform build/release pipeline, and a built-in test framework.
@@ -173,6 +175,10 @@ See [docs/releasing.md](docs/releasing.md) for the end-to-end flow.
 - **🚫 NEVER run `npm start`** — it's the user's long-running dev process. Assume it's already running; if it isn't, **instruct the user to run it** rather than running it yourself (running it again kills theirs). To see output, **read the `logs/*.log` files** (`dev.log`, `runtime.log`, `test.log`) — never tail/attach to the process. Running `npx mgr test` is fine.
 - **After editing files**, verify the gulp watcher recompiled successfully. Check for webpack/sass errors in the console output. A change that breaks the build is not a completed change.
 - **Live-test UI changes via CDP.** After code changes compile, use the `chrome-devtools-electron` MCP tools (screenshots, click, evaluate JS, console logs) to verify the change works in the running app. This is the primary way to confirm UI/renderer changes — type-checking and test suites verify code correctness, not feature correctness. See [docs/cdp-debugging.md](docs/cdp-debugging.md) and `~/.claude/mcp-server/servers/chrome-devtools-electron/CLAUDE.md`.
+
+## Supply-Chain Security
+
+All `npm install` calls in CLI commands (`npx mgr i`, `npx mgr setup`, `npx mgr runner`) route through the `safeInstall()` helper (`src/utils/safe-install.js`). It prefixes `sfw` (Socket Firewall) when installed — blocking confirmed malware at the network level before packages reach disk. Falls back to plain npm if sfw isn't available. CI workflows install sfw globally and run `sfw npm ci`. Installs will **fail if sfw detects confirmed malware** in any package in the dependency tree; non-critical CVEs and quality warnings pass through.
 
 ## File Conventions
 

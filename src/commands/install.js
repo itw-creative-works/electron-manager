@@ -1,7 +1,7 @@
 // Libraries
 const Manager = new (require('../build.js'));
 const logger = Manager.logger('install');
-const { execute } = require('node-powertools');
+const { safeInstall } = require('../utils/safe-install');
 const os = require('os');
 
 const package = Manager.getPackage('main');
@@ -31,5 +31,5 @@ module.exports = async function (options) {
 };
 
 function run(command) {
-  return execute(command, { log: true });
+  return safeInstall(command);
 }

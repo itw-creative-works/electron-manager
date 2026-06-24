@@ -15,6 +15,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `Security` in case of vulnerabilities.
 
 ---
+## 1.9.0 — Supply-chain security
+
+### Added
+- **Socket Firewall (sfw) integration across all CLI install commands.** New `safeInstall()` helper (`src/utils/safe-install.js`) wraps every `npm install` in `sfw` when installed — blocking confirmed malware at the network level before packages reach disk. Falls back to plain npm when sfw is unavailable. Wired into `mgr install`, `mgr setup`, and `mgr runner self-update`.
+- **CI workflows install sfw globally** and run `sfw npm ci` in every job (test, build, sign, finalize) — supply-chain protection in CI, not just local.
+- **`docs/` and `CLAUDE.md` included in the npm tarball** via updated `files` field. Consumers get architecture docs alongside the installed package.
+
+### Changed
+- **BrowserSync URL guidance updated** in `docs/cdp-debugging.md` — prefer `https://localhost:4000` over network IP.
+
+---
 ## 1.8.5 — Signing status in boot log
 
 ### Added

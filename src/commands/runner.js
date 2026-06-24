@@ -27,6 +27,7 @@ const jetpack  = require('fs-jetpack');
 
 const Manager  = new (require('../build.js'));
 const logger   = Manager.logger('runner');
+const { safeInstall } = require('../utils/safe-install');
 
 const RUNNER_LABELS = ['self-hosted', 'windows', 'ev-token'];
 
@@ -787,7 +788,7 @@ async function selfUpdate() {
   const { execute } = require('node-powertools');
   logger.log('Updating electron-manager to latest…');
   try {
-    const out = await execute('npm i -g electron-manager@latest');
+    const out = await safeInstall('npm i -g electron-manager@latest');
     logger.log(out);
     logger.log('✓ electron-manager updated.');
   } catch (e) {
